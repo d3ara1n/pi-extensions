@@ -89,8 +89,11 @@ for (const dir of packageDirs) {
 
   let commitsToCheck;
   if (!tagExists) {
-    // Never published or no tag — check last 50 commits
-    commitsToCheck = run(`git log --format="%H" -50`).split("\n").filter(Boolean);
+    // Tag doesn't exist (e.g. first publish was manual).
+    // Create a baseline tag at current HEAD so future runs start from here.
+    run(`git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" tag ${lastTag}`);
+    log(`Created baseline tag: ${lastTag}`);
+    commitsToCheck = [];
   } else {
     commitsToCheck = run(`git log --format="%H" ${lastTag}..HEAD`).split("\n").filter(Boolean);
   }
@@ -151,14 +154,22 @@ for (const dir of packageDirs) {
   pkg.version = newVersion;
   writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + "\n");
 
-  // Stage and commit
+  // Stage and commit (skip if nothing to commit)
   run(`git add ${pkgJsonPath}`);
-  run(`git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" commit -m "release: ${fullName}@${newVersion}"`);
+  const needsCommit = run(`git diff --cached --name-only`, { allowFail: true });
+  if (needsCommit) {
+    run(`git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" commit -m "release: ${fullName}@${newVersion}"`);
+  }
 
   // Tag
   const tag = `${fullName}@${newVersion}`;
-  run(`git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" tag ${tag}`);
-  log(`Tagged: ${tag}`);
+  const tagExists = run(`git tag -l "${tag}"`, { allowFail: true });
+  if (tagExists) {
+    log(`Tag already exists: ${tag}, skipping`);
+  } else {
+    run(`git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" tag ${tag}`);
+    log(`Tagged: ${tag}`);
+  }
 
   // Publish
   run(`npm publish -w ${pkgDir} --access public --provenance`);

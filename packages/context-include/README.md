@@ -1,4 +1,4 @@
-# @pi-extensions/context-include
+# @d3ara1n/context-include
 
 `@path` syntax for AGENTS.md — include files by reference.
 
@@ -14,7 +14,7 @@
 ## Install
 
 ```bash
-pi install npm:@pi-extensions/context-include
+pi install npm:@d3ara1n/context-include
 ```
 
 ## Usage

@@ -13,13 +13,13 @@ A collection of small extensions for [Pi Coding Agent](https://pi.dev).
 Each extension can be installed individually:
 
 ```bash
-pi install npm:@pi-extensions/context-include
+pi install npm:@d3ara1n/context-include
 ```
 
 Or install all at once:
 
 ```bash
-pi install npm:pi-extensions
+pi install npm:@d3ara1n/context-include
 ```
 
 ## Development

@@ -1,5 +1,5 @@
 {
-  "name": "@pi-extensions/context-include",
+  "name": "@d3ara1n/context-include",
   "version": "1.0.0",
   "description": "@path syntax for AGENTS.md — include files by reference with recursive resolution",
   "keywords": ["pi-package"],

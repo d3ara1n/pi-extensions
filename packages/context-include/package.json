@@ -1,0 +1,19 @@
+{
+  "name": "@pi-extensions/context-include",
+  "version": "1.0.0",
+  "description": "@path syntax for AGENTS.md — include files by reference with recursive resolution",
+  "keywords": ["pi-package"],
+  "main": "context-include.ts",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": ["./context-include.ts"]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/d3ara1n/pi-extensions",
+    "directory": "packages/context-include"
+  },
+  "license": "MIT"
+}

@@ -163,8 +163,8 @@ for (const dir of packageDirs) {
 
   // Tag
   const tag = `${fullName}@${newVersion}`;
-  const tagExists = run(`git tag -l "${tag}"`, { allowFail: true });
-  if (tagExists) {
+  const existingTag = run(`git tag -l "${tag}"`, { allowFail: true });
+  if (existingTag) {
     log(`Tag already exists: ${tag}, skipping`);
   } else {
     run(`git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" tag ${tag}`);

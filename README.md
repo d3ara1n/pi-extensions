@@ -1,4 +1,4 @@
-# Pi Extensions
+# Pi Extensions Monorepo
 
 A collection of small extensions for [Pi Coding Agent](https://pi.dev).
 
@@ -10,14 +10,6 @@ A collection of small extensions for [Pi Coding Agent](https://pi.dev).
 
 ## Install
 
-Each extension can be installed individually:
-
-```bash
-pi install npm:@d3ara1n/context-include
-```
-
-Or install all at once:
-
 ```bash
 pi install npm:@d3ara1n/context-include
 ```
@@ -25,20 +17,20 @@ pi install npm:@d3ara1n/context-include
 ## Development
 
 ```bash
-npm install          # install all workspace dependencies
-npm test             # run tests across all packages
+npm install
 ```
 
 ## Publish
 
-```bash
-npm run publish --workspaces
-```
+Fully automated via GitHub Actions on push to `main`.
 
-## Publish
+Uses [Conventional Commits](https://www.conventionalcommits.org/):
 
-```bash
-node publish.js context-include           # auto patch bump
-node publish.js context-include minor     # bump minor
-node publish.js context-include major     # bump major
-```
+| Commit | Version bump |
+|--------|-------------|
+| `feat(<scope>): ...` | minor |
+| `fix(<scope>): ...` | patch |
+| `feat(<scope>)!: ...` or `BREAKING CHANGE:` | major |
+| `chore:`, `docs:`, `refactor:` | no publish |
+
+Scope must match the package directory name (e.g. `context-include`).

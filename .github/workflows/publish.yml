@@ -1,0 +1,36 @@
+name: Publish
+
+on:
+  push:
+    branches: [main]
+
+# Prevent concurrent publishes
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need full history for commit parsing
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Detect changes and publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node .github/scripts/auto-publish.mjs
+
+      # If auto-publish made version commits, push them back
+      - name: Push tags
+        run: git push --tags
+        if: always()

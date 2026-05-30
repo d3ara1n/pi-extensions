@@ -161,7 +161,7 @@ for (const dir of packageDirs) {
   log(`Tagged: ${tag}`);
 
   // Publish
-  run(`npm publish -w ${pkgDir} --access public`);
+  run(`npm publish -w ${pkgDir} --access public --provenance`);
   log(`✅ Published ${fullName}@${newVersion}`);
   published++;
 }

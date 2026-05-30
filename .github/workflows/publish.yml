@@ -4,13 +4,13 @@ on:
   push:
     branches: [main]
 
-# Prevent concurrent publishes
 concurrency:
   group: publish
   cancel-in-progress: false
 
 permissions:
   contents: write
+  id-token: write  # OIDC for npm trusted publishing
 
 jobs:
   publish:
@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # need full history for commit parsing
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -26,11 +26,8 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Detect changes and publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: node .github/scripts/auto-publish.mjs
 
-      # If auto-publish made version commits, push them back
       - name: Push tags
         run: git push --tags
         if: always()

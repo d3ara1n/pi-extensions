@@ -34,3 +34,11 @@ npm test             # run tests across all packages
 ```bash
 npm run publish --workspaces
 ```
+
+## Publish
+
+```bash
+node publish.js context-include           # auto patch bump
+node publish.js context-include minor     # bump minor
+node publish.js context-include major     # bump major
+```

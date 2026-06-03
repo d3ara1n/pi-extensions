@@ -1,17 +1,17 @@
 {
   "name": "@d3ara1n/pi-context-include",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "@path syntax for AGENTS.md — include files by reference with recursive resolution",
   "keywords": [
     "pi-package"
   ],
-  "main": "pi-context-include.ts",
+  "main": "index.ts",
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
   },
   "pi": {
     "extensions": [
-      "./pi-context-include.ts"
+      "./index.ts"
     ]
   },
   "repository": {

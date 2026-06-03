@@ -147,6 +147,7 @@ function createUsageProvider(): UsageProvider {
     id: PROVIDER_ID,
     name: "Zhipu Coding",
     icon: "⚡",
+    source: "api",
     async fetchUsage(): Promise<UsageWindow[]> {
       const apiKey = resolveApiKey();
       if (!apiKey) return [];

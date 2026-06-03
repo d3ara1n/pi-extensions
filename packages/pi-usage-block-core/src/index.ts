@@ -15,22 +15,58 @@ export interface UsageWindow {
 }
 
 /**
+ * Header mapping for reading usage from response headers (source: "headers").
+ * Maps header name → UsageWindow field.
+ *
+ * Supported field keys: "used", "limit", "period", "unit", "resetAt"
+ * - "used" and "limit" are parsed as numbers
+ * - "unit" should be "requests" | "tokens" | "dollars"
+ * - "resetAt" is parsed as epoch-seconds or ISO 8601
+ * - "period" is a free-text label
+ *
+ * Example:
+ *   { "x-ratelimit-remaining-tokens": "used",
+ *     "x-ratelimit-limit-tokens": "limit",
+ *     "x-ratelimit-reset-requests": "resetAt" }
+ */
+export interface HeaderMapping {
+  [headerName: string]: "used" | "limit" | "period" | "unit" | "resetAt";
+}
+
+/**
  * A usage provider registered by a provider plugin.
- * Each provider is responsible for fetching its own usage data.
+ *
+ * Two modes are supported:
+ * - **api**: `fetchUsage()` is called periodically by pi-usage-block.
+ * - **headers**: usage is extracted from HTTP response headers.
+ *   pi-usage-block listens to `after_provider_response` and applies `headerMapping`.
+ *   No code required — just declare the mapping.
  */
 export interface UsageProvider {
-  /** Unique identifier, e.g. "zhipu-coding" */
+  /** Unique identifier — must match the pi provider key, e.g. "zhipu-coding" */
   id: string;
   /** Display name, e.g. "Zhipu Coding Plan" */
   name: string;
   /** Optional icon character */
   icon?: string;
   /**
-   * Fetch current usage windows.
-   * Should return one entry per window type the provider tracks.
+   * Data source type.
+   * - "api": fetch usage via an external API (requires `fetchUsage`)
+   * - "headers": read usage from per-response HTTP headers (requires `headerMapping`)
+   */
+  source: "api" | "headers";
+  /**
+   * [source="api"] Fetch current usage windows.
+   * Called periodically by pi-usage-block.
    * Return empty array if unavailable (provider is treated as offline).
    */
-  fetchUsage(): Promise<UsageWindow[]>;
+  fetchUsage?(): Promise<UsageWindow[]>;
+  /**
+   * [source="headers"] Map response header names to UsageWindow fields.
+   * pi-usage-block reads `after_provider_response` event headers,
+   * builds a single UsageWindow from the mapping.
+   */
+  headerMapping?: HeaderMapping;
 }
 
 /**
@@ -67,6 +103,46 @@ export class UsageRegistry {
   get size(): number {
     return this.providers.size;
   }
+}
+
+/** Helper: parse a UsageWindow from response headers using a HeaderMapping. */
+export function parseHeaderUsage(
+  headers: Record<string, string>,
+  mapping: HeaderMapping,
+): UsageWindow | null {
+  const fields: Partial<UsageWindow> = {};
+  for (const [headerName, fieldKey] of Object.entries(mapping)) {
+    const value = headers[headerName] ?? headers[headerName.toLowerCase()];
+    if (value === undefined) continue;
+    switch (fieldKey) {
+      case "used":
+      case "limit":
+        fields[fieldKey] = Number(value);
+        break;
+      case "period":
+        fields.period = value;
+        break;
+      case "unit":
+        if (value === "requests" || value === "tokens" || value === "dollars") {
+          fields.unit = value;
+        }
+        break;
+      case "resetAt": {
+        const n = Number(value);
+        fields.resetAt = new Date(Number.isFinite(n) && n > 1e12 ? n : n * 1000);
+        break;
+      }
+    }
+  }
+  // Must have at least used and limit, or percentage
+  if (fields.used === undefined && fields.limit === undefined) return null;
+  return {
+    period: fields.period ?? "",
+    used: fields.used ?? 0,
+    limit: fields.limit ?? 100,
+    unit: fields.unit ?? "tokens",
+    resetAt: fields.resetAt,
+  };
 }
 
 /** Module-level singleton — shared via globalThis to survive jiti module dedup issues. */

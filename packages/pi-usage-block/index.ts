@@ -1,18 +1,25 @@
 /**
  * pi-usage-block — Status bar display
  *
- * Polls registered UsageProviders and renders quota status
- * via ctx.ui.setStatus("usage-block", ...) for powerline customItems.
+ * Displays usage quota for the currently active pi provider.
+ *
+ * Two data sources are supported:
+ *   api:     timer-based polling via fetchUsage()
+ *   headers: event-driven via after_provider_response + headerMapping
+ *
+ * Usage providers register themselves via usageRegistry from
+ * @d3ara1n/pi-usage-block-core. The display only queries the one
+ * whose id matches ctx.model.provider.
  *
  * powerline config example:
  *   "customItems": [{ "id": "usage", "statusKey": "usage-block",
  *                     "position": "right", "prefix": "⚡", "color": "accent" }]
  *
  * Optional settings under "usageBlock":
- *   refreshIntervalMs — poll interval in ms (default 60000)
+ *   refreshIntervalMs — poll interval in ms for api-source providers (default 60000)
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { usageRegistry, type UsageWindow } from "@d3ara1n/pi-usage-block-core";
+import { usageRegistry, parseHeaderUsage, type UsageWindow } from "@d3ara1n/pi-usage-block-core";
 
 const STATUS_KEY = "usage-block";
 
@@ -20,7 +27,6 @@ const STATUS_KEY = "usage-block";
 
 function fmtPct(used: number, limit: number): string {
   if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) return "—";
-  // When limit=100 and used is already a percentage, just use it directly
   if (limit === 100) return `${Math.round(used)}%`;
   return `${Math.round((used / limit) * 100)}%`;
 }
@@ -55,39 +61,93 @@ export default function (pi: ExtensionAPI) {
   let ctx: any;
   let timer: ReturnType<typeof setInterval> | undefined;
   let alive = false;
+  let activeProviderId: string | undefined;
+  /** Cached windows from the latest headers-based response. */
+  let headerWindows: UsageWindow[] | undefined;
 
-  /** Refresh status bar. Safe to call at any time — guards ctx validity. */
+  // ── Helpers ────────────────────────────────────────────────────────────
+
+  function getActiveUsageProvider() {
+    if (!activeProviderId) return undefined;
+    return usageRegistry.get(activeProviderId);
+  }
+
+  /** Render windows to the status bar. */
+  function render(windows: UsageWindow[] | undefined) {
+    if (!ctx || !alive) return;
+    if (!windows?.length) {
+      clear();
+      return;
+    }
+    const provider = getActiveUsageProvider();
+    const name = provider?.name ?? activeProviderId ?? "usage";
+    ctx.ui.setStatus(STATUS_KEY, fmtProvider(name, windows));
+  }
+
+  /** Remove the status bar entry. */
+  function clear() {
+    if (!ctx || !alive) return;
+    ctx.ui.setStatus(STATUS_KEY, undefined);
+  }
+
+  // ── API-source refresh (timer-driven) ──────────────────────────────────
+
   async function refresh() {
     if (!ctx || !alive) return;
-
     try {
-      const providers = usageRegistry.getAll();
-      if (!providers.length) {
-        ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("dim", "usage: no providers"));
-        return;
-      }
-
-      const parts: string[] = [];
-      for (const p of providers) {
-        try {
-          const windows = await p.fetchUsage();
-          if (!ctx || !alive) return; // session died during await
-          if (windows.length) parts.push(fmtProvider(p.name, windows));
-        } catch { /* skip failed provider */ }
-      }
-
+      const provider = getActiveUsageProvider();
+      if (!provider || provider.source !== "api" || !provider.fetchUsage) return;
+      const windows = await provider.fetchUsage();
       if (!ctx || !alive) return;
-      ctx.ui.setStatus(STATUS_KEY, parts.length ? parts.join(" │ ") : undefined);
-    } catch (e) {
-      console.error("[usage-block] refresh failed:", e);
+      render(windows);
+    } catch {
+      // fetch failed silently — keep previous data if any
     }
   }
+
+  // ── Headers-source handling (event-driven) ─────────────────────────────
+
+  pi.on("after_provider_response", (event) => {
+    if (!alive) return;
+    const provider = getActiveUsageProvider();
+    if (!provider || provider.source !== "headers" || !provider.headerMapping) return;
+    const w = parseHeaderUsage(event.headers, provider.headerMapping);
+    if (w) {
+      headerWindows = [w];
+      render([w]);
+    }
+  });
+
+  // ── Model tracking ─────────────────────────────────────────────────────
+
+  function setActive(id: string | undefined) {
+    activeProviderId = id;
+    headerWindows = undefined;
+    const provider = getActiveUsageProvider();
+    if (!provider) {
+      clear();
+      return;
+    }
+    if (provider.source === "api") {
+      // Kick off an immediate fetch; the interval handles the rest.
+      refresh();
+    } else {
+      // headers-source: show nothing until the next response arrives.
+      clear();
+    }
+  }
+
+  pi.on("model_select", (event) => {
+    setActive(event.model.provider);
+  });
+
+  // ── Lifecycle ──────────────────────────────────────────────────────────
 
   pi.on("session_start", async (_e, c) => {
     ctx = c;
     alive = true;
+    setActive(c.model?.provider);
     const ms: number = (c as any).settings?.usageBlock?.refreshIntervalMs ?? 60_000;
-    await refresh();
     timer = setInterval(() => { if (alive) refresh(); }, ms);
   });
 
@@ -96,5 +156,7 @@ export default function (pi: ExtensionAPI) {
     clearInterval(timer);
     timer = undefined;
     ctx = undefined;
+    activeProviderId = undefined;
+    headerWindows = undefined;
   });
 }

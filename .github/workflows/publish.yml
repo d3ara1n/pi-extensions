@@ -30,4 +30,4 @@ jobs:
 
       - name: Push tags
         run: git push --tags
-        if: always()
+        if: success()

@@ -37,8 +37,8 @@ function log(msg) { console.log(`  ${msg}`); }
  * Returns { type, scope, breaking, description } or null.
  *
  * Examples:
- *   feat(context-include): add nested includes
- *   fix(context-include)!: handle missing files
+ *   feat(pi-context-include): add nested includes
+ *   fix(pi-context-include)!: handle missing files
  *   chore: update deps
  */
 function parseCommit(message) {

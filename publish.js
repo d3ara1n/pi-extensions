@@ -5,8 +5,8 @@
  *
  * Usage:
  *   node publish.js <package-name> [patch|minor|major]
- *   node publish.js context-include         # auto patch bump
- *   node publish.js context-include minor   # bump minor
+ *   node publish.js pi-context-include         # auto patch bump
+ *   node publish.js pi-context-include minor   # bump minor
  *
  * Flow:
  *   1. Check published version on npm

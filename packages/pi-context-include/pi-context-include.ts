@@ -110,7 +110,7 @@ function resolveIncludes(
 
 		if (visited.has(resolvedCanonical)) continue; // already included or cycle
 		if (!fs.existsSync(resolvedCanonical)) {
-			console.warn(`[context-include] Referenced file not found: ${ref} (resolved to ${resolvedCanonical})`);
+			console.warn(`[pi-context-include] Referenced file not found: ${ref} (resolved to ${resolvedCanonical})`);
 			continue;
 		}
 
@@ -125,7 +125,7 @@ function resolveIncludes(
 			// Recurse into included file for nested @references
 			resolveIncludes(resolvedCanonical, includedContent, visited, depth + 1, results);
 		} catch (err) {
-			console.warn(`[context-include] Failed to read ${resolvedCanonical}:`, err);
+			console.warn(`[pi-context-include] Failed to read ${resolvedCanonical}:`, err);
 		}
 	}
 }
@@ -151,7 +151,7 @@ export default function contextIncludeExtension(pi: ExtensionAPI) {
 				const content = fs.readFileSync(filePath, "utf-8");
 				resolveIncludes(filePath, content, visited, 0, allIncluded);
 			} catch (err) {
-				console.warn(`[context-include] Failed to read context file ${filePath}:`, err);
+				console.warn(`[pi-context-include] Failed to read context file ${filePath}:`, err);
 			}
 		}
 
@@ -166,7 +166,7 @@ export default function contextIncludeExtension(pi: ExtensionAPI) {
 		for (const inc of allIncluded) {
 			if (totalBytes + inc.content.length > MAX_INCLUDED_BYTES) {
 				console.warn(
-					`[context-include] Skipping ${inc.path}: total included size would exceed ${MAX_INCLUDED_BYTES} bytes`,
+					`[pi-context-include] Skipping ${inc.path}: total included size would exceed ${MAX_INCLUDED_BYTES} bytes`,
 				);
 				continue;
 			}

@@ -138,7 +138,8 @@ rl.question(`\n  Publish ${fullName}@${targetVersion}? [Y/n] `, (answer) => {
 	info("Git pushed");
 
 	// ── 6. npm publish ────────────────────────────────────
-	run(`npm publish -w ${pkgDir} --access public`);
+	// Use inherited stdio so npm can prompt for OTP / MFA
+	execSync(`npm publish -w ${pkgDir} --access public`, { stdio: "inherit" });
 	info(`Published to npm: ${tag}`);
 
 	console.log("");

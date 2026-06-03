@@ -1,0 +1,22 @@
+{
+  "name": "@d3ara1n/pi-provider-zhipu-coding-plan",
+  "version": "1.0.0",
+  "description": "Zhipu AI Coding Plan provider for pi — auto-discovers models, reports usage quota",
+  "keywords": ["pi-package"],
+  "main": "index.ts",
+  "dependencies": {
+    "@d3ara1n/pi-usage-block-core": "^1.0.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/d3ara1n/pi-extensions",
+    "directory": "packages/pi-provider-zhipu-coding-plan"
+  }
+}

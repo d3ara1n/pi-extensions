@@ -10,6 +10,7 @@ A collection of small extensions for [Pi Coding Agent](https://pi.dev).
 | [`pi-provider-zhipu-coding-plan`](./packages/pi-provider-zhipu-coding-plan) | Zhipu AI Coding Plan provider — auto-discover models, report usage |
 | [`pi-usage-block`](./packages/pi-usage-block) | Usage quota status bar block for powerline |
 | [`pi-scout`](./packages/pi-scout) | Per-turn side agent — lazy skill injection + automatic model routing |
+| [`pi-subagent`](./packages/pi-subagent) | Role-based subagent orchestration — delegates tasks to specialized pi child processes with real-time TUI progress |
 | [`pi-model-roles`](./packages/pi-model-roles) | Named model role definitions with resolution to Model instances |
 
 ## Libraries

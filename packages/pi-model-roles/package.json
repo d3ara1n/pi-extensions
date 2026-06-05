@@ -4,18 +4,27 @@
   "description": "Model role configuration library for pi extensions — defines named model roles and resolves them to Model instances",
   "main": "src/index.ts",
   "types": "src/types.ts",
-  "keywords": ["pi-package", "pi"],
+  "keywords": [
+    "pi-package",
+    "pi"
+  ],
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*"
   },
   "peerDependenciesMeta": {
-    "@earendil-works/pi-ai": { "optional": true },
-    "@earendil-works/pi-coding-agent": { "optional": true }
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
   },
   "dependencies": {},
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "repository": {
     "type": "git",

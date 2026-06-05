@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "description": "Role-based subagent orchestration for pi — delegates tasks to specialized pi child processes with configurable model roles",
   "main": "src/index.ts",
-  "keywords": ["pi-package", "pi"],
+  "keywords": [
+    "pi-package",
+    "pi"
+  ],
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
@@ -11,15 +14,23 @@
     "@d3ara1n/pi-model-roles": "*"
   },
   "peerDependenciesMeta": {
-    "@earendil-works/pi-ai": { "optional": true },
-    "@earendil-works/pi-coding-agent": { "optional": true },
-    "@d3ara1n/pi-model-roles": { "optional": true }
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@d3ara1n/pi-model-roles": {
+      "optional": true
+    }
   },
   "dependencies": {
     "@d3ara1n/pi-model-roles": "^0.1.0"
   },
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "repository": {
     "type": "git",

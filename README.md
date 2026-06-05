@@ -9,11 +9,8 @@ A collection of small extensions for [Pi Coding Agent](https://pi.dev).
 | [`pi-context-include`](./packages/pi-context-include) | `@path` syntax for AGENTS.md — include files by reference |
 | [`pi-provider-zhipu-coding-plan`](./packages/pi-provider-zhipu-coding-plan) | Zhipu AI Coding Plan provider — auto-discover models, report usage |
 | [`pi-usage-block`](./packages/pi-usage-block) | Usage quota status bar block for powerline |
-
-## Libraries
-
-| Package | Description |
-|---------|-------------|
+| [`pi-scout`](./packages/pi-scout) | Per-turn side agent — lazy skill injection + automatic model routing |
+| [`pi-model-roles`](./packages/pi-model-roles) | Named model role definitions with resolution to Model instances |
 | [`pi-usage-block-core`](./packages/pi-usage-block-core) | Shared types and registry for usage quota reporting |
 
 ## Install

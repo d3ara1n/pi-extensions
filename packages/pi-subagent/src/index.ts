@@ -454,20 +454,27 @@ export default function subagentExtension(pi: ExtensionAPI) {
 
 			// Collapsed view
 			let text = `${icon} ${theme.fg("toolTitle", theme.bold(r.role))}`;
-			if (r.summary) {
-				text += ` ${theme.fg("dim", "\u00b7")} ${theme.fg("text", r.summary)}`;
-			}
-			if (isError && r.errorMessage) {
-				text += `\n${theme.fg("error", `Error: ${r.errorMessage}`)}`;
-			} else if (displayItems.length === 0) {
-				text += `\n${theme.fg("muted", isRunning ? "(running...)" : "(no output)")}`;
+
+			if (isRunning) {
+				// Running: show recent tool calls only
+				const toolCalls = displayItems.filter((item) => item.type === "toolCall");
+				if (toolCalls.length === 0) {
+					text += `\n${theme.fg("muted", "(running...)")}`;
+				} else {
+					const rendered = renderDisplayItems(toolCalls, 5, theme.fg.bind(theme));
+					if (rendered) text += `\n${rendered}`;
+				}
 			} else {
-				const rendered = renderDisplayItems(displayItems, 6, theme.fg.bind(theme));
-				if (rendered) text += `\n${rendered}`;
+				// Finished: summary + usage, no tool calls
+				if (r.summary) {
+					text += ` ${theme.fg("dim", "\u00b7")} ${theme.fg("text", r.summary)}`;
+				}
+				if (isError && r.errorMessage) {
+					text += `\n${theme.fg("error", `Error: ${r.errorMessage}`)}`;
+				}
+				const usageStr = formatUsageStats(r.usage, r.model);
+				if (usageStr) text += `\n${theme.fg("dim", usageStr)}`;
 			}
-			const usageStr = formatUsageStats(r.usage, r.model);
-			if (usageStr && !isRunning) text += `\n${theme.fg("dim", usageStr)}`;
-			if (!isRunning && displayItems.length > 6) text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
 			return new Text(text, 0, 0);
 		},
 	});

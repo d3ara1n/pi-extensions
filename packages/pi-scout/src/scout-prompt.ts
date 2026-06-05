@@ -6,31 +6,34 @@ import type { ScoutConfig } from "./types.ts";
 
 /**
  * Build the user message for the side agent.
+ * Only contains per-turn variable content — stable data lives in the system prompt
+ * so it can be prompt-cached across turns.
  */
 export function buildScoutUserMessage(
 	userPrompt: string,
-	skillsList: string,
 	currentRole: string,
-	rolesList: string,
 ): string {
 	return [
-		`User prompt:`,
-		userPrompt,
-		``,
-		`Available skills:`,
-		skillsList || "(none)",
-		``,
 		`Current role: ${currentRole}`,
 		``,
-		`Available roles:`,
-		rolesList,
+		`User prompt:`,
+		userPrompt,
 	].join("\n");
 }
 
 /**
  * Build the system prompt for the side agent.
+ *
+ * Stable per-session data (skills, roles) is embedded here rather than in the
+ * user message so that the entire system prompt forms a large, cacheable prefix.
+ * This is critical for Anthropic which requires a 1024-token minimum for
+ * prompt caching to activate.
  */
-export function buildScoutSystemPrompt(config: ScoutConfig): string {
+export function buildScoutSystemPrompt(
+	config: ScoutConfig,
+	skillsList: string,
+	rolesList: string,
+): string {
 	const parts: string[] = [];
 
 	parts.push(`You are a scout. Analyze the user's request and decide which skills and model role to use.`);
@@ -58,6 +61,14 @@ export function buildScoutSystemPrompt(config: ScoutConfig): string {
 	if (!config.modules.skillRouter) {
 		parts.push(`- IMPORTANT: skill routing is disabled. Always return skills: [].`);
 	}
+
+	parts.push(``);
+	parts.push(`## Available Skills`);
+	parts.push(skillsList || "(none)");
+
+	parts.push(``);
+	parts.push(`## Available Roles`);
+	parts.push(rolesList);
 
 	return parts.join("\n");
 }

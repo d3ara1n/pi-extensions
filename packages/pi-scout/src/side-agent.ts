@@ -21,9 +21,8 @@ interface SideAgentContext {
  * @param sideModel - The Model instance to use (from pi-model-roles "side" role)
  * @param apiKey - API key for the side model
  * @param headers - Custom headers for the side model
- * @param systemPrompt - Scout system prompt
+ * @param systemPrompt - Scout system prompt (includes skills/roles for cache friendliness)
  * @param userPrompt - The user's original prompt text
- * @param skillsList - Formatted list of available skills for the prompt
  * @param currentRole - Current active role name
  * @returns Parsed ScoutDecision, or a safe fallback on error
  */
@@ -33,9 +32,7 @@ export async function callSideAgent(
 	headers: Record<string, string> | undefined,
 	systemPrompt: string,
 	userPrompt: string,
-	skillsList: string,
 	currentRole: string,
-	rolesList: string,
 ): Promise<ScoutDecision> {
 	const fallback: ScoutDecision = { skills: [], role: null, reasoning: "side agent error" };
 
@@ -44,13 +41,14 @@ export async function callSideAgent(
 		messages: [
 			{
 				role: "user",
-				content: buildScoutUserMessage(userPrompt, skillsList, currentRole, rolesList),
+				content: buildScoutUserMessage(userPrompt, currentRole),
 			},
 		],
 	};
 
 	const options: Record<string, any> = {
 		maxTokens: 256,
+		cacheRetention: "short",
 	};
 
 	if (apiKey) options.apiKey = apiKey;

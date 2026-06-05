@@ -199,7 +199,7 @@ export default function scoutExtension(pi: ExtensionAPI) {
 			: "unknown";
 
 		// 3. Call side agent
-		const scoutSystemPrompt = buildScoutSystemPrompt(config);
+		const scoutSystemPrompt = buildScoutSystemPrompt(config, skillsList, rolesList);
 		const visibleRoles = rolesApi.getVisibleRoles();
 		const rolesList = Object.entries(visibleRoles)
 			.map(([name, cfg]: [string, any]) => `- ${name}: ${cfg.description ?? "(no description)"}${cfg.model ? ` (model: ${cfg.model})` : " (current model)"}`)
@@ -210,9 +210,7 @@ export default function scoutExtension(pi: ExtensionAPI) {
 			sideResolved.headers,
 			scoutSystemPrompt,
 			event.prompt,
-			skillsList,
 			currentRole,
-			rolesList,
 		);
 
 		lastDecision = decision;

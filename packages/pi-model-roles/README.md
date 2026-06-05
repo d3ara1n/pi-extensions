@@ -63,6 +63,13 @@ Override specific roles in `~/.pi/agent/settings.json`:
 User settings **merge** with built-in defaults: only override roles you want to change.
 You can also add entirely new roles.
 
+### Hidden roles
+
+Roles with `hidden: true` (like `utility` by default) are excluded from scout's role
+selection list — the side agent won't suggest switching to them. They can still be
+used directly by name (e.g. as `sideAgentRole` in scout config) and resolved via
+`resolveRole()` / `resolveRoleAsync()`.
+
 ### Role fields
 
 | Field | Type | Default | Description |

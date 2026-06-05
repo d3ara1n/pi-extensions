@@ -28,7 +28,8 @@ export const BUILTIN_DEFAULT_ROLES: Record<string, RoleConfig> = {
   },
   utility: {
     model: null,
-    description: "轻量辅助：模型路由、commit 生成、标题摘要等",
+    description: "轻量辅助：模型路由、commit 生成、标题摘要等（hidden）",
     thinking: "off",
+    hidden: true,
   },
 };

@@ -1,0 +1,57 @@
+# @d3ara1n/pi-subagent
+
+Role-based subagent orchestration for [pi](https://github.com/earendil-works/pi).
+
+Provides a `delegate` tool that lets the main model delegate tasks to specialized pi child processes with configurable model roles.
+
+## How it works
+
+1. Main model calls the `delegate` tool with a role and task description
+2. The extension resolves the role to a model via pi-model-roles
+3. Spawns an isolated pi child process with the configured model, tools, and system prompt
+4. Returns the result to the main model
+
+## Built-in Roles
+
+| Role | Model Role | Tools | Description |
+|------|-----------|-------|-------------|
+| `explorer` | fast | read, bash, find, grep, glob | Fast code search (read-only) |
+| `reviewer` | heavy | read, bash, grep, glob | Deep code review (read-only) |
+| `worker` | default | read, bash, edit, write, grep, glob | Implementation with file editing |
+| `researcher` | fast | web_search, fetch_content, read | Web research and docs lookup |
+
+## Requirements
+
+- **@d3ara1n/pi-model-roles** must be installed and configured
+- Role definitions must exist in `modelRoles` settings
+
+## Installation
+
+```bash
+pi extension add @d3ara1n/pi-subagent
+```
+
+## Configuration
+
+Edit `~/.pi/agent/settings.json`:
+
+```jsonc
+{
+  "subagent": {
+    "timeoutMs": 300000  // 5 minute timeout per subagent
+  }
+}
+```
+
+## Usage (by the main model)
+
+```json
+{
+  "role": "explorer",
+  "task": "Find all files that import the ModelRegistry and trace how they use it"
+}
+```
+
+## License
+
+MIT

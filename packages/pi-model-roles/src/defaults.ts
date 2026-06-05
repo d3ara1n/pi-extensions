@@ -1,8 +1,8 @@
 /**
  * Built-in default role definitions.
  *
- * Only universal roles are built-in. Scout/subagent-specific roles
- * (like "side") are left for users to define — modelRoles accepts
+ * Only universal roles are built-in. Plugin-specific roles
+ * are left for users to define — modelRoles accepts
  * any custom role name.
  *
  * model=null means "use pi's current model, don't switch".
@@ -26,9 +26,9 @@ export const BUILTIN_DEFAULT_ROLES: Record<string, RoleConfig> = {
     description: "快速修改、简单问答",
     thinking: "low",
   },
-  side: {
+  utility: {
     model: null,
-    description: "Scout side agent 路由决策",
+    description: "轻量辅助：模型路由、commit 生成、标题摘要等",
     thinking: "off",
   },
 };

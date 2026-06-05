@@ -2,7 +2,7 @@
 
 Model role configuration library for [pi](https://github.com/earendil-works/pi) extensions.
 
-Defines named model roles (e.g. "heavy", "fast", "side") and resolves them to pi `Model` instances with API key and headers.
+Defines named model roles (e.g. "heavy", "fast", "utility") and resolves them to pi `Model` instances with API key and headers.
 
 ## What it does
 
@@ -26,12 +26,13 @@ Built-in defaults use `model: null` (use pi's current model, don't switch):
 |------|-------|----------|-------------|
 | `default` | null | medium | Daily coding |
 | `heavy` | null | high | Architecture, deep debugging |
-| `fast` | null | off | Quick edits, simple Q&A |
+| `fast` | null | low | Quick edits, simple Q&A |
+| `utility` | null | off | Lightweight utility tasks: routing, commit gen, title summarization |
 
 `model: null` means "keep using whatever model pi currently has".
 Only `thinking` level differs between roles by default.
 
-Custom roles (e.g. `side` for scout) can be added freely — any role name works:
+Custom roles can be added freely — any role name works:
 
 ## Configuration
 
@@ -48,11 +49,10 @@ Override specific roles in `~/.pi/agent/settings.json`:
         "model": "google/gemini-2.5-flash",
         "thinking": "off"
       },
-      // Custom role for scout's side agent
-      "side": {
+      // Lightweight utility tasks (routing, commit generation, etc.)
+      "utility": {
         "model": "deepseek/deepseek-v4-flash",
-        "thinking": "off",
-        "hidden": true
+        "thinking": "off"
       }
     },
     "defaultRole": "default"

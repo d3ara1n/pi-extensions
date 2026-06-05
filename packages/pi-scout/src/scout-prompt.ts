@@ -6,12 +6,12 @@ import type { ScoutConfig } from "./types.ts";
 
 /**
  * Build the user message for the side agent.
- * Includes the user's prompt, available skills, and current role.
  */
 export function buildScoutUserMessage(
 	userPrompt: string,
 	skillsList: string,
 	currentRole: string,
+	rolesList: string,
 ): string {
 	return [
 		`User prompt:`,
@@ -21,6 +21,9 @@ export function buildScoutUserMessage(
 		skillsList || "(none)",
 		``,
 		`Current role: ${currentRole}`,
+		``,
+		`Available roles:`,
+		rolesList,
 	].join("\n");
 }
 

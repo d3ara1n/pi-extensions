@@ -122,6 +122,23 @@ export default function scoutExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	// ── list_skills tool ───────────────────────────────────────────
+	let cachedAllSkills: Array<{ name: string; description: string; filePath: string }> = [];
+
+	pi.registerTool({
+		name: "list_skills",
+		label: "List all skills",
+		description: "List all available skills with name and description. Use this when the user asks what skills are installed or you need to discover skills beyond those currently active.",
+		parameters: { type: "object", properties: {}, required: [] } as any,
+		async execute() {
+			if (cachedAllSkills.length === 0) {
+				return { content: [{ type: "text", text: "No skills available." }] };
+			}
+			const lines = cachedAllSkills.map((s) => `- **${s.name}**: ${s.description}`);
+			return { content: [{ type: "text", text: lines.join("\n") }] };
+		},
+	});
+
 	// ── session_start: load config ──────────────────────────────────
 	pi.on("session_start", async (_event, ctx) => {
 		config = loadScoutConfig(ctx.cwd);
@@ -164,6 +181,13 @@ export default function scoutExtension(pi: ExtensionAPI) {
 
 		// 1. Get available skills from systemPromptOptions
 		const skills = event.systemPromptOptions?.skills ?? [];
+		if (cachedAllSkills.length === 0 && skills.length > 0) {
+			cachedAllSkills = skills.map((s: any) => ({
+				name: s.name,
+				description: s.description ?? "",
+				filePath: s.filePath,
+			}));
+		}
 		const skillsList = skills
 			.map((s: any) => `- ${s.name}: ${s.description ?? "(no description)"}`)
 			.join("\n");
@@ -176,6 +200,10 @@ export default function scoutExtension(pi: ExtensionAPI) {
 
 		// 3. Call side agent
 		const scoutSystemPrompt = buildScoutSystemPrompt(config);
+		const visibleRoles = rolesApi.getVisibleRoles();
+		const rolesList = Object.entries(visibleRoles)
+			.map(([name, cfg]: [string, any]) => `- ${name}: ${cfg.description ?? "(no description)"}${cfg.model ? ` (model: ${cfg.model})` : " (current model)"}`)
+			.join("\n");
 		const decision = await callSideAgent(
 			sideResolved.model,
 			sideResolved.apiKey,
@@ -184,6 +212,7 @@ export default function scoutExtension(pi: ExtensionAPI) {
 			event.prompt,
 			skillsList,
 			currentRole,
+			rolesList,
 		);
 
 		lastDecision = decision;
@@ -205,6 +234,10 @@ export default function scoutExtension(pi: ExtensionAPI) {
 			const switched = await switchToRole(pi, decision.role, rolesApi);
 			if (switched) {
 				switchedRole = decision.role;
+				const newModel = await rolesApi.resolveRoleAsync(decision.role);
+				if (newModel?.model) {
+					systemPrompt += `\n\n<current_model>${newModel.model.provider}/${newModel.model.id} (role: ${decision.role})</current_model>`;
+				}
 			}
 		}
 

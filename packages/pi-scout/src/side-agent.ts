@@ -35,6 +35,7 @@ export async function callSideAgent(
 	userPrompt: string,
 	skillsList: string,
 	currentRole: string,
+	rolesList: string,
 ): Promise<ScoutDecision> {
 	const fallback: ScoutDecision = { skills: [], role: null, reasoning: "side agent error" };
 
@@ -43,7 +44,7 @@ export async function callSideAgent(
 		messages: [
 			{
 				role: "user",
-				content: buildScoutUserMessage(userPrompt, skillsList, currentRole),
+				content: buildScoutUserMessage(userPrompt, skillsList, currentRole, rolesList),
 			},
 		],
 	};

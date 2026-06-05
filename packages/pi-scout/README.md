@@ -27,7 +27,7 @@ before_agent_start hook fires
 ## Requirements
 
 - **@d3ara1n/pi-model-roles** must be installed and configured
-- A `side` role must be defined in `modelRoles` configuration
+- A cheap role must be defined in `modelRoles` configuration or use default(may be much more expansive) instead
 
 ## Installation
 
@@ -43,7 +43,7 @@ Edit `~/.pi/agent/settings.json`:
 {
   "scout": {
     "enabled": true,
-    "sideAgentRole": "side",
+    "sideAgentRole": "fast",
     "maxSelectedSkills": 5,
     "modules": {
       "skillRouter": true,
@@ -56,7 +56,7 @@ Edit `~/.pi/agent/settings.json`:
 | Field | Default | Description |
 |-------|---------|-------------|
 | `enabled` | `true` | Global on/off |
-| `sideAgentRole` | `"side"` | pi-model-roles role for the side agent |
+| `sideAgentRole` | `"fast"` | pi-model-roles role for the side agent |
 | `maxSelectedSkills` | `5` | Max skills the side agent can select |
 | `modules.skillRouter` | `true` | Enable/disable skill routing |
 | `modules.modelRouter` | `true` | Enable/disable model routing |

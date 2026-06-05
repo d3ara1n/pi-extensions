@@ -11,6 +11,11 @@ A collection of small extensions for [Pi Coding Agent](https://pi.dev).
 | [`pi-usage-block`](./packages/pi-usage-block) | Usage quota status bar block for powerline |
 | [`pi-scout`](./packages/pi-scout) | Per-turn side agent — lazy skill injection + automatic model routing |
 | [`pi-model-roles`](./packages/pi-model-roles) | Named model role definitions with resolution to Model instances |
+
+## Libraries
+
+| Package | Description |
+|---------|-------------|
 | [`pi-usage-block-core`](./packages/pi-usage-block-core) | Shared types and registry for usage quota reporting |
 
 ## Install

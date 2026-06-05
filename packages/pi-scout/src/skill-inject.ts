@@ -1,52 +1,83 @@
 /**
- * Skill interception and injection.
+ * Skill interception and injection with description caching.
  *
- * - Strips the <available_skills> XML block from the system prompt
- * - Reads selected skill files and injects their full content
+ * Replaces pi's default skills section (verbose intro + all skills)
+ * with a compact version containing only scout-selected skills.
+ *
+ * Description caching: skills already shown in a previous turn omit
+ * their description (the LLM already has it in conversation history).
+ * This significantly reduces per-turn token usage for recurring skills.
  */
 
-import * as fs from "node:fs";
+/** Match pi's entire skills section: intro paragraph + XML block. */
+const SKILLS_SECTION_RE = /\n\nThe following skills provide specialized instructions[\s\S]*?<\/available_skills>/;
 
-/** Regex to match the entire <available_skills>...</available_skills> block. */
-const SKILLS_XML_RE = /<available_skills>[\s\S]*?<\/available_skills>/g;
+/** Track skill names already shown to the LLM in this session. */
+let shownSkills: Set<string> = new Set();
 
-/**
- * Remove the <available_skills> XML block from the system prompt.
- * pi injects this block with skill metadata (name + description + location).
- * Scout replaces it with the actual skill content of selected skills only.
- */
-export function stripSkillsBlock(systemPrompt: string): string {
-	return systemPrompt.replace(SKILLS_XML_RE, "");
+/** Reset the cache — called on session_start. */
+export function resetSkillCache(): void {
+	shownSkills = new Set();
 }
 
 /**
- * Read the full SKILL.md content for selected skills.
+ * Replace pi's default skills section with a compact, cached version.
  *
+ * - First appearance of a skill: includes description
+ * - Subsequent appearances: description omitted (LLM already has it)
+ * - No skills selected: entire section removed
+ *
+ * @param systemPrompt - Full system prompt
  * @param selectedSkills - Skill names chosen by the side agent
- * @param allSkills - All loaded skills with their file paths
- * @returns Injected skill content string, or empty string if nothing to inject
+ * @param allSkills - All loaded skills with their metadata
+ * @returns Modified system prompt
  */
-export function readSkillContent(
+export function filterSkillsBlock(
+	systemPrompt: string,
 	selectedSkills: string[],
-	allSkills: Array<{ name: string; filePath: string }>,
+	allSkills: Array<{ name: string; description: string; filePath: string }>,
 ): string {
-	if (selectedSkills.length === 0) return "";
+	if (selectedSkills.length === 0) {
+		return systemPrompt.replace(SKILLS_SECTION_RE, "");
+	}
 
-	const parts: string[] = [];
+	const skillMap = new Map(allSkills.map((s) => [s.name, s]));
+	const entries: string[] = [];
+	const newlyShown: string[] = [];
 
 	for (const name of selectedSkills) {
-		const skill = allSkills.find((s) => s.name === name);
-		if (!skill?.filePath) continue;
+		const skill = skillMap.get(name);
+		if (!skill) continue;
 
-		try {
-			const content = fs.readFileSync(skill.filePath, "utf8").trim();
-			if (content) {
-				parts.push(`--- Skill: ${name} ---\n${content}`);
-			}
-		} catch {
-			// Skill file not found or unreadable — skip
+		if (shownSkills.has(name)) {
+			// Already introduced — compact form
+			entries.push(`  <skill name="${esc(skill.name)}" location="${esc(skill.filePath)}" />`);
+		} else {
+			// First time — include description
+			entries.push(`  <skill name="${esc(skill.name)}" location="${esc(skill.filePath)}">${esc(skill.description)}</skill>`);
+			newlyShown.push(name);
 		}
 	}
 
-	return parts.length > 0 ? "\n\n" + parts.join("\n\n") : "";
+	if (entries.length === 0) {
+		return systemPrompt.replace(SKILLS_SECTION_RE, "");
+	}
+
+	// Update cache
+	for (const name of newlyShown) {
+		shownSkills.add(name);
+	}
+
+	const compact = `\n\nActive skills (use \`read\` to load a skill's file):\n<available_skills>\n${entries.join("\n")}\n</available_skills>`;
+
+	return systemPrompt.replace(SKILLS_SECTION_RE, compact);
+}
+
+function esc(str: string): string {
+	return str
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&apos;");
 }

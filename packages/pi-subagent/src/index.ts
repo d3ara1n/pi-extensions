@@ -20,7 +20,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 
 	// Load config on session start
 	pi.on("session_start", async (_event, ctx) => {
-		config = loadSubagentConfig(ctx.settings);
+		config = loadSubagentConfig(ctx.cwd);
 	});
 
 	// Register the delegate tool

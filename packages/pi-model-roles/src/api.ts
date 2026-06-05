@@ -19,7 +19,7 @@ interface APIState {
 	modelRegistry: any;
 }
 
-export function initModelRolesAPI(settings: any, modelRegistry: any, currentModel: any): ModelRolesAPI {
+export function initModelRolesAPI(modelRegistry: any, currentModel: any, cwd?: string): ModelRolesAPI {
 	const state: APIState = {
 		config: undefined,
 		currentModel,
@@ -28,7 +28,7 @@ export function initModelRolesAPI(settings: any, modelRegistry: any, currentMode
 
 	function getConfig(): ModelRolesConfig {
 		if (!state.config) {
-			state.config = loadRolesConfig(settings);
+			state.config = loadRolesConfig(cwd);
 		}
 		return state.config;
 	}

@@ -7,6 +7,7 @@
  * 2. Whether to switch model roles (model-router module)
  *
  * Both modules can be independently toggled via /scout:* commands.
+ * Scout progress and results are shown in the status bar.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -17,17 +18,36 @@ import { DEFAULT_CONFIG } from "./types.ts";
 import { loadScoutConfig } from "./config.ts";
 import { callSideAgent } from "./side-agent.ts";
 import { buildScoutSystemPrompt } from "./scout-prompt.ts";
-import { stripSkillsBlock, readSkillContent } from "./skill-inject.ts";
+import { filterSkillsBlock, resetSkillCache } from "./skill-inject.ts";
 import { switchToRole } from "./model-switch.ts";
+
+const STATUS_KEY = "scout";
+
+/** Build a one-line status summary from a scout decision. */
+function formatDecisionStatus(decision: ScoutDecision, theme: any): string {
+	const parts: string[] = [];
+
+	if (decision.skills.length > 0) {
+		const names = decision.skills.length <= 3
+			? decision.skills.join(", ")
+			: `${decision.skills.slice(0, 2).join(", ")} +${decision.skills.length - 2}`;
+		parts.push(theme.fg("accent", `skills: ${names}`));
+	}
+	if (decision.role) {
+		parts.push(theme.fg("warning", `→ ${decision.role}`));
+	}
+
+	if (parts.length === 0) {
+		return theme.fg("dim", "✓ scout: no changes");
+	}
+
+	return theme.fg("success", "✓ scout:") + " " + parts.join(" | ");
+}
 
 export default function scoutExtension(pi: ExtensionAPI) {
 	let config: ScoutConfig = DEFAULT_CONFIG;
 	let lastDecision: ScoutDecision | undefined;
 
-	/**
-	 * Safely get ModelRolesAPI. Returns undefined if not initialized,
-	 * with a user-visible notification.
-	 */
 	function tryGetRolesApi(ctx: ExtensionContext): ModelRolesAPI | undefined {
 		try {
 			return getModelRolesAPI();
@@ -46,6 +66,7 @@ export default function scoutExtension(pi: ExtensionAPI) {
 		handler: async (_args, ctx) => {
 			const rolesApi = tryGetRolesApi(ctx);
 			const sideRole = rolesApi?.getRole(config.sideAgentRole);
+			const theme = ctx.ui.theme;
 			const lines = [
 				`Scout: ${config.enabled ? "enabled" : "disabled"}`,
 				`Side agent role: ${config.sideAgentRole} (${sideRole?.model ?? "current model"})`,
@@ -103,15 +124,18 @@ export default function scoutExtension(pi: ExtensionAPI) {
 
 	// ── session_start: load config ──────────────────────────────────
 	pi.on("session_start", async (_event, ctx) => {
-		config = loadScoutConfig(ctx.settings);
+		config = loadScoutConfig(ctx.cwd);
+		resetSkillCache();
+	});
+
+	// ── Clear status at turn start ──────────────────────────────────
+	pi.on("turn_start", async () => {
+		// Will be overwritten by before_agent_start if scout runs
 	});
 
 	// ── before_agent_start: core scout logic ────────────────────────
 	pi.on("before_agent_start", async (event, ctx) => {
-		// Skip if disabled
 		if (!config.enabled) return;
-
-		// Both modules off → nothing to do
 		if (!config.modules.skillRouter && !config.modules.modelRouter) return;
 
 		let rolesApi: ModelRolesAPI;
@@ -122,12 +146,21 @@ export default function scoutExtension(pi: ExtensionAPI) {
 			return;
 		}
 
+		const theme = ctx.ui.theme;
+
+		// Show "Scouting..." indicator
+		ctx.ui.setStatus(STATUS_KEY, theme.fg("accent", "◎") + theme.fg("dim", " Scouting..."));
+
 		// Resolve side agent model
 		const sideResolved = await rolesApi.resolveRoleAsync(config.sideAgentRole);
 		if (!sideResolved.model) {
+			ctx.ui.setStatus(STATUS_KEY, theme.fg("warning", "◎ scout: side model unavailable"));
 			console.warn(`[pi-scout] Side agent role "${config.sideAgentRole}" not available — skipping`);
 			return;
 		}
+
+		// Update status: resolving
+		ctx.ui.setStatus(STATUS_KEY, theme.fg("accent", "◎") + theme.fg("dim", ` Scouting via ${sideResolved.model.provider}/${sideResolved.model.id}...`));
 
 		// 1. Get available skills from systemPromptOptions
 		const skills = event.systemPromptOptions?.skills ?? [];
@@ -154,36 +187,31 @@ export default function scoutExtension(pi: ExtensionAPI) {
 		);
 
 		lastDecision = decision;
-		console.log(`[pi-scout] Decision: skills=${decision.skills.join(",") || "(none)"} role=${decision.role ?? "(no change)"} — ${decision.reasoning}`);
 
 		let systemPrompt = event.systemPrompt;
+		let switchedRole: string | undefined;
 
-		// 4. skill-router: intercept skills XML + inject selected skill content
+		// 4. skill-router: filter skills XML to only selected ones
 		if (config.modules.skillRouter) {
-			// Strip the default <available_skills> XML block
-			systemPrompt = stripSkillsBlock(systemPrompt);
-
-			// Inject full content of selected skills
-			if (decision.skills.length > 0) {
-				const skillContent = readSkillContent(
-					decision.skills,
-					skills.map((s: any) => ({ name: s.name, filePath: s.filePath })),
-				);
-				if (skillContent) {
-					systemPrompt += skillContent;
-				}
-			}
+			systemPrompt = filterSkillsBlock(
+				systemPrompt,
+				decision.skills,
+				skills.map((s: any) => ({ name: s.name, description: s.description ?? "", filePath: s.filePath })),
+			);
 		}
 
 		// 5. model-router: switch model if side agent recommends a different role
 		if (config.modules.modelRouter && decision.role && decision.role !== currentRole) {
 			const switched = await switchToRole(pi, decision.role, rolesApi);
 			if (switched) {
-				console.log(`[pi-scout] Switched model to role "${decision.role}"`);
+				switchedRole = decision.role;
 			}
 		}
 
-		// 6. Return modified system prompt
+		// 6. Show result in status bar
+		ctx.ui.setStatus(STATUS_KEY, formatDecisionStatus(decision, theme));
+
+		// 7. Return modified system prompt
 		if (systemPrompt !== event.systemPrompt) {
 			return { systemPrompt };
 		}

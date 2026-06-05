@@ -198,12 +198,14 @@ export default function scoutExtension(pi: ExtensionAPI) {
 			? (rolesApi.findRoleByModel(`${currentModel.provider}/${currentModel.id}`) ?? "unknown")
 			: "unknown";
 
-		// 3. Call side agent
-		const scoutSystemPrompt = buildScoutSystemPrompt(config, skillsList, rolesList);
+		// 3. Build roles list
 		const visibleRoles = rolesApi.getVisibleRoles();
 		const rolesList = Object.entries(visibleRoles)
 			.map(([name, cfg]: [string, any]) => `- ${name}: ${cfg.description ?? "(no description)"}${cfg.model ? ` (model: ${cfg.model})` : " (current model)"}`)
 			.join("\n");
+
+		// 4. Call side agent
+		const scoutSystemPrompt = buildScoutSystemPrompt(config, skillsList, rolesList);
 		const decision = await callSideAgent(
 			sideResolved.model,
 			sideResolved.apiKey,

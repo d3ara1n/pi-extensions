@@ -220,6 +220,8 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			"",
 			"Progress is shown in real-time via TUI (tool calls, turns, elapsed time).",
 			"Use Ctrl+O on a completed result to see full details.",
+			"",
+			"Note: Subagents only have built-in tools (read, bash, edit, write, grep, glob, find, web_search, fetch_content). They do NOT have access to MCP tools or custom tools from the main session.",
 		].join("\n"),
 
 		parameters: Type.Object({
@@ -387,8 +389,16 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			}
 
 			const r = details.results[0];
-			const isError = isFailedResult(r);
-			const icon = isError ? theme.fg("error", "\u2717") : theme.fg("success", "\u2713");
+			const isRunning = r.exitCode === -1;
+			const isError = !isRunning && isFailedResult(r);
+			let icon: string;
+			if (isRunning) {
+				icon = theme.fg("warning", "\u23F3"); // hourglass
+			} else if (isError) {
+				icon = theme.fg("error", "\u2717");
+			} else {
+				icon = theme.fg("success", "\u2713");
+			}
 			const displayItems = getDisplayItems(r.messages);
 			const finalOutput = getFinalOutput(r.messages);
 			const mdTheme = getMarkdownTheme();
@@ -403,15 +413,17 @@ export default function subagentExtension(pi: ExtensionAPI) {
 				if (isError && r.errorMessage)
 					container.addChild(new Text(theme.fg("error", `Error: ${r.errorMessage}`), 0, 0));
 
-				container.addChild(new Spacer(1));
-				container.addChild(new Text(theme.fg("muted", "\u2500\u2500\u2500 Task \u2500\u2500\u2500"), 0, 0));
-				container.addChild(new Text(theme.fg("dim", r.task), 0, 0));
+				if (!isRunning) {
+					container.addChild(new Spacer(1));
+					container.addChild(new Text(theme.fg("muted", "\u2500\u2500\u2500 Task \u2500\u2500\u2500"), 0, 0));
+					container.addChild(new Text(theme.fg("dim", r.task), 0, 0));
+				}
 
 				container.addChild(new Spacer(1));
-				container.addChild(new Text(theme.fg("muted", "\u2500\u2500\u2500 Tool Calls \u2500\u2500\u2500"), 0, 0));
 				const toolCalls = displayItems.filter((item) => item.type === "toolCall");
 				if (toolCalls.length === 0) {
-					container.addChild(new Text(theme.fg("muted", "(none)"), 0, 0));
+					const runningLabel = isRunning ? "(waiting for first event...)" : "(none)";
+					container.addChild(new Text(theme.fg("muted", runningLabel), 0, 0));
 				} else {
 					for (const item of toolCalls) {
 						container.addChild(
@@ -425,7 +437,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 					}
 				}
 
-				if (finalOutput) {
+				if (!isRunning && finalOutput) {
 					container.addChild(new Spacer(1));
 					container.addChild(new Text(theme.fg("muted", "\u2500\u2500\u2500 Output \u2500\u2500\u2500"), 0, 0));
 					container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
@@ -448,14 +460,14 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			if (isError && r.errorMessage) {
 				text += `\n${theme.fg("error", `Error: ${r.errorMessage}`)}`;
 			} else if (displayItems.length === 0) {
-				text += `\n${theme.fg("muted", "(no output)")}`;
+				text += `\n${theme.fg("muted", isRunning ? "(running...)" : "(no output)")}`;
 			} else {
 				const rendered = renderDisplayItems(displayItems, 6, theme.fg.bind(theme));
 				if (rendered) text += `\n${rendered}`;
 			}
 			const usageStr = formatUsageStats(r.usage, r.model);
-			if (usageStr) text += `\n${theme.fg("dim", usageStr)}`;
-			if (displayItems.length > 6) text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
+			if (usageStr && !isRunning) text += `\n${theme.fg("dim", usageStr)}`;
+			if (!isRunning && displayItems.length > 6) text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
 			return new Text(text, 0, 0);
 		},
 	});

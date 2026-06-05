@@ -52,7 +52,12 @@ export function loadSubagentConfig(cwd?: string): SubagentConfig {
 	const raw = settings?.subagent;
 	if (!raw) return DEFAULT_CONFIG;
 
+	const rawSummary = raw?.summary;
 	return {
 		timeoutMs: raw.timeoutMs ?? DEFAULT_CONFIG.timeoutMs,
+		summary: {
+			role: rawSummary?.role ?? DEFAULT_CONFIG.summary.role,
+			enabled: rawSummary?.enabled ?? DEFAULT_CONFIG.summary.enabled,
+		},
 	};
 }

@@ -4,12 +4,18 @@
 
 /** Configuration for the subagent extension. */
 export interface SubagentConfig {
-  /** Default timeout in milliseconds for subagent processes */
   timeoutMs: number;
+  summary: SubagentSummaryConfig;
+}
+
+export interface SubagentSummaryConfig {
+  role: string;
+  enabled: boolean;
 }
 
 export const DEFAULT_CONFIG: SubagentConfig = {
-  timeoutMs: 300_000, // 5 minutes
+  timeoutMs: 300_000,
+  summary: { role: "utility", enabled: true },
 };
 
 /** A built-in subagent role definition. */
@@ -22,29 +28,69 @@ export interface SubagentRole {
   tools: string[];
 }
 
-/** Result from a subagent execution. */
+/** Usage statistics from a subagent execution. */
+export interface SubagentUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cost: number;
+  contextTokens: number;
+  turns: number;
+}
+
+/** A message from the subagent's JSON event stream. */
+export interface SubagentMessage {
+  role: string;
+  content: Array<{
+    type: string;
+    text?: string;
+    name?: string;
+    arguments?: Record<string, any>;
+    id?: string;
+  }>;
+  usage?: {
+    input?: number;
+    output?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+    cost?: { total?: number };
+    totalTokens?: number;
+  };
+  model?: string;
+  stopReason?: string;
+  errorMessage?: string;
+  toolCallId?: string;
+}
+
+/** Result from a single subagent execution. */
 export interface SubagentResult {
   /** Which subagent role was used */
   role: string;
   /** The task that was assigned */
   task: string;
-  /** Process exit code */
+  /** Process exit code (-1 = still running for streaming) */
   exitCode: number;
-  /** Extracted text output */
+  /** All messages from the event stream (assistant + tool results) */
+  messages: SubagentMessage[];
+  /** Last assistant text output */
   output: string;
+  /** AI-generated one-line summary for TUI display */
+  summary?: string;
   /** stderr output */
   stderr: string;
   /** Token usage stats */
-  usage: {
-    input: number;
-    output: number;
-    cost: number;
-    turns: number;
-  };
-  /** Model used */
+  usage: SubagentUsage;
+  /** Model identifier used */
   model?: string;
-  /** Stop reason */
+  /** Stop reason from last message */
   stopReason?: string;
   /** Error message if failed */
   errorMessage?: string;
+}
+
+/** TUI details structure passed via tool result details. */
+export interface SubagentDetails {
+  mode: "single";
+  results: SubagentResult[];
 }

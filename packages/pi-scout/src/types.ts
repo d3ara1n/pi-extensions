@@ -29,7 +29,7 @@ export interface ScoutDecision {
 
 export const DEFAULT_CONFIG: ScoutConfig = {
   enabled: true,
-  sideAgentRole: "fast",
+  sideAgentRole: "side",
   maxSelectedSkills: 5,
   modules: {
     skillRouter: true,

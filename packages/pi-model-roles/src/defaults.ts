@@ -24,6 +24,11 @@ export const BUILTIN_DEFAULT_ROLES: Record<string, RoleConfig> = {
   fast: {
     model: null,
     description: "快速修改、简单问答",
+    thinking: "low",
+  },
+  side: {
+    model: null,
+    description: "Scout side agent 路由决策",
     thinking: "off",
   },
 };

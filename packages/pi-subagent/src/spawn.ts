@@ -12,20 +12,14 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { SubagentMessage, SubagentResult } from "./types.ts";
 
-/** Determine how to invoke pi. Handles both bundled and CLI installations. */
+/** Determine how to invoke pi.
+ *
+ * Always uses the `pi` CLI command. On Windows with Bun-compiled pi,
+ * process.execPath returns a virtual path (B:/~BUN/root/pi.exe) that
+ * leaks into the child model's context and causes it to run stray
+ * diagnostic commands. Using the `pi` command from PATH avoids this.
+ */
 function getPiInvocation(args: string[]): { command: string; args: string[] } {
-	const currentScript = process.argv[1];
-	const isBunVirtualScript = currentScript?.startsWith("/$bunfs/root/");
-	if (currentScript && !isBunVirtualScript && fs.existsSync(currentScript)) {
-		return { command: process.execPath, args: [currentScript, ...args] };
-	}
-
-	const execName = path.basename(process.execPath).toLowerCase();
-	const isGenericRuntime = /^(node|bun)(\.exe)?$/.test(execName);
-	if (!isGenericRuntime) {
-		return { command: process.execPath, args };
-	}
-
 	return { command: "pi", args };
 }
 

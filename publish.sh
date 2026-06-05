@@ -101,7 +101,7 @@ info "Version set to ${TARGET_VERSION}"
 TAG="${FULL_NAME}@${TARGET_VERSION}"
 git add "$PKG_JSON"
 git commit -m "release: ${TAG}" || true
-git tag "$TAG"
+git tag -m "$TAG" "$TAG"
 info "Git tag: ${TAG}"
 
 git push

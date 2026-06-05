@@ -130,7 +130,7 @@ rl.question(`\n  Publish ${fullName}@${targetVersion}? [Y/n] `, (answer) => {
 
 	run(`git add ${path.relative(process.cwd(), pkgJsonPath)}`);
 	run(`git commit -m "release: ${tag}"`, { allowFail: true });
-	run(`git tag ${tag}`);
+	run(`git tag -m "${tag}" ${tag}`);
 	info(`Git tag: ${tag}`);
 
 	run("git push");

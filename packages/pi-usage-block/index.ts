@@ -81,7 +81,7 @@ export default function (pi: ExtensionAPI) {
     }
     const provider = getActiveUsageProvider();
     const name = provider?.name ?? activeProviderId ?? "usage";
-    ctx.ui.setStatus(STATUS_KEY, fmtProvider(name, windows));
+    ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("dim", fmtProvider(name, windows)));
   }
 
   /** Remove the status bar entry. */

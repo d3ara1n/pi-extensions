@@ -231,11 +231,15 @@ export async function spawnSubagent(
 			}
 		};
 
-		// Build env with optional subagent allowlist
+		// Build env with optional subagent allowlist and tmpdir for researcher role
 		const childEnv: NodeJS.ProcessEnv = { ...process.env };
 		if (options.subagentRoles && options.subagentRoles.length > 0) {
 			childEnv.PI_SUBAGENT_ALLOWED = options.subagentRoles.join(",");
 		}
+		// Expose tmpdir as env var so subagent bash commands (e.g. git clone) can use it
+		childEnv.PI_SUBAGENT_TMPDIR = tmpDir;
+
+		let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
 		const exitCode = await new Promise<number>((resolve) => {
 			const proc = spawn(invocation.command, invocation.args, {
@@ -257,6 +261,7 @@ export async function spawnSubagent(
 			});
 
 			proc.on("close", (code) => {
+				if (timeoutHandle) clearTimeout(timeoutHandle);
 				if (buffer.trim()) processLine(buffer);
 				resolve(code ?? 0);
 			});
@@ -280,7 +285,7 @@ export async function spawnSubagent(
 
 			// Handle timeout
 			if (options.timeoutMs && options.timeoutMs > 0) {
-				setTimeout(() => {
+				timeoutHandle = setTimeout(() => {
 					if (!proc.killed) {
 						proc.kill("SIGTERM");
 						setTimeout(() => {

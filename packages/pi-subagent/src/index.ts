@@ -15,7 +15,7 @@ import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { ModelRolesAPI } from "@d3ara1n/pi-model-roles";
 import { getModelRolesAPI } from "@d3ara1n/pi-model-roles";
-import type { SubagentConfig, SubagentDetails, SubagentResult } from "./types.ts";
+import type { SubagentConfig, SubagentDetails, SubagentResult, SubagentRole } from "./types.ts";
 import { DEFAULT_CONFIG } from "./types.ts";
 import { loadSubagentConfig } from "./config.ts";
 import { BUILTIN_ROLES } from "./roles.ts";
@@ -63,6 +63,9 @@ function getDisplayItems(messages: SubagentResult["messages"]): DisplayItem[] {
 
 function shortenPath(p: string): string {
 	const home = os.homedir();
+	if (process.platform === "win32") {
+		return p.toLowerCase().startsWith(home.toLowerCase()) ? `~${p.slice(home.length)}` : p;
+	}
 	return p.startsWith(home) ? `~${p.slice(home.length)}` : p;
 }
 
@@ -194,7 +197,12 @@ async function generateSummary(
 
 		return text || undefined;
 	} catch {
-		return undefined;
+		// Fall back to manual truncation: use first line of output as summary
+		const trimmed = outputText.trim();
+		if (!trimmed) return undefined;
+		const firstLine = trimmed.split("\n")[0];
+		if (firstLine.length <= 65) return firstLine;
+		return firstLine.slice(0, 62) + "...";
 	}
 }
 
@@ -515,8 +523,9 @@ export default function subagentExtension(pi: ExtensionAPI) {
 				if (r.summary) {
 					text += ` ${theme.fg("dim", "\u00b7")} ${theme.fg("text", r.summary)}`;
 				}
-				if (isError && r.errorMessage) {
-					text += `\n${theme.fg("error", `Error: ${r.errorMessage}`)}`;
+				if (isError) {
+					const errMsg = r.errorMessage || (r.stderr ? r.stderr.trim().split("\n")[0].slice(0, 80) : r.stopReason);
+					if (errMsg) text += `\n${theme.fg("error", `Error: ${errMsg}`)}`;
 				}
 				const usageStr = formatUsageStats(r.usage, r.model);
 				if (usageStr) text += `\n${theme.fg("dim", usageStr)}`;

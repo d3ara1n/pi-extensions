@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-subagent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Role-based subagent orchestration for pi — delegates tasks to specialized pi child processes with configurable model roles",
   "main": "src/index.ts",
   "keywords": [

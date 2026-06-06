@@ -12,6 +12,12 @@ export const BUILTIN_ROLES: Record<string, SubagentRole> = {
   explorer: {
     role: "fast",
     fallbackRole: "default",
+    description: "READ-ONLY codebase exploration — locate files, grep symbols, trace imports, explain structures. Tools: read, find, grep, glob. NO bash, NO edits, NO web access.",
+    examples: [
+      "Find where auth middleware is implemented",
+      "Map the routing structure",
+    ],
+    decisionTrigger: "Task finds or maps code without touch?",
     tools: ["read", "find", "grep", "glob"],
     systemPrompt: [
       "Fast code explorer. You have READ-ONLY tools only — no commands, no edits.",
@@ -27,6 +33,12 @@ export const BUILTIN_ROLES: Record<string, SubagentRole> = {
   reviewer: {
     role: "heavy",
     fallbackRole: "default",
+    description: "READ-ONLY code review & analysis — audit code, assess architecture, review diffs. Tools: read, bash, grep, glob. Has bash (git diff/log, test runs). NO edits, NO web access.",
+    examples: [
+      "Review the error handling in src/api/ for security issues",
+      "Audit this PR diff for performance regressions",
+    ],
+    decisionTrigger: "Task audits or reviews code quality?",
     tools: ["read", "bash", "grep", "glob"],
     systemPrompt: [
       "Senior code reviewer. READ-ONLY — you must NOT modify any file.",
@@ -41,6 +53,12 @@ export const BUILTIN_ROLES: Record<string, SubagentRole> = {
   },
   worker: {
     role: "default",
+    description: "the ONLY role that can MODIFY files — edit, write, refactor, fix, implement. Tools: read, bash, edit, write, grep, glob, delegate. Can delegate to explorer/researcher.",
+    examples: [
+      "Rename all snake_case fields to camelCase",
+      "Add input validation to POST /login",
+    ],
+    decisionTrigger: "Task modifies files?",
     tools: ["read", "bash", "edit", "write", "grep", "glob", "delegate"],
     subagentRoles: ["explorer", "researcher"],
     systemPrompt: [
@@ -62,6 +80,12 @@ export const BUILTIN_ROLES: Record<string, SubagentRole> = {
   researcher: {
     role: "fast",
     fallbackRole: "default",
+    description: "the ONLY role with WEB ACCESS — search docs, fetch pages, analyze GitHub repos. Tools: web_search, fetch_content, read, bash, delegate. Can clone repos & delegate to explorer.",
+    examples: [
+      "Find the React 19 migration guide",
+      "Check GitHub issue #1234 for context",
+    ],
+    decisionTrigger: "Task searches web or GitHub?",
     tools: ["web_search", "fetch_content", "read", "bash", "delegate"],
     subagentRoles: ["explorer"],
     systemPrompt: [

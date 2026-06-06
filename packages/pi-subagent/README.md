@@ -81,6 +81,47 @@ Edit `~/.pi/agent/settings.json`:
 
 All fields are optional. Defaults: `timeoutMs: 300000`, `summary.role: "utility"`, `summary.enabled: true`.
 
+### Agent Overrides
+
+Override, disable, or add subagent roles via `agentOverrides`. Built-in and custom roles are treated equally — all descriptions, examples, and decision triggers feed into the LLM's prompt dynamically.
+
+```jsonc
+{
+  "subagent": {
+    "agentOverrides": {
+      // ── Override a built-in role (only specify changed fields) ──
+      "worker": {
+        "role": "heavy"               // use a stronger model
+      },
+
+      // ── Disable a built-in role ──
+      "reviewer": {
+        "disabled": true
+      },
+
+      // ── Add a custom role (all required fields must be provided) ──
+      "tester": {
+        "role": "default",
+        "description": "Test automation & QA — write and run tests, validate fixes. Tools: read, bash, edit, write, grep. Can delegate to explorer.",
+        "examples": [
+          "Write unit tests for the auth module",
+          "Run the test suite and fix failing tests"
+        ],
+        "decisionTrigger": "Task writes or runs tests?",
+        "tools": ["read", "bash", "edit", "write", "grep"],
+        "systemPrompt": "QA engineer. Write tests, run them, fix failures. After each change, re-run affected tests."
+      }
+    }
+  }
+}
+```
+
+**Required fields for custom roles:** `role`, `description`, `examples`, `decisionTrigger`, `tools`, `systemPrompt`.
+
+**Optional fields:** `subagentRoles` (roles this role can spawn via delegate), `fallbackRole` (backup pi-model-roles role on provider errors).
+
+Invalid custom roles (missing required fields) are silently skipped with an error notification at session start.
+
 ## Usage (by the main model)
 
 Delegate tasks that would generate many tool calls or verbose output to keep your own context clean:

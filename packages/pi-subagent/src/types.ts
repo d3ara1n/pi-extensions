@@ -29,6 +29,12 @@ export const DEFAULT_CONFIG: SubagentConfig = {
 export interface SubagentRole {
   /** pi-model-roles role name to use for this subagent */
   role: string;
+  /** One-line description for the LLM prompt — what this role does and what tools it has */
+  description: string;
+  /** Example tasks to show in CONCRETE EXAMPLES section */
+  examples: string[];
+  /** Decision flow trigger phrase, e.g. "Task modifies files?" */
+  decisionTrigger: string;
   /** System prompt for the subagent */
   systemPrompt: string;
   /** Tools available to this subagent */

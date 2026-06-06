@@ -239,40 +239,39 @@ export default function subagentExtension(pi: ExtensionAPI) {
 	const guidelines: string[] = [];
 
 	function rebuildGuidelines(roles: Record<string, SubagentRole>): void {
+		const entries = Object.entries(roles);
+		const exampleLines: string[] = [];
+		const decisionLines: string[] = [];
+
+		for (const [name, role] of entries) {
+			// Decision flow
+			decisionLines.push(`  ${role.decisionTrigger} → delegate(${name})`);
+
+			// Concrete examples — one line per role with comma-separated examples
+			const quotedExamples = role.examples.map((e) => `"${e}"`).join(", ");
+			exampleLines.push(`  delegate(${name}):  ${quotedExamples}`);
+		}
+
 		guidelines.length = 0;
 		guidelines.push(
 			"WHEN TO DELEGATE — offload work to keep your own context clean and focused:",
 			"",
 			"- Any task requiring 3+ file reads or tool calls → delegate. Don't fill your context with raw exploration or verbose output.",
-			"- File modifications (edit/write/refactor) → delegate to worker. Your context stays focused on the user's intent, not implementation details.",
-			"- Code review or audit → delegate to reviewer. Review output is longform; keep it isolated.",
-			"- Web or GitHub research → delegate to researcher. Search results are noisy; let the researcher summarize.",
-			"- Exploratory investigation → delegate to explorer. You only need the conclusion, not every file trace.",
+			"- File modifications (edit/write/refactor) → delegate. Your context stays focused on the user's intent, not implementation details.",
+			"- Code review or audit → delegate. Review output is longform; keep it isolated.",
+			"- Web or GitHub research → delegate. Search results are noisy; let the researcher summarize.",
+			"- Exploratory investigation → delegate. You only need the conclusion, not every file trace.",
 			"",
 			"AVAILABLE ROLES:",
-			...Object.entries(roles).map(([name, role]) => {
-				switch (name) {
-					case "explorer": return "  - explorer: READ-ONLY codebase exploration — locate files, grep symbols, trace imports, explain structures. Tools: read, find, grep, glob. NO bash, NO edits, NO web access.";
-					case "reviewer": return "  - reviewer: READ-ONLY code review & analysis — audit code, assess architecture, review diffs. Tools: read, bash, grep, glob. Has bash (git diff/log, test runs). NO edits, NO web access.";
-					case "worker": return "  - worker: the ONLY role that can MODIFY files — edit, write, refactor, fix, implement. Tools: read, bash, edit, write, grep, glob, delegate. Can delegate to explorer/researcher.";
-					case "researcher": return "  - researcher: the ONLY role with WEB ACCESS — search docs, fetch pages, analyze GitHub repos. Tools: web_search, fetch_content, read, bash, delegate. Can clone repos & delegate to explorer.";
-					default: return `  - ${name}: ${role.systemPrompt.split(".")[0]}`;
-				}
-			}),
+			...entries.map(([name, role]) => `  - ${name}: ${role.description}`),
 			"",
 			"CONCRETE EXAMPLES:",
 			"",
-			'  delegate(explorer):  "Find where auth middleware is implemented", "Map the routing structure"',
-			'  delegate(reviewer):  "Review the error handling in src/api/ for security issues", "Audit this PR diff for performance regressions"',
-			'  delegate(worker):    "Rename all snake_case fields to camelCase", "Add input validation to POST /login"',
-			'  delegate(researcher): "Find the React 19 migration guide", "Check GitHub issue #1234 for context"',
+			...exampleLines,
 			"",
 			"DECISION FLOW:",
 			"",
-			"  Task modifies files?                     → delegate(worker)",
-			"  Task searches web or GitHub?             → delegate(researcher)",
-			"  Task audits or reviews code quality?     → delegate(reviewer)",
-			"  Task finds or maps code without touch?    → delegate(explorer)",
+			...decisionLines,
 			"",
 			"For multiple independent tasks, emit multiple delegate calls in one turn — they run in parallel.",
 			"Include ALL necessary context — subagents have no access to this conversation.",
@@ -287,7 +286,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			} else if (roles[name]) {
 				roles[name] = { ...roles[name], ...override };
 			} else {
-				// Custom role — must provide at least role/tools/systemPrompt
+				// Custom role — must provide all required fields (validated in session_start)
 				roles[name] = override as SubagentRole;
 			}
 		}
@@ -299,6 +298,21 @@ export default function subagentExtension(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		config = loadSubagentConfig(ctx.cwd);
 		applyAgentOverrides(availableRoles, config.agentOverrides);
+
+		// Validate custom roles (skip built-in roles — they already have all fields)
+		const REQUIRED_FIELDS = ["role", "description", "examples", "decisionTrigger", "tools", "systemPrompt"] as const;
+		for (const [name, role] of Object.entries(availableRoles)) {
+			if (name in BUILTIN_ROLES) continue;
+			const missing = REQUIRED_FIELDS.filter((f) => !(f in (role as any)));
+			if (missing.length > 0) {
+				delete availableRoles[name];
+				ctx.ui.notify(
+					`[pi-subagent] Custom role "${name}" skipped — missing: ${missing.join(", ")}. Required: ${REQUIRED_FIELDS.join(", ")}.`,
+					"error",
+				);
+			}
+		}
+
 		rebuildGuidelines(availableRoles);
 	});
 
@@ -310,15 +324,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 		promptGuidelines: guidelines,
 
 		parameters: Type.Object({
-			role: Type.Union(
-				[
-					Type.Literal("explorer"),
-					Type.Literal("reviewer"),
-					Type.Literal("worker"),
-					Type.Literal("researcher"),
-				],
-				{ description: "Subagent role to use" },
-			),
+			role: Type.String({ description: "Subagent role to use" }),
 			task: Type.String({ description: "Specific task for the subagent" }),
 			cwd: Type.Optional(Type.String({ description: "Working directory (defaults to current)" })),
 		}),
@@ -587,10 +593,9 @@ export default function subagentExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerCommand({
-		name: "subagent:doctor",
+	pi.registerCommand("subagent:doctor", {
 		description: "Diagnose pi-subagent configuration and dependencies",
-		async execute(_args, ctx) {
+		handler: async (_args, ctx) => {
 			const lines: string[] = [];
 			let allOk = true;
 
@@ -639,9 +644,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			}
 
 			const summary = allOk ? "All checks passed" : "Some checks failed";
-			return {
-				content: [{ type: "text", text: `${summary}\n\n${lines.join("\n")}` }],
-			};
+			ctx.ui.notify(`${summary}\n\n${lines.join("\n")}`, "info");
 		},
 	});
 }

@@ -203,6 +203,36 @@ async function generateSummary(
 export default function subagentExtension(pi: ExtensionAPI) {
 	let config: SubagentConfig = DEFAULT_CONFIG;
 
+	// If spawned as a child by a parent subagent, PI_SUBAGENT_ALLOWED restricts
+	// which roles are available. Filter before any tool description sees them.
+	const ALLOWLIST: string[] | undefined = (() => {
+		const raw = process.env.PI_SUBAGENT_ALLOWED;
+		if (!raw) return undefined;
+		const list = raw.split(",").map((s) => s.trim()).filter(Boolean);
+		return list.length > 0 ? list : undefined;
+	})();
+
+	const availableRoles: Record<string, SubagentRole> = {};
+	for (const [name, role] of Object.entries(BUILTIN_ROLES)) {
+		if (!ALLOWLIST || ALLOWLIST.includes(name)) {
+			availableRoles[name] = role;
+		}
+	}
+
+	// For promptGuidelines: only list roles the LLM is allowed to use
+	const roleGuidelines = Object.entries(availableRoles).map(([name, role]) => {
+		switch (name) {
+			case "explorer": return "  - explorer: codebase exploration, reading files, answering 'where is X?' questions. READ-ONLY.";
+			case "reviewer": return "  - reviewer: deep code review, bug analysis, architecture assessment. READ-ONLY.";
+			case "worker": return "  - worker: ANY task that requires creating, editing, or writing files. Can delegate to explorer/researcher.";
+			case "researcher": return "  - researcher: web research, documentation lookup, GitHub repo analysis.";
+			default: return `  - ${name}: ${role.systemPrompt.split(".")[0]}`;
+		}
+	});
+
+	const hasReadOnlyRoles = availableRoles.explorer || availableRoles.reviewer;
+	const hasWorkerRole = !!availableRoles.worker;
+
 	pi.on("session_start", async (_event, ctx) => {
 		config = loadSubagentConfig(ctx.cwd);
 	});
@@ -214,11 +244,8 @@ export default function subagentExtension(pi: ExtensionAPI) {
 		promptSnippet: "Delegate tasks to specialized subagents",
 		promptGuidelines: [
 			"Role selection (choose exactly one based on the task):",
-			"  - explorer: codebase exploration, reading files, answering 'where is X?' questions. READ-ONLY (read, grep, find, glob).",
-			"  - reviewer: deep code review, bug analysis, architecture assessment. READ-ONLY (read, bash, grep, glob).",
-			"  - worker: ANY task that requires creating, editing, or writing files. Has full editing tools.",
-			"  - researcher: web research, documentation lookup, GitHub repo analysis (can clone repos and delegate to explorer).",
-			"CRITICAL: If the task involves modifying ANY file, you MUST use 'worker'. 'explorer' and 'reviewer' are READ-ONLY.",
+			...roleGuidelines,
+			...(hasReadOnlyRoles && hasWorkerRole ? ["CRITICAL: If the task involves modifying ANY file, you MUST use 'worker'. 'explorer' and 'reviewer' are READ-ONLY."] : []),
 			"For multiple independent subagent tasks, emit multiple `delegate` tool calls in the same turn — they run in parallel automatically.",
 			"Subagents have NO context from the current conversation — include ALL necessary context in the task description.",
 		],
@@ -238,13 +265,13 @@ export default function subagentExtension(pi: ExtensionAPI) {
 		}),
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const roleDef = BUILTIN_ROLES[params.role];
+			const roleDef = availableRoles[params.role];
 			if (!roleDef) {
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Unknown subagent role: ${params.role}. Available: ${Object.keys(BUILTIN_ROLES).join(", ")}`,
+							text: `Unknown subagent role: ${params.role}. Available: ${Object.keys(availableRoles).join(", ")}`,
 						},
 					],
 				};
@@ -292,6 +319,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 					cwd: params.cwd ?? ctx.cwd,
 					tools: roleDef.tools,
 					systemPrompt: roleDef.systemPrompt,
+					subagentRoles: roleDef.subagentRoles,
 					timeoutMs: config.timeoutMs,
 					signal,
 					onProgress: (partial) => {

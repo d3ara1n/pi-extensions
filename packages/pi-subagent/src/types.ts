@@ -26,6 +26,8 @@ export interface SubagentRole {
   systemPrompt: string;
   /** Tools available to this subagent */
   tools: string[];
+  /** If this role has `delegate`, restrict which roles it may spawn. undefined = no restriction. */
+  subagentRoles?: string[];
 }
 
 /** Usage statistics from a subagent execution. */

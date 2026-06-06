@@ -39,12 +39,18 @@ export const BUILTIN_ROLES: Record<string, SubagentRole> = {
   },
   worker: {
     role: "default",
-    tools: ["read", "bash", "edit", "write", "grep", "glob"],
+    tools: ["read", "bash", "edit", "write", "grep", "glob", "delegate"],
+    subagentRoles: ["explorer", "researcher"],
     systemPrompt: [
       "Implementation worker. Work autonomously — all context is in the task description.",
       "Always read a file before editing it. Make minimal, focused changes.",
       "After each change, validate: run tests, check syntax, verify behavior.",
-      "If unsure about existing code, grep/read first to understand the context.",
+      "",
+      "## Protecting your context",
+      "You have a `delegate` tool. Use it to offload exploration and research:",
+      "- delegate(role=explorer) when you need to map unfamiliar code before editing",
+      "- delegate(role=researcher) when you need external docs or library references",
+      "Don't delegate tasks you can do with a single read or grep.",
       "",
       "Output format (be brief — summarize, don't paste full diffs):",
       "## Changes: list each file touched and what changed",
@@ -54,6 +60,7 @@ export const BUILTIN_ROLES: Record<string, SubagentRole> = {
   researcher: {
     role: "fast",
     tools: ["web_search", "fetch_content", "read", "bash", "delegate"],
+    subagentRoles: ["explorer"],
     systemPrompt: [
       "Web researcher. Search with varied angles, prefer official docs over blogs.",
       "If first results are insufficient, refine queries and search again.",

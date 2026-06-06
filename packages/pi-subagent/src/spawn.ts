@@ -45,6 +45,7 @@ export async function spawnSubagent(
 		cwd?: string;
 		tools?: string[];
 		systemPrompt?: string;
+		subagentRoles?: string[];
 		timeoutMs?: number;
 		signal?: AbortSignal;
 		onProgress?: (update: Partial<SubagentResult>) => void;
@@ -149,9 +150,16 @@ export async function spawnSubagent(
 			}
 		};
 
+		// Build env with optional subagent allowlist
+		const childEnv: NodeJS.ProcessEnv = { ...process.env };
+		if (options.subagentRoles && options.subagentRoles.length > 0) {
+			childEnv.PI_SUBAGENT_ALLOWED = options.subagentRoles.join(",");
+		}
+
 		const exitCode = await new Promise<number>((resolve) => {
 			const proc = spawn(invocation.command, invocation.args, {
 				cwd: options.cwd,
+				env: childEnv,
 				shell: false,
 				stdio: ["ignore", "pipe", "pipe"],
 			});

@@ -2,7 +2,22 @@
 
 Role-based subagent orchestration for [pi](https://github.com/earendil-works/pi).
 
-Provides a `delegate` tool that lets the main model delegate tasks to specialized pi child processes with configurable model roles, real-time TUI progress, and AI-generated summaries.
+Provides a `delegate` tool that lets the main model offload tasks to specialized pi child processes with configurable model roles, real-time TUI progress, and AI-generated summaries.
+
+## Design Philosophy
+
+**The main model is the decision maker; subagents are executors.**
+
+Your primary AI has the most complete context — it knows the full conversation history, project structure, and task at hand. Subagents are spawned with **clean, isolated contexts** to handle specific, well-defined tasks without polluting the main model's context window.
+
+This means:
+- **Subagents don't plan** — the main model decides what needs to be done and provides a clear task description
+- **Subagents don't orchestrate** — if a task requires multiple steps, the main model examines each result and decides the next move
+- **Subagents don't inherit history** — they don't need the full conversation; just a precise task description
+- **Multiple subagents can run in parallel** — emit multiple `delegate` calls in one turn; pi executes them concurrently
+- **Subagents can nest subagents** — a `worker` can delegate exploration to `explorer` without returning to the main model
+
+> This design intentionally excludes chain pipelines and context-forking — those patterns are better suited when subagents act as advisors (planner, oracle), not executors.
 
 ## How it works
 
@@ -15,12 +30,16 @@ Provides a `delegate` tool that lets the main model delegate tasks to specialize
 
 ## Built-in Roles
 
-| Role | Model Role | Tools | Description |
-|------|-----------|-------|-------------|
-| `explorer` | fast | read, bash, find, grep, glob | Fast code search (read-only) |
-| `reviewer` | heavy | read, bash, grep, glob | Deep code review (read-only) |
-| `worker` | default | read, bash, edit, write, grep, glob | Implementation with file editing |
-| `researcher` | fast | web_search, fetch_content, read | Web research and docs lookup |
+| Role | Model Role | Tools | Can Delegate To | Description |
+|------|-----------|-------|-----------------|-------------|
+| `explorer` | fast | read, find, grep, glob | — | Fast code search (read-only, no bash) |
+| `reviewer` | heavy | read, bash, grep, glob | — | Deep code review (read-only, bash for git/log) |
+| `worker` | default | read, bash, edit, write, grep, glob, delegate | explorer, researcher | Implementation — the only role that can modify files |
+| `researcher` | fast | web_search, fetch_content, read, bash, delegate | explorer | Web research + GitHub repo analysis |
+
+**Nested delegation**: `worker` and `researcher` can spawn their own subagents. This keeps the main model's context clean — a worker can explore unfamiliar code via an `explorer` subagent without returning intermediate results to the main model.
+
+**Parallel execution**: To run multiple subagents concurrently, emit multiple `delegate` calls in a single turn. Pi's framework executes them in parallel automatically, with each subagent getting its own TUI progress display.
 
 ## TUI Display
 

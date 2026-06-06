@@ -71,20 +71,18 @@ export async function spawnSubagent(
 			args.push("--tools", options.tools.join(","));
 		}
 
-		// Ensure temp dir exists if needed for prompt or long task
-		const needTmpDir = options.systemPrompt?.trim() || task.length > TASK_CHAR_LIMIT;
-		if (needTmpDir) {
-			tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-subagent-"));
-		}
+		// Always create temp dir — used for prompt file, long task file, and as PI_SUBAGENT_TMPDIR for subagent work (e.g. git clone)
+		tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-subagent-"));
 
-		if (options.systemPrompt?.trim()) {
-			tmpFile = path.join(tmpDir!, "prompt.md");
-			await fs.promises.writeFile(tmpFile, options.systemPrompt, { encoding: "utf-8", mode: 0o600 });
-			args.push("--append-system-prompt", tmpFile);
-		}
+		const promptContent = options.systemPrompt?.trim()
+			? options.systemPrompt + `\n\nPI_SUBAGENT_TMPDIR=${tmpDir}`
+			: `PI_SUBAGENT_TMPDIR=${tmpDir}`;
+		tmpFile = path.join(tmpDir, "prompt.md");
+		await fs.promises.writeFile(tmpFile, promptContent, { encoding: "utf-8", mode: 0o600 });
+		args.push("--append-system-prompt", tmpFile);
 
 		if (task.length > TASK_CHAR_LIMIT) {
-			const taskPath = path.join(tmpDir!, "task.md");
+			const taskPath = path.join(tmpDir, "task.md");
 			await fs.promises.writeFile(taskPath, task, { encoding: "utf-8", mode: 0o600 });
 			args.push(`@${taskPath}`);
 		} else {

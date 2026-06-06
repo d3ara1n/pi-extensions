@@ -217,7 +217,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			"  - explorer: codebase exploration, reading files, answering 'where is X?' questions. READ-ONLY (read, grep, find, glob).",
 			"  - reviewer: deep code review, bug analysis, architecture assessment. READ-ONLY (read, bash, grep, glob).",
 			"  - worker: ANY task that requires creating, editing, or writing files. Has full editing tools.",
-			"  - researcher: web research, documentation lookup, finding online resources.",
+			"  - researcher: web research, documentation lookup, GitHub repo analysis (can clone repos and delegate to explorer).",
 			"CRITICAL: If the task involves modifying ANY file, you MUST use 'worker'. 'explorer' and 'reviewer' are READ-ONLY.",
 			"For multiple independent subagent tasks, emit multiple `delegate` tool calls in the same turn — they run in parallel automatically.",
 			"Subagents have NO context from the current conversation — include ALL necessary context in the task description.",

@@ -64,6 +64,7 @@ const packageDirs = readdirSync(packagesDir, { withFileTypes: true })
 console.log(`Scanning ${packageDirs.length} package(s)...\n`);
 
 let published = 0;
+let failed = 0;
 
 for (const dir of packageDirs) {
   const pkgDir = join(packagesDir, dir);
@@ -182,11 +183,16 @@ for (const dir of packageDirs) {
     pkg.version = originalVersion;
     writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + "\n");
     console.error(`  ❌ Failed to publish ${fullName}@${newVersion}: ${e.stderr?.trim() || e.message}`);
+    failed++;
   }
 }
 
 console.log(`\n${"─".repeat(40)}`);
-console.log(`Published ${published} package(s)`);
+console.log(`Published ${published} package(s), ${failed} failed`);
+
+if (failed > 0) {
+  process.exitCode = 1;
+}
 
 if (published > 0) {
   // Push version commits and tags

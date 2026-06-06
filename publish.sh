@@ -86,7 +86,8 @@ echo ""
 read -rp "  Publish ${FULL_NAME}@${TARGET_VERSION}? [Y/n] " CONFIRM
 [[ "${CONFIRM,,}" == "n" ]] && { warn "Cancelled"; exit 0; }
 
-# ── 4. 更新 version ────────────────────────────────────
+# ── 4. Save original version and update ─────────────────
+ORIGINAL_VERSION=$(node -e "console.log(require('./$PKG_JSON').version)")
 npm version "$TARGET_VERSION" --no-git-tag-version -w "$PKG_DIR" 2>/dev/null || \
     node -e "
         const fs = require('fs');
@@ -97,22 +98,34 @@ npm version "$TARGET_VERSION" --no-git-tag-version -w "$PKG_DIR" 2>/dev/null || 
     "
 info "Version set to ${TARGET_VERSION}"
 
-# ── 5. Git commit + tag + push ─────────────────────────
 TAG="${FULL_NAME}@${TARGET_VERSION}"
-git add "$PKG_JSON"
-git commit -m "release: ${TAG}" || true
-git tag -m "$TAG" "$TAG"
-info "Git tag: ${TAG}"
 
-git push
-git push --tags
-info "Git pushed"
+# ── 5. npm publish first ───────────────────────────────
+if npm publish -w "$PKG_DIR" --access public; then
+    info "Published to npm: ${TAG}"
 
-# ── 6. npm publish ─────────────────────────────────────
-npm publish -w "$PKG_DIR" --access public
-info "Published to npm: ${TAG}"
+    # ── 6. Git commit + tag + push (only on success) ─────
+    git add "$PKG_JSON"
+    git commit -m "release: ${TAG}" || true
+    git tag -m "$TAG" "$TAG"
+    info "Git tag: ${TAG}"
 
-echo ""
-info "Done! 🚀"
-echo ""
-echo -e "  Install: ${DIM}pi install npm:${FULL_NAME}${RESET}"
+    git push
+    git push --tags
+    info "Git pushed"
+
+    echo ""
+    info "Done! 🚀"
+    echo ""
+    echo -e "  Install: ${DIM}pi install npm:${FULL_NAME}${RESET}"
+else
+    # Publish failed — revert package.json
+    node -e "
+        const fs = require('fs');
+        const p = '$PKG_JSON';
+        const pkg = JSON.parse(fs.readFileSync(p, 'utf8'));
+        pkg.version = '$ORIGINAL_VERSION';
+        fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');
+    "
+    err "Failed to publish ${TAG}"
+fi

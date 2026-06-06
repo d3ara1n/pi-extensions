@@ -150,37 +150,45 @@ for (const dir of packageDirs) {
 
   log(`Bump: ${baseVersion} → ${newVersion} (${bumpLevel})`);
 
-  // ── 6. Update, commit, tag, publish ─────────────────────
+  // ── 6. Publish, then commit + tag only on success ───────
+  const originalVersion = pkg.version;
+  const tag = `${fullName}@${newVersion}`;
+
+  // Write new version to package.json for publish
   pkg.version = newVersion;
   writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + "\n");
 
-  // Stage and commit (skip if nothing to commit)
-  run(`git add ${pkgJsonPath}`);
-  const needsCommit = run(`git diff --cached --name-only`, { allowFail: true });
-  if (needsCommit) {
-    run(`git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" commit -m "release: ${fullName}@${newVersion}"`);
-  }
+  try {
+    run(`npm publish -w ${pkgDir} --access public --provenance`);
+    log(`✅ Published ${fullName}@${newVersion}`);
+    published++;
 
-  // Tag
-  const tag = `${fullName}@${newVersion}`;
-  const existingTag = run(`git tag -l "${tag}"`, { allowFail: true });
-  if (existingTag) {
-    log(`Tag already exists: ${tag}, skipping`);
-  } else {
-    run(`git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" tag ${tag}`);
-    log(`Tagged: ${tag}`);
-  }
+    // Only commit + tag on success
+    run(`git add ${pkgJsonPath}`);
+    const needsCommit = run(`git diff --cached --name-only`, { allowFail: true });
+    if (needsCommit) {
+      run(`git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" commit -m "release: ${fullName}@${newVersion}"`);
+    }
 
-  // Publish
-  run(`npm publish -w ${pkgDir} --access public --provenance`);
-  log(`✅ Published ${fullName}@${newVersion}`);
-  published++;
+    const existingTag = run(`git tag -l "${tag}"`, { allowFail: true });
+    if (existingTag) {
+      log(`Tag already exists: ${tag}, skipping`);
+    } else {
+      run(`git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" tag ${tag}`);
+      log(`Tagged: ${tag}`);
+    }
+  } catch (e) {
+    // Publish failed — revert package.json, continue to next package
+    pkg.version = originalVersion;
+    writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + "\n");
+    console.error(`  ❌ Failed to publish ${fullName}@${newVersion}: ${e.stderr?.trim() || e.message}`);
+  }
 }
 
 console.log(`\n${"─".repeat(40)}`);
 console.log(`Published ${published} package(s)`);
 
 if (published > 0) {
-  // Push the version commits back
-  run("git push");
+  // Push version commits and tags
+  run("git push --follow-tags");
 }

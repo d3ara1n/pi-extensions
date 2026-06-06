@@ -22,12 +22,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          registry-url: https://registry.npmjs.org
+          node-version: 24
 
       - name: Detect changes and publish
         run: node .github/scripts/auto-publish.mjs
 
-      - name: Push tags
-        run: git push --tags
+      - name: Push tags and version commits
+        run: git push --follow-tags
         if: success()

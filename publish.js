@@ -120,31 +120,38 @@ rl.question(`\n  Publish ${fullName}@${targetVersion}? [Y/n] `, (answer) => {
 		process.exit(0);
 	}
 
-	// ── 4. Update package.json version ────────────────────
+	// ── 4. Update package.json version (temporary) ────────
+	const originalVersion = pkg.version;
 	pkg.version = targetVersion;
 	fs.writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + "\n");
 	info(`Version set to ${targetVersion}`);
 
-	// ── 5. Git commit + tag + push ────────────────────────
 	const tag = `${fullName}@${targetVersion}`;
 
-	run(`git add ${path.relative(process.cwd(), pkgJsonPath)}`);
-	run(`git commit -m "release: ${tag}"`, { allowFail: true });
-	run(`git tag -m "${tag}" ${tag}`);
-	info(`Git tag: ${tag}`);
+	// ── 5. npm publish first ──────────────────────────────
+	try {
+		execSync(`npm publish -w ${pkgDir} --access public`, { stdio: "inherit" });
+		info(`Published to npm: ${tag}`);
 
-	run("git push");
-	run("git push --tags");
-	info("Git pushed");
+		// ── 6. Git commit + tag + push (only on success) ────
+		run(`git add ${path.relative(process.cwd(), pkgJsonPath)}`);
+		run(`git commit -m "release: ${tag}"`, { allowFail: true });
+		run(`git tag -m "${tag}" ${tag}`);
+		info(`Git tag: ${tag}`);
 
-	// ── 6. npm publish ────────────────────────────────────
-	// Use inherited stdio so npm can prompt for OTP / MFA
-	execSync(`npm publish -w ${pkgDir} --access public`, { stdio: "inherit" });
-	info(`Published to npm: ${tag}`);
+		run("git push");
+		run("git push --tags");
+		info("Git pushed");
 
-	console.log("");
-	info("Done! 🚀");
-	console.log("");
-	console.log(`  Install: pi install npm:${fullName}`);
-	console.log("");
+		console.log("");
+		info("Done! 🚀");
+		console.log("");
+		console.log(`  Install: pi install npm:${fullName}`);
+		console.log("");
+	} catch (e) {
+		// Publish failed — revert package.json
+		pkg.version = originalVersion;
+		fs.writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + "\n");
+		die(`Failed to publish: ${e.stderr?.trim() || e.message}`);
+	}
 });

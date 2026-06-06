@@ -175,12 +175,20 @@ async function generateSummary(
 		const resolved = await rolesApi.resolveRoleAsync(summaryConfig.role);
 		if (!resolved.model) return undefined;
 
+		// Truncate large outputs to avoid wasting summary tokens (keep head + tail)
+		const SUMMARY_MAX_INPUT = 4000;
+		let summaryInput = outputText;
+		if (summaryInput.length > SUMMARY_MAX_INPUT) {
+			const half = Math.floor(SUMMARY_MAX_INPUT / 2);
+			summaryInput = summaryInput.slice(0, half) + "\n\n... [truncated for summary] ...\n\n" + summaryInput.slice(-half);
+		}
+
 		const result = await complete(
 			resolved.model,
 			{
 				systemPrompt:
 					"Summarize the following agent output in one concise Chinese sentence (max 60 characters). Focus on what was accomplished, not how. Output only the summary, no preamble.",
-				messages: [{ role: "user", content: outputText }],
+				messages: [{ role: "user", content: summaryInput }],
 			},
 			{
 				maxTokens: 100,

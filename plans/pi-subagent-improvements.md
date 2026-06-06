@@ -67,9 +67,9 @@
 - 只在 provider 级别错误时回退，普通任务失败不回退
 
 **行动项**：
-- [ ] 在 `SubagentRole` 类型中添加 `fallbackModels` 字段
-- [ ] 修改 `spawnSubagent` 增加 retry 循环
-- [ ] 区分 provider 错误 vs 任务错误
+- [x] 利用 pi-model-roles 角色体系，SubagentRole 加 `fallbackRole` 字段（默认 "default"）
+- [x] execute 中检测 provider 错误（stderr 含 429/quota/auth/timeout 等关键词）后 resolveRoleAsync 回退角色并重试
+- [x] 区分 provider 错误 vs 任务错误（普通失败不触发回退）
 
 ---
 

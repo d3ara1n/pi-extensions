@@ -28,6 +28,8 @@ export interface SubagentRole {
   tools: string[];
   /** If this role has `delegate`, restrict which roles it may spawn. undefined = no restriction. */
   subagentRoles?: string[];
+  /** Fallback pi-model-roles role name when this role's model is unavailable (provider error). Defaults to "default". */
+  fallbackRole?: string;
 }
 
 /** Usage statistics from a subagent execution. */

@@ -350,7 +350,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			}
 
 			try {
-				const result = await spawnSubagent(modelRef, params.task, {
+				let result = await spawnSubagent(modelRef, params.task, {
 					cwd: params.cwd ?? ctx.cwd,
 					tools: roleDef.tools,
 					systemPrompt: roleDef.systemPrompt,
@@ -386,6 +386,27 @@ export default function subagentExtension(pi: ExtensionAPI) {
 						});
 					},
 				});
+
+				// Retry with fallback role on provider errors (quota, auth, timeout, etc.)
+				if ((result.exitCode !== 0 || result.errorMessage) && roleDef.fallbackRole) {
+					const isProviderError = /429|quota|rate.?limit|auth|timeout|exhausted|unavailable/i.test(
+						(result.stderr || "") + (result.errorMessage || ""),
+					);
+					if (isProviderError) {
+						const fallback = await rolesApi.resolveRoleAsync(roleDef.fallbackRole);
+						if (fallback.model) {
+							const fbRef = `${fallback.model.provider}/${fallback.model.id}`;
+							result = await spawnSubagent(fbRef, params.task, {
+								cwd: params.cwd ?? ctx.cwd,
+								tools: roleDef.tools,
+								systemPrompt: roleDef.systemPrompt,
+								subagentRoles: roleDef.subagentRoles,
+								timeoutMs: config.timeoutMs,
+								signal,
+							});
+						}
+					}
+				}
 
 				// Generate summary for TUI display
 				if (config.summary.enabled && result.output.trim()) {

@@ -11,6 +11,7 @@ import type { SubagentRole } from "./types.ts";
 export const BUILTIN_ROLES: Record<string, SubagentRole> = {
   explorer: {
     role: "fast",
+    fallbackRole: "default",
     tools: ["read", "find", "grep", "glob"],
     systemPrompt: [
       "Fast code explorer. You have READ-ONLY tools only — no commands, no edits.",
@@ -25,6 +26,7 @@ export const BUILTIN_ROLES: Record<string, SubagentRole> = {
   },
   reviewer: {
     role: "heavy",
+    fallbackRole: "default",
     tools: ["read", "bash", "grep", "glob"],
     systemPrompt: [
       "Senior code reviewer. READ-ONLY — you must NOT modify any file.",
@@ -59,6 +61,7 @@ export const BUILTIN_ROLES: Record<string, SubagentRole> = {
   },
   researcher: {
     role: "fast",
+    fallbackRole: "default",
     tools: ["web_search", "fetch_content", "read", "bash", "delegate"],
     subagentRoles: ["explorer"],
     systemPrompt: [

@@ -4,13 +4,16 @@
 
 ## 当前状态
 
-`@d3ara1n/pi-subagent` 是一个精简的子代理扩展（~780 行，5 个核心文件），实现了：
+`@d3ara1n/pi-subagent` 是一个精简的子代理扩展（~990 行，5 个核心文件），实现了：
 
 - 4 个内置角色 (explorer/reviewer/worker/researcher)
 - 单次子代理执行 + 流式 TUI
 - 嵌套权限白名单 (PI_SUBAGENT_ALLOWED)
 - pi-model-roles 集成 + 中文摘要
 - 输出截断保护 (50KB)
+- **并行委托**：主模型一次发出多个 `delegate` 工具调用，pi 框架自动并行执行
+- **嵌套委派**：worker 可委派 explorer/researcher，researcher 可委派 explorer
+- **Windows 路径解析**：`process.argv[1]` / `import.meta.resolve` / PATH 三级回退
 
 对比参考项目 `pi-subagents`（50+ 文件，~5000+ 行），以下是差距和改进方向。
 
@@ -18,18 +21,22 @@
 
 ## P0 — 高优先级（实际影响大）
 
-### 1. 修复 Windows spawn 路径问题
+### 1. ~修复 Windows spawn 路径问题~ ✅ 已实施（2026-06-06）
 
-**现状**：`spawn.ts` 的 `getPiInvocation()` 仅返回 `"pi"` 字符串。如果 `pi` 不在系统 PATH 中，子进程会直接启动失败。
+**旧现状**：`getPiInvocation()` 仅返回 `"pi"` 字符串，pi 不在 PATH 时失败。
 
-**参考做法**（`pi-subagents` 的 `pi-spawn.ts`）：
-- Windows 上通过 `import.meta.resolve("@earendil-works/pi-coding-agent")` 找到包根目录
-- 定位 `cli.js` 或入口脚本，用 `process.execPath`（即 Bun 路径）+ 脚本路径启动
-- Unix 上继续使用 `pi` 命令
+**已实施**：`spawn.ts` 的 `getPiInvocation()` 现采用三步策略：
+- **Windows**：
+  1. `process.argv[1]` 如果是可执行脚本 → `spawn(process.execPath, [argv1, ...args])`（`bun` 模式）
+  2. `import.meta.resolve("@earendil-works/pi-coding-agent")` → 读 `bin` 字段 → `spawn(process.execPath, [binPath, ...args])`
+  3. 兜底 `spawn("pi", args)`（从 PATH 走）
+- **非 Windows**：直接 `spawn("pi", args)`（不变）
+
+**注意**：参考项目用 `process.execPath` 启动的是 bun（不是编译版 exe 的虚拟路径），同时先用 `process.argv[1]` 或 `import.meta.resolve` 解析出**真实的 CLI 脚本路径**。虚拟路径出现时前两步会失败并降级到兜底，永远不会被实际传给子进程。详见 `resolveWindowsPiCliScript()`。
 
 **行动项**：
-- [ ] 修改 `getPiInvocation()` 增加 Windows 回退逻辑
-- [ ] 测试 `pi` 不在 PATH 时的行为
+- [x] 修改 `getPiInvocation()` 增加 Windows 回退逻辑
+- [ ] 在 Windows 上测试 `pi` 不在 PATH 时的行为
 
 ---
 
@@ -84,43 +91,25 @@
 
 ---
 
-### 5. Chain 链式执行
+### 5. ❌ Chain 链式执行 — 设计决策：不实现
 
-**现状**：不支持多步流水线。
+**理由**：pi-subagent 的设计原则是「主模型做决策，子代理执行具体任务」。链式编排意味着子代理之间传递上下文、多步流水线——这本质上是编排工作，应该由主模型来主导。主模型会在每步之后检查结果、决定下一步派谁。
 
-**参考做法**（`pi-subagents`）：
-- 支持 chain 模式：step1 → step2 → step3
-- 变量模板：`{task}`, `{previous}`, `{outputs.name}`
-- 澄清 TUI：执行前预览/编辑链参数
-- 保存的 `.chain.md` / `.chain.json` 工作流文件
-
-**典型流水线**：
+**替代方式**：主模型需要多步时，直接连续调用 `delegate` 即可，每步都可检查结果再决定下一步：
 ```
-clarify → planner → worker → fresh reviewers → worker
+主模型: delegate(explorer) → 返回结果 → 主模型检查 → delegate(worker) → ...
 ```
-
-**行动项**：
-- [ ] 设计 chain 参数 schema
-- [ ] 实现顺序执行引擎 + 变量传递
-- [ ] TUI 展示链式进度
-- [ ] 考虑是否支持保存/加载工作流
 
 ---
 
-### 6. Fork 上下文模式
+### 6. ❌ Fork 上下文模式 — 设计决策：不实现
 
-**现状**：所有子代理都是 fresh（干净上下文）。
+**理由**：fork 是为了让子代理「理解前因后果」后做判断——这更适合 planner/oracle 这类参谋角色。但 pi-subagent 的定位是**执行者**而非**参谋者**：
+- 主模型拥有最完整的上下文，决策应由主模型做出
+- 子代理只需要清晰的任务描述，不需要知道讨论历史
+- 如果某个子代理确实需要上下文，主模型可以在 task 描述中携带必要的背景信息
 
-**参考做法**（`pi-subagents`）：
-- `fresh`：干净子进程（当前行为）
-- `fork`：从父会话当前 leaf 分支出一个真实 session，子代理继承完整对话历史
-- planner 和 oracle 默认用 fork，因为它们需要理解父会话讨论的上下文
-- 自动推断：如果任一角色 defaultContext 为 fork，整个调用用 fork
-
-**行动项**：
-- [ ] 调研 pi 是否支持 session fork API
-- [ ] 设计 context 模式选择逻辑
-- [ ] 更新角色定义，为 planner/oracle 等角色标记 `defaultContext: "fork"`
+> 详见 `spawn.ts` 中 `getPiInvocation()` 设计权衡的分析：参考项目 nicobailon/pi-subagents 确实实现了 fork 模式，但那是为 planner/oracle 等决策角色服务的。我们的 4 个角色（explorer/reviewer/worker/researcher）全是执行型，fresh 上下文是正确选择。
 
 ---
 
@@ -177,14 +166,16 @@ clarify → planner → worker → fresh reviewers → worker
 
 ### 11. 更多内置角色
 
-**参考项目有 8 个**，当前只有 4 个。建议考虑：
+**参考项目有 8 个**，当前只有 4 个。参考项目额外有：`planner`、`oracle`、`context-builder`、`delegate`。
 
-| 新角色 | 用途 |
-|--------|------|
-| `planner` | 从上下文生成具体实施计划（只读，不编辑） |
-| `oracle` | 第二意见，挑战假设，推荐最安全的下一步 |
-| `context-builder` | 强化的上下文收集，输出 context.md + meta-prompt.md |
-| `delegate` | 轻量通用代理，行为接近父会话 |
+**设计决策**：`planner` 和 `oracle` 是参谋型角色（需要理解全局上下文），不匹配 pi-subagent「执行者」的定位，**不引入**。
+
+可以考虑引入的：
+
+| 新角色 | 用途 | 是否执行型 |
+|--------|------|-----------|
+| `context-builder` | 强化的上下文收集，输出 context.md | ✅ 执行型（收集信息输出文件） |
+| `delegate` | 轻量通用代理，行为接近父会话 | ⚠️ 与现有 4 角色分工重叠 |
 
 ---
 

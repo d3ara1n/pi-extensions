@@ -59,5 +59,6 @@ export function loadSubagentConfig(cwd?: string): SubagentConfig {
 			role: rawSummary?.role ?? DEFAULT_CONFIG.summary.role,
 			enabled: rawSummary?.enabled ?? DEFAULT_CONFIG.summary.enabled,
 		},
+		agentOverrides: raw.agentOverrides ?? {},
 	};
 }

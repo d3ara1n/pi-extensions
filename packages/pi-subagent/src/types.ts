@@ -6,6 +6,12 @@
 export interface SubagentConfig {
   timeoutMs: number;
   summary: SubagentSummaryConfig;
+  /**
+   * Per-role overrides from settings.json. Keyed by role name.
+   * - Override built-in roles: provide fields to merge.
+   * - Disable built-in roles: set `disabled: true`.
+   */
+  agentOverrides: Record<string, Partial<SubagentRole> & { disabled?: boolean }>;
 }
 
 export interface SubagentSummaryConfig {
@@ -16,6 +22,7 @@ export interface SubagentSummaryConfig {
 export const DEFAULT_CONFIG: SubagentConfig = {
   timeoutMs: 300_000,
   summary: { role: "utility", enabled: true },
+  agentOverrides: {},
 };
 
 /** A built-in subagent role definition. */

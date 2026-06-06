@@ -77,17 +77,12 @@
 
 ### 4. Agent 覆盖系统
 
-**现状**：内置角色在 `roles.ts` 中硬编码，用户想改模型或工具必须改源码。
-
-**参考做法**（`pi-subagents`）：
-- `settings.json` 中 `subagents.agentOverrides.<name>` 可覆盖 model/thinking/tools/skills/systemPrompt/disabled
-- 不需要复制整个 agent 定义文件
-- 支持批量禁用内置角色 (`disableBuiltins: true`)
+**现状**：~~内置角色在 `roles.ts` 中硬编码，用户想改模型或工具必须改源码。~~
 
 **行动项**：
-- [ ] 设计 override schema
-- [ ] 修改配置加载逻辑，合并 override 到内置角色
-- [ ] 允许用户在 settings 中添加自定义角色
+- [x] 设计 override schema → `SubagentConfig.agentOverrides`
+- [x] `session_start` 中加载 config 后合并 override 到内置角色
+- [x] 支持禁用角色 (`disabled: true`) 和自定义角色
 
 ---
 

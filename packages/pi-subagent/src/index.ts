@@ -19,7 +19,7 @@ import type { SubagentConfig, SubagentDetails, SubagentResult, SubagentRole } fr
 import { DEFAULT_CONFIG } from "./types.ts";
 import { loadSubagentConfig } from "./config.ts";
 import { BUILTIN_ROLES } from "./roles.ts";
-import { spawnSubagent } from "./spawn.ts";
+import { spawnSubagent, getPiInvocation } from "./spawn.ts";
 import * as os from "node:os";
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -539,6 +539,64 @@ export default function subagentExtension(pi: ExtensionAPI) {
 				if (usageStr) text += `\n${theme.fg("dim", usageStr)}`;
 			}
 			return new Text(text, 0, 0);
+		},
+	});
+
+	pi.registerCommand({
+		name: "subagent:doctor",
+		description: "Diagnose pi-subagent configuration and dependencies",
+		async execute(_args, ctx) {
+			const lines: string[] = [];
+			let allOk = true;
+
+			// 1. pi executable
+			const inv = getPiInvocation(["--version"]);
+			lines.push(`[\u2713] pi invocation: ${inv.command} ${inv.args.slice(0, 1).join(" ")}`);
+
+			// 2. pi-model-roles
+			try {
+				const api = getModelRolesAPI();
+				lines.push("[\u2713] pi-model-roles: loaded");
+
+				// 3. config
+				try {
+					const cfg = loadSubagentConfig(ctx.cwd);
+					lines.push(`[\u2713] config: timeout=${cfg.timeoutMs}ms summary=${cfg.summary.enabled ? cfg.summary.role : "off"}`);
+				} catch {
+					lines.push("[\u2717] config: failed to load");
+					allOk = false;
+				}
+
+				// 4. roles
+				for (const [name, role] of Object.entries(availableRoles)) {
+					try {
+						const resolved = await api.resolveRoleAsync(role.role);
+						if (resolved.model) {
+							lines.push(`[\u2713] role ${name}: \u2192 ${resolved.model.provider}/${resolved.model.id}`);
+						} else {
+							lines.push(`[\u2717] role ${name}: model not resolved (role config: ${role.role})`);
+							allOk = false;
+						}
+					} catch {
+						lines.push(`[\u2717] role ${name}: resolution failed`);
+						allOk = false;
+					}
+				}
+			} catch {
+				lines.push("[\u2717] pi-model-roles: not initialized");
+				allOk = false;
+			}
+
+			// 5. ALLOWLIST
+			const allowed = process.env.PI_SUBAGENT_ALLOWED;
+			if (allowed) {
+				lines.push(`[i] PI_SUBAGENT_ALLOWED: ${allowed}`);
+			}
+
+			const summary = allOk ? "All checks passed" : "Some checks failed";
+			return {
+				content: [{ type: "text", text: `${summary}\n\n${lines.join("\n")}` }],
+			};
 		},
 	});
 }

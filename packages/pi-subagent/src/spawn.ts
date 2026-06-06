@@ -102,7 +102,7 @@ function resolveWindowsPiCliScript(args: string[]): { command: string; args: str
  * (virtual Bun path like B:/~BUN/root/pi.exe) ever being passed
  * to the child process, while still working when `pi` is not in PATH.
  */
-function getPiInvocation(args: string[]): { command: string; args: string[] } {
+export function getPiInvocation(args: string[]): { command: string; args: string[] } {
 	if (process.platform === "win32") {
 		const winResult = resolveWindowsPiCliScript(args);
 		if (winResult) return winResult;

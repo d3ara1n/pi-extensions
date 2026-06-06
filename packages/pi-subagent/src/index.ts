@@ -222,10 +222,10 @@ export default function subagentExtension(pi: ExtensionAPI) {
 	// For promptGuidelines: only list roles the LLM is allowed to use
 	const roleGuidelines = Object.entries(availableRoles).map(([name, role]) => {
 		switch (name) {
-			case "explorer": return "  - explorer: codebase exploration, reading files, answering 'where is X?' questions. READ-ONLY.";
-			case "reviewer": return "  - reviewer: deep code review, bug analysis, architecture assessment. READ-ONLY.";
-			case "worker": return "  - worker: ANY task that requires creating, editing, or writing files. Can delegate to explorer/researcher.";
-			case "researcher": return "  - researcher: web research, documentation lookup, GitHub repo analysis.";
+			case "explorer": return "  - explorer: READ-ONLY codebase exploration — locate files, grep symbols, trace imports, explain structures. Tools: read, find, grep, glob. NO bash, NO edits, NO web access.";
+			case "reviewer": return "  - reviewer: READ-ONLY code review & analysis — audit code, assess architecture, review diffs. Tools: read, bash, grep, glob. Has bash (git diff/log, test runs). NO edits, NO web access.";
+			case "worker": return "  - worker: the ONLY role that can MODIFY files — edit, write, refactor, fix, implement. Tools: read, bash, edit, write, grep, glob, delegate. Can delegate to explorer/researcher.";
+			case "researcher": return "  - researcher: the ONLY role with WEB ACCESS — search docs, fetch pages, analyze GitHub repos. Tools: web_search, fetch_content, read, bash, delegate. Can clone repos & delegate to explorer.";
 			default: return `  - ${name}: ${role.systemPrompt.split(".")[0]}`;
 		}
 	});
@@ -243,9 +243,22 @@ export default function subagentExtension(pi: ExtensionAPI) {
 		description: "Delegate a task to a specialized subagent with isolated context. Subagents have NO context from the current conversation — include all necessary context in the task description.",
 		promptSnippet: "Delegate tasks to specialized subagents",
 		promptGuidelines: [
-			"Role selection (choose exactly one based on the task):",
+			"Role selection — each role has a distinct tool set. Choose by the PRIMARY action required:",
 			...roleGuidelines,
-			...(hasReadOnlyRoles && hasWorkerRole ? ["CRITICAL: If the task involves modifying ANY file, you MUST use 'worker'. 'explorer' and 'reviewer' are READ-ONLY."] : []),
+			"",
+			"DECISION GUIDE (in priority order):",
+			"  1. Task requires modifying files? → worker (the ONLY role with edit/write)",
+			"  2. Task requires web search or external documentation? → researcher (the ONLY role with web access)",
+			"  3. Task requires running git commands or tests? → reviewer (has bash; explorer does not)",
+			"  4. Pure codebase exploration (read, grep, locate)? → explorer (lightweight, no bash)",
+			...(hasReadOnlyRoles && hasWorkerRole ? [
+				"",
+				"CRITICAL: If the task involves modifying ANY file, you MUST use 'worker'. 'explorer' and 'reviewer' are READ-ONLY.",
+				"",
+				"AMBIGUOUS TASKS (e.g. 'optimize query performance'):",
+				"  - 'find the cause' / 'investigate and report' → explorer or reviewer (read-only fact-finding)",
+				"  - 'fix it' / 'investigate and fix' → worker (worker explores internally via delegate)",
+			] : []),
 			"For multiple independent subagent tasks, emit multiple `delegate` tool calls in the same turn — they run in parallel automatically.",
 			"Subagents have NO context from the current conversation — include ALL necessary context in the task description.",
 		],

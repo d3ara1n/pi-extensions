@@ -12,6 +12,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { SubagentMessage, SubagentResult } from "./types.ts";
 
+/** Maximum task length before writing to a temp file (avoids CLI arg limits). */
+const TASK_CHAR_LIMIT = 8000;
+
+/** Maximum output characters returned to the main model. Larger outputs are truncated. */
+const MAX_OUTPUT_CHARS = 50_000;
+
 /** Determine how to invoke pi.
  *
  * Always uses the `pi` CLI command. On Windows with Bun-compiled pi,
@@ -21,15 +27,6 @@ import type { SubagentMessage, SubagentResult } from "./types.ts";
  */
 function getPiInvocation(args: string[]): { command: string; args: string[] } {
 	return { command: "pi", args };
-}
-
-/** Write a system prompt to a temp file for --append-system-prompt. */
-async function writeTempPromptFile(prefix: string, content: string): Promise<{ dir: string; filePath: string }> {
-	const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-subagent-"));
-	const safeName = prefix.replace(/[^\w.-]+/g, "_");
-	const filePath = path.join(tmpDir, `prompt-${safeName}.md`);
-	await fs.promises.writeFile(filePath, content, { encoding: "utf-8", mode: 0o600 });
-	return { dir: tmpDir, filePath };
 }
 
 /**
@@ -74,14 +71,25 @@ export async function spawnSubagent(
 			args.push("--tools", options.tools.join(","));
 		}
 
+		// Ensure temp dir exists if needed for prompt or long task
+		const needTmpDir = options.systemPrompt?.trim() || task.length > TASK_CHAR_LIMIT;
+		if (needTmpDir) {
+			tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-subagent-"));
+		}
+
 		if (options.systemPrompt?.trim()) {
-			const tmp = await writeTempPromptFile("delegate", options.systemPrompt);
-			tmpDir = tmp.dir;
-			tmpFile = tmp.filePath;
+			tmpFile = path.join(tmpDir!, "prompt.md");
+			await fs.promises.writeFile(tmpFile, options.systemPrompt, { encoding: "utf-8", mode: 0o600 });
 			args.push("--append-system-prompt", tmpFile);
 		}
 
-		args.push(`Task: ${task}`);
+		if (task.length > TASK_CHAR_LIMIT) {
+			const taskPath = path.join(tmpDir!, "task.md");
+			await fs.promises.writeFile(taskPath, task, { encoding: "utf-8", mode: 0o600 });
+			args.push(`@${taskPath}`);
+		} else {
+			args.push(`Task: ${task}`);
+		}
 
 		// Spawn process
 		const invocation = getPiInvocation(args);
@@ -198,6 +206,11 @@ export async function spawnSubagent(
 
 		result.exitCode = exitCode;
 		if (wasAborted) throw new Error("Subagent was aborted");
+
+		// Truncate large outputs to avoid flooding the main model's context
+		if (result.output.length > MAX_OUTPUT_CHARS) {
+			result.output = `[Output truncated — ${result.output.length} chars total]\n\n` + result.output.slice(-MAX_OUTPUT_CHARS);
+		}
 	} finally {
 		// Cleanup temp files
 		if (tmpFile) try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }

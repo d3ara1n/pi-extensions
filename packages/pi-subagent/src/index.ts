@@ -210,19 +210,18 @@ export default function subagentExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "delegate",
 		label: "Delegate to subagent",
-		description: [
-			"Delegate a task to a specialized subagent with isolated context.",
-			"Available roles:",
-			"  - explorer: fast code search and navigation (read-only)",
-			"  - reviewer: deep code review with evidence (read-only)",
-			"  - worker: implementation with file editing capabilities",
-			"  - researcher: web research and documentation lookup",
-			"",
-			"Progress is shown in real-time via TUI (tool calls, turns, elapsed time).",
-			"Use Ctrl+O on a completed result to see full details.",
-			"",
-			"Note: Subagents only have built-in tools (read, bash, edit, write, grep, glob, find, web_search, fetch_content). They do NOT have access to MCP tools or custom tools from the main session.",
-		].join("\n"),
+		description: "Delegate a task to a specialized subagent with isolated context. Subagents have NO context from the current conversation — include all necessary context in the task description.",
+		promptSnippet: "Delegate tasks to specialized subagents",
+		promptGuidelines: [
+			"Role selection (choose exactly one based on the task):",
+			"  - explorer: codebase exploration, reading files, answering 'where is X?' questions. READ-ONLY (read, grep, find, glob).",
+			"  - reviewer: deep code review, bug analysis, architecture assessment. READ-ONLY (read, bash, grep, glob).",
+			"  - worker: ANY task that requires creating, editing, or writing files. Has full editing tools.",
+			"  - researcher: web research, documentation lookup, finding online resources.",
+			"CRITICAL: If the task involves modifying ANY file, you MUST use 'worker'. 'explorer' and 'reviewer' are READ-ONLY.",
+			"For multiple independent subagent tasks, emit multiple `delegate` tool calls in the same turn — they run in parallel automatically.",
+			"Subagents have NO context from the current conversation — include ALL necessary context in the task description.",
+		],
 
 		parameters: Type.Object({
 			role: Type.Union(

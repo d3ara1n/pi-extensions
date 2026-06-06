@@ -230,9 +230,6 @@ export default function subagentExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	const hasReadOnlyRoles = availableRoles.explorer || availableRoles.reviewer;
-	const hasWorkerRole = !!availableRoles.worker;
-
 	pi.on("session_start", async (_event, ctx) => {
 		config = loadSubagentConfig(ctx.cwd);
 	});
@@ -240,27 +237,36 @@ export default function subagentExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "delegate",
 		label: "Delegate to subagent",
-		description: "Delegate a task to a specialized subagent with isolated context. Subagents have NO context from the current conversation — include all necessary context in the task description.",
+		description: "Offload work to a specialized subagent to keep your own context clean and focused. Prefer this over doing work yourself when a task would generate many tool calls or verbose output. Subagents have isolated context — include all necessary info in the task description.",
 		promptSnippet: "Delegate tasks to specialized subagents",
 		promptGuidelines: [
-			"Role selection — each role has a distinct tool set. Choose by the PRIMARY action required:",
+			"WHEN TO DELEGATE — offload work to keep your own context clean and focused:",
+			"",
+			"- Any task requiring 3+ file reads or tool calls → delegate. Don't fill your context with raw exploration or verbose output.",
+			"- File modifications (edit/write/refactor) → delegate to worker. Your context stays focused on the user's intent, not implementation details.",
+			"- Code review or audit → delegate to reviewer. Review output is longform; keep it isolated.",
+			"- Web or GitHub research → delegate to researcher. Search results are noisy; let the researcher summarize.",
+			"- Exploratory investigation → delegate to explorer. You only need the conclusion, not every file trace.",
+			"",
+			"AVAILABLE ROLES:",
 			...roleGuidelines,
 			"",
-			"DECISION GUIDE (in priority order):",
-			"  1. Task requires modifying files? → worker (the ONLY role with edit/write)",
-			"  2. Task requires web search or external documentation? → researcher (the ONLY role with web access)",
-			"  3. Task requires running git commands or tests? → reviewer (has bash; explorer does not)",
-			"  4. Pure codebase exploration (read, grep, locate)? → explorer (lightweight, no bash)",
-			...(hasReadOnlyRoles && hasWorkerRole ? [
-				"",
-				"CRITICAL: If the task involves modifying ANY file, you MUST use 'worker'. 'explorer' and 'reviewer' are READ-ONLY.",
-				"",
-				"AMBIGUOUS TASKS (e.g. 'optimize query performance'):",
-				"  - 'find the cause' / 'investigate and report' → explorer or reviewer (read-only fact-finding)",
-				"  - 'fix it' / 'investigate and fix' → worker (worker explores internally via delegate)",
-			] : []),
-			"For multiple independent subagent tasks, emit multiple `delegate` tool calls in the same turn — they run in parallel automatically.",
-			"Subagents have NO context from the current conversation — include ALL necessary context in the task description.",
+			"CONCRETE EXAMPLES:",
+			"",
+			"  delegate(explorer):  \"Find where auth middleware is implemented\", \"Map the routing structure\"",
+			"  delegate(reviewer):  \"Review the error handling in src/api/ for security issues\", \"Audit this PR diff for performance regressions\"",
+			"  delegate(worker):    \"Rename all snake_case fields to camelCase\", \"Add input validation to POST /login\"",
+			"  delegate(researcher): \"Find the React 19 migration guide\", \"Check GitHub issue #1234 for context\"",
+			"",
+			"DECISION FLOW:",
+			"",
+			"  Task modifies files?                     → delegate(worker)",
+			"  Task searches web or GitHub?             → delegate(researcher)",
+			"  Task audits or reviews code quality?     → delegate(reviewer)",
+			"  Task finds or maps code without touch?    → delegate(explorer)",
+			"",
+			"For multiple independent tasks, emit multiple delegate calls in one turn — they run in parallel.",
+			"Include ALL necessary context — subagents have no access to this conversation.",
 		],
 
 		parameters: Type.Object({

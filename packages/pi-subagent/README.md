@@ -83,11 +83,31 @@ All fields are optional. Defaults: `timeoutMs: 300000`, `summary.role: "utility"
 
 ## Usage (by the main model)
 
+Delegate tasks that would generate many tool calls or verbose output to keep your own context clean:
+
 ```json
 {
   "role": "explorer",
   "task": "Find all files that import the ModelRegistry and trace how they use it"
 }
+```
+
+**Role-specific examples:**
+
+| Role | Example task | Why delegate? |
+|------|-------------|---------------|
+| `explorer` | `"Map the routing structure of src/api/"` | You only need the conclusion, not every grep result |
+| `reviewer` | `"Review error handling in auth.ts for security issues"` | Review output is longform; keep it isolated |
+| `worker` | `"Rename all snake_case fields to camelCase in src/models/"` | Your context stays focused on high-level intent |
+| `researcher` | `"Find the React 19 migration guide and summarize breaking changes"` | Search results are noisy; get a clean summary |
+
+**Parallel usage:** emit multiple `delegate` calls in a single turn:
+
+```json
+[
+  { "role": "explorer", "task": "Map the repository structure" },
+  { "role": "researcher", "task": "Find latest docs on the library used here" }
+]
 ```
 
 ## License

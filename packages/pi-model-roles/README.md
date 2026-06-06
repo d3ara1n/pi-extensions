@@ -24,9 +24,9 @@ Built-in defaults use `model: null` (use pi's current model, don't switch):
 
 | Role | model | thinking | Description |
 |------|-------|----------|-------------|
-| `default` | null | medium | Daily coding |
-| `heavy` | null | high | Architecture, deep debugging |
-| `fast` | null | low | Quick edits, simple Q&A |
+| `default` | null | medium | Regular dev tasks: new features, code edits, code review, adding tests, general debugging, single-file changes |
+| `heavy` | null | high | Deep-thinking tasks: cross-file refactoring, architecture design, complex bug debugging, performance optimization, security analysis, DB schema changes, multi-module migrations |
+| `fast` | null | low | Simple deterministic tasks: one-line edits, formatting, simple Q&A, doc lookups, git operations, confirmations |
 | `utility` | null | off | Lightweight utility tasks: routing, commit gen, title summarization |
 
 `model: null` means "keep using whatever model pi currently has".

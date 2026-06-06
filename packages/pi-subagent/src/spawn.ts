@@ -207,14 +207,15 @@ export async function spawnSubagent(
 		result.exitCode = exitCode;
 		if (wasAborted) throw new Error("Subagent was aborted");
 
-		// Truncate large outputs to avoid flooding the main model's context
+		// Truncate large outputs: keep head (findings) + tail (summary), drop middle
 		if (result.output.length > MAX_OUTPUT_CHARS) {
-			result.output = `[Output truncated — ${result.output.length} chars total]\n\n` + result.output.slice(-MAX_OUTPUT_CHARS);
+			const head = result.output.slice(0, 30_000);
+			const tail = result.output.slice(-(MAX_OUTPUT_CHARS - 30_050));
+			result.output = `[Output truncated — ${result.output.length} chars total]\n\n${head}\n\n... [truncated] ...\n\n${tail}`;
 		}
 	} finally {
-		// Cleanup temp files
-		if (tmpFile) try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
-		if (tmpDir) try { fs.rmdirSync(tmpDir); } catch { /* ignore */ }
+		// Cleanup temp directory and all contents
+		if (tmpDir) try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
 	}
 
 	return result;

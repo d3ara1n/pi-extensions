@@ -52,7 +52,7 @@ export async function generateSessionName(
 	try {
 		const result = await complete(sideModel, {
 			systemPrompt,
-			messages: [{ role: "user", content: truncatedPrompt }],
+			messages: [{ role: "user", content: truncatedPrompt, timestamp: Date.now() }],
 		}, options);
 
 		const raw = result.content

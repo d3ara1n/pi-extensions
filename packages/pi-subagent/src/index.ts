@@ -188,7 +188,7 @@ async function generateSummary(
 			{
 				systemPrompt:
 					"Summarize the following agent output in one concise Chinese sentence (max 60 characters). Focus on what was accomplished, not how. Output only the summary, no preamble.",
-				messages: [{ role: "user", content: summaryInput }],
+				messages: [{ role: "user", content: summaryInput, timestamp: Date.now() }],
 			},
 			{
 				maxTokens: 100,
@@ -338,6 +338,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 							text: `Unknown subagent role: ${params.role}. Available: ${Object.keys(availableRoles).join(", ")}`,
 						},
 					],
+					details: undefined as any,
 				};
 			}
 
@@ -348,6 +349,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			} catch {
 				return {
 					content: [{ type: "text", text: "pi-model-roles is not initialized. Cannot resolve model for subagent." }],
+					details: undefined as any,
 				};
 			}
 
@@ -355,6 +357,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			if (!resolved.model) {
 				return {
 					content: [{ type: "text", text: `Role "${roleDef.role}" could not be resolved. Model not available.` }],
+					details: undefined as any,
 				};
 			}
 
@@ -541,7 +544,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 						container.addChild(
 							new Text(
 								theme.fg("muted", "\u2192 ") +
-									formatToolCall(item.name, item.args, theme.fg.bind(theme)),
+									formatToolCall(item.name, item.args, theme.fg.bind(theme) as (color: string, text: string) => string),
 								0,
 								0,
 							),
@@ -573,7 +576,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 				if (toolCalls.length === 0) {
 					text += `\n${theme.fg("muted", "(running...)")}`;
 				} else {
-					const rendered = renderDisplayItems(toolCalls, 5, theme.fg.bind(theme));
+					const rendered = renderDisplayItems(toolCalls, 5, theme.fg.bind(theme) as (color: string, text: string) => string);
 					if (rendered) text += `\n${rendered}`;
 				}
 			} else {

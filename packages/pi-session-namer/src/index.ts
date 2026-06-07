@@ -67,7 +67,6 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
 		);
 
 		pi.setSessionName(name);
-		console.log(`[pi-session-namer] Session named: ${name}`);
 	});
 
 	// ── /namer — show status ────────────────────────────────────────

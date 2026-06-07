@@ -7,12 +7,11 @@
 
 import { complete } from "@earendil-works/pi-ai";
 import type { ScoutDecision } from "./types.ts";
-import { buildScoutUserMessage } from "./scout-prompt.ts";
 
-/** Minimal type for side agent context — avoids importing pi-ai types directly. */
+/** Minimal type for side agent context — matches pi-ai's Context interface. */
 interface SideAgentContext {
 	systemPrompt?: string;
-	messages: Array<{ role: string; content: string }>;
+	messages: Array<{ role: "user"; content: string; timestamp: number }>;
 }
 
 /**
@@ -22,8 +21,7 @@ interface SideAgentContext {
  * @param apiKey - API key for the side model
  * @param headers - Custom headers for the side model
  * @param systemPrompt - Scout system prompt (includes skills/roles for cache friendliness)
- * @param userPrompt - The user's original prompt text
- * @param currentRole - Current active role name
+ * @param userMessage - Fully assembled user message (includes context, current role, user prompt)
  * @returns Parsed ScoutDecision, or a safe fallback on error
  */
 export async function callSideAgent(
@@ -31,8 +29,7 @@ export async function callSideAgent(
 	apiKey: string | undefined,
 	headers: Record<string, string> | undefined,
 	systemPrompt: string,
-	userPrompt: string,
-	currentRole: string,
+	userMessage: string,
 ): Promise<ScoutDecision> {
 	const fallback: ScoutDecision = { skills: [], role: null, reasoning: "side agent error" };
 
@@ -41,7 +38,8 @@ export async function callSideAgent(
 		messages: [
 			{
 				role: "user",
-				content: buildScoutUserMessage(userPrompt, currentRole),
+				content: userMessage,
+				timestamp: Date.now(),
 			},
 		],
 	};

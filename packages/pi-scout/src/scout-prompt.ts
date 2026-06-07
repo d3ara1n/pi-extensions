@@ -1,24 +1,46 @@
 /**
- * Side agent system prompt — instructs the model to return a structured JSON decision.
+ * Side agent prompt construction — system prompt and user message.
  */
 
 import type { ScoutConfig } from "./types.ts";
 
+/** Previous turn context for better routing decisions. */
+export interface PrevTurnContext {
+	userPrompt: string;
+	assistantSummary: string;
+}
+
 /**
  * Build the user message for the side agent.
- * Only contains per-turn variable content — stable data lives in the system prompt
- * so it can be prompt-cached across turns.
+ *
+ * Includes previous turn context (when available) so the side agent can
+ * understand follow-up prompts like "continue", "change that", etc.
  */
 export function buildScoutUserMessage(
 	userPrompt: string,
 	currentRole: string,
+	prevTurn?: PrevTurnContext,
 ): string {
-	return [
-		`Current role: ${currentRole}`,
-		``,
-		`User prompt:`,
-		userPrompt,
-	].join("\n");
+	const parts: string[] = [];
+
+	parts.push(`Current role: ${currentRole}`);
+
+	if (prevTurn && (prevTurn.userPrompt || prevTurn.assistantSummary)) {
+		parts.push(``);
+		parts.push(`## Previous Turn`);
+		if (prevTurn.userPrompt) {
+			parts.push(`User: ${prevTurn.userPrompt}`);
+		}
+		if (prevTurn.assistantSummary) {
+			parts.push(`Assistant: ${prevTurn.assistantSummary}`);
+		}
+	}
+
+	parts.push(``);
+	parts.push(`## Current User Prompt`);
+	parts.push(userPrompt);
+
+	return parts.join("\n");
 }
 
 /**
@@ -53,6 +75,7 @@ export function buildScoutSystemPrompt(
 	parts.push(`- "role" should be null if the current role is appropriate.`);
 	parts.push(`- Only suggest a role change when the task clearly benefits from a different model.`);
 	parts.push(`- Be conservative: prefer fewer skills and no role change when uncertain.`);
+	parts.push(`- Use the Previous Turn context to understand follow-up requests (e.g. "continue", "change that", "no, the other one").`);
 
 	if (!config.modules.modelRouter) {
 		parts.push(`- IMPORTANT: model routing is disabled. Always return role: null.`);

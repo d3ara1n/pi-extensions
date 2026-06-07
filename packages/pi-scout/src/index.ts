@@ -17,7 +17,7 @@ import type { ScoutConfig, ScoutDecision } from "./types.ts";
 import { DEFAULT_CONFIG } from "./types.ts";
 import { loadScoutConfig } from "./config.ts";
 import { callSideAgent } from "./side-agent.ts";
-import { buildScoutSystemPrompt } from "./scout-prompt.ts";
+import { buildScoutSystemPrompt, buildScoutUserMessage } from "./scout-prompt.ts";
 import { filterSkillsBlock, resetSkillCache } from "./skill-inject.ts";
 import { switchToRole } from "./model-switch.ts";
 
@@ -47,6 +47,9 @@ function formatDecisionStatus(decision: ScoutDecision, theme: any): string {
 export default function scoutExtension(pi: ExtensionAPI) {
 	let config: ScoutConfig = DEFAULT_CONFIG;
 	let lastDecision: ScoutDecision | undefined;
+
+	/** Cache of previous turn context for better routing decisions. */
+	let prevTurn: { userPrompt: string; assistantSummary: string } | undefined;
 
 	function tryGetRolesApi(ctx: ExtensionContext): ModelRolesAPI | undefined {
 		try {
@@ -132,10 +135,10 @@ export default function scoutExtension(pi: ExtensionAPI) {
 		parameters: { type: "object", properties: {}, required: [] } as any,
 		async execute() {
 			if (cachedAllSkills.length === 0) {
-				return { content: [{ type: "text", text: "No skills available." }] };
+				return { content: [{ type: "text", text: "No skills available." }], details: undefined as any };
 			}
 			const lines = cachedAllSkills.map((s) => `- **${s.name}**: ${s.description}`);
-			return { content: [{ type: "text", text: lines.join("\n") }] };
+			return { content: [{ type: "text", text: lines.join("\n") }], details: undefined as any };
 		},
 	});
 
@@ -143,11 +146,35 @@ export default function scoutExtension(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		config = loadScoutConfig(ctx.cwd);
 		resetSkillCache();
+		prevTurn = undefined;
 	});
 
-	// ── Clear status at turn start ──────────────────────────────────
-	pi.on("turn_start", async () => {
-		// Will be overwritten by before_agent_start if scout runs
+	// ── turn_end: cache assistant response for next turn's context ──
+	pi.on("turn_end", async (event) => {
+		const msg = event.message;
+		if (msg.role !== "assistant") return;
+
+		// Extract text content, skip thinking blocks and tool calls
+		const textParts: string[] = [];
+		for (const block of msg.content) {
+			if ("type" in block && block.type === "text" && "text" in block) {
+				textParts.push(block.text);
+			}
+		}
+		const fullText = textParts.join("");
+		if (!fullText.trim()) return;
+
+		// Truncate to avoid bloating the side agent context
+		const MAX_SUMMARY = 500;
+		const assistantSummary = fullText.length > MAX_SUMMARY
+			? fullText.slice(0, MAX_SUMMARY) + "..."
+			: fullText;
+
+		// before_agent_start already created/updated prevTurn with the user prompt.
+		// We just fill in the assistant summary here.
+		if (prevTurn) {
+			prevTurn.assistantSummary = assistantSummary;
+		}
 	});
 
 	// ── before_agent_start: core scout logic ────────────────────────
@@ -204,15 +231,23 @@ export default function scoutExtension(pi: ExtensionAPI) {
 			.map(([name, cfg]: [string, any]) => `- ${name}: ${cfg.description ?? "(no description)"}${cfg.model ? ` (model: ${cfg.model})` : " (current model)"}`)
 			.join("\n");
 
-		// 4. Call side agent
+		// 4. Build user message with conversation context
+		const prevTurnContext = prevTurn?.assistantSummary
+			? { userPrompt: prevTurn.userPrompt, assistantSummary: prevTurn.assistantSummary }
+			: undefined;
+		const userMessage = buildScoutUserMessage(event.prompt, currentRole, prevTurnContext);
+
+		// Reset prevTurn for the current turn — user prompt now, assistant filled by turn_end
+		prevTurn = { userPrompt: event.prompt, assistantSummary: "" };
+
+		// 5. Call side agent
 		const scoutSystemPrompt = buildScoutSystemPrompt(config, skillsList, rolesList);
 		const decision = await callSideAgent(
 			sideResolved.model,
 			sideResolved.apiKey,
 			sideResolved.headers,
 			scoutSystemPrompt,
-			event.prompt,
-			currentRole,
+			userMessage,
 		);
 
 		lastDecision = decision;
@@ -220,7 +255,7 @@ export default function scoutExtension(pi: ExtensionAPI) {
 		let systemPrompt = event.systemPrompt;
 		let switchedRole: string | undefined;
 
-		// 4. skill-router: filter skills XML to only selected ones
+		// 6. skill-router: filter skills XML to only selected ones
 		if (config.modules.skillRouter) {
 			systemPrompt = filterSkillsBlock(
 				systemPrompt,
@@ -229,7 +264,7 @@ export default function scoutExtension(pi: ExtensionAPI) {
 			);
 		}
 
-		// 5. model-router: switch model if side agent recommends a different role
+		// 7. model-router: switch model if side agent recommends a different role
 		if (config.modules.modelRouter && decision.role && decision.role !== currentRole) {
 			const switched = await switchToRole(pi, decision.role, rolesApi);
 			if (switched) {
@@ -241,10 +276,10 @@ export default function scoutExtension(pi: ExtensionAPI) {
 			}
 		}
 
-		// 6. Show result in status bar
+		// 8. Show result in status bar
 		ctx.ui.setStatus(STATUS_KEY, formatDecisionStatus(decision, theme));
 
-		// 7. Return modified system prompt
+		// 9. Return modified system prompt
 		if (systemPrompt !== event.systemPrompt) {
 			return { systemPrompt };
 		}

@@ -8,6 +8,9 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
     "typebox": "^1.1.38",
     "typescript": "^6.0.3"
   }

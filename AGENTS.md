@@ -90,7 +90,7 @@ const roles: ModelRolesAPI = getModelRolesAPI();  // 完整类型推导
 
 ### settings.json 中的插件配置结构
 
-插件配置字段名约定与包名一致（去掉 `@d3ara1n/pi-` 前缀）：
+插件配置字段名约定：去掉 `@d3ara1n/pi-` 前缀后**转 camelCase**：
 
 ```jsonc
 {

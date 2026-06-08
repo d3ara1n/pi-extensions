@@ -1,0 +1,33 @@
+{
+  "name": "@d3ara1n/pi-command-palette",
+  "version": "0.1.0",
+  "description": "Global command palette for pi — press Ctrl+Shift+P to search and run commands from anywhere",
+  "main": "src/index.ts",
+  "keywords": [
+    "pi-package",
+    "pi"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/d3ara1n/pi-extensions",
+    "directory": "packages/pi-command-palette"
+  },
+  "license": "MIT"
+}

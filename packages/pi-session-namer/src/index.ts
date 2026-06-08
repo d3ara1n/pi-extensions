@@ -44,29 +44,32 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
 		// 标记为已处理（无论后续成功与否，不重试）
 		hasNamed = true;
 
-		let rolesApi;
-		try {
-			rolesApi = getModelRolesAPI();
-		} catch {
-			console.warn("[pi-session-namer] pi-model-roles not initialized — skipping");
-			return;
-		}
+		// 异步命名，不阻塞主 agent 启动
+		(async () => {
+			let rolesApi;
+			try {
+				rolesApi = getModelRolesAPI();
+			} catch {
+				console.warn("[pi-session-namer] pi-model-roles not initialized — skipping");
+				return;
+			}
 
-		const resolved = await rolesApi.resolveRoleAsync(config.sideAgentRole);
-		if (!resolved.model) {
-			console.warn(`[pi-session-namer] Side agent role "${config.sideAgentRole}" not available — skipping`);
-			return;
-		}
+			const resolved = await rolesApi.resolveRoleAsync(config.sideAgentRole);
+			if (!resolved.model) {
+				console.warn(`[pi-session-namer] Side agent role "${config.sideAgentRole}" not available — skipping`);
+				return;
+			}
 
-		const name = await generateSessionName(
-			resolved.model,
-			resolved.apiKey,
-			resolved.headers,
-			config,
-			event.prompt,
-		);
+			const name = await generateSessionName(
+				resolved.model,
+				resolved.apiKey,
+				resolved.headers,
+				config,
+				event.prompt,
+			);
 
-		pi.setSessionName(name);
+			pi.setSessionName(name);
+		})().catch((err) => console.warn("[pi-session-namer] naming failed:", err));
 	});
 
 	// ── /namer — show status ────────────────────────────────────────

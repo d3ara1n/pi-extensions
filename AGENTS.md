@@ -82,7 +82,7 @@ const roles: ModelRolesAPI = getModelRolesAPI();  // 完整类型推导
 
 - 不要同时使用 symlinks（`~/.pi/agent/extensions/` 目录）和 settings.json，会导致重复加载
 - `package.json` 中 `"pi": { "extensions": ["./src/index.ts"] }` 告诉 pi 哪个文件是 extension 入口
-- `"keywords": ["pi-package"]` 是发布到 npm 的标识，本地开发不需要
+- `"keywords": ["pi-package", "pi"]` — 所有 pi 插件必须包含这两个 keywords，`pi-package` 是 npm 发布标识，`pi` 用于 npm 搜索发现
 
 ### 依赖库插件的加载顺序
 

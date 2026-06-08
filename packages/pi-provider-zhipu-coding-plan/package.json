@@ -3,7 +3,8 @@
   "version": "1.2.0",
   "description": "Zhipu AI Coding Plan provider for pi — auto-discovers models, reports usage quota",
   "keywords": [
-    "pi-package"
+    "pi-package",
+    "pi"
   ],
   "main": "index.ts",
   "dependencies": {

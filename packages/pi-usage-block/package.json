@@ -3,7 +3,8 @@
   "version": "1.2.0",
   "description": "Usage quota status bar block for pi — polls registered UsageProviders and displays in powerline",
   "keywords": [
-    "pi-package"
+    "pi-package",
+    "pi"
   ],
   "main": "index.ts",
   "dependencies": {

@@ -3,7 +3,8 @@
   "version": "1.1.0",
   "description": "@path syntax for AGENTS.md — include files by reference with recursive resolution",
   "keywords": [
-    "pi-package"
+    "pi-package",
+    "pi"
   ],
   "main": "index.ts",
   "peerDependencies": {

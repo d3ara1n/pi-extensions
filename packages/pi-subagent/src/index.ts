@@ -187,7 +187,7 @@ async function generateSummary(
 			resolved.model,
 			{
 				systemPrompt:
-					"Summarize the following agent output in one concise Chinese sentence (max 60 characters). Focus on what was accomplished, not how. Output only the summary, no preamble.",
+					"Summarize the following agent output in one concise sentence (max 60 characters). Respond in the same language as the input. Focus on what was accomplished, not how. Output only the summary, no preamble.",
 				messages: [{ role: "user", content: summaryInput, timestamp: Date.now() }],
 			},
 			{

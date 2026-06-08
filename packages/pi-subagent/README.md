@@ -44,7 +44,7 @@ This means:
 ## TUI Display
 
 - **During execution**: Shows role, elapsed time, turn count, and live tool calls
-- **Collapsed result**: `✓ explorer · 找到了登录/注册/token三块逻辑` + recent tool calls + usage stats
+- **Collapsed result**: `✓ explorer · Found login, registration, and token logic` + recent tool calls + usage stats
 - **Expanded result** (Ctrl+O): Full task text, all tool calls, final output as rendered Markdown, and usage details
 
 ## Requirements
@@ -56,7 +56,7 @@ This means:
 ## Installation
 
 ```bash
-pi extension add @d3ara1n/pi-subagent
+pi install @d3ara1n/pi-subagent
 ```
 
 ## Configuration
@@ -70,7 +70,7 @@ Edit `~/.pi/agent/settings.json`:
     "timeoutMs": 300000,
 
     // Summary generation — uses a lightweight model to create
-    // a one-line Chinese summary for the TUI display
+    // a one-line summary for the TUI display
     "summary": {
       "role": "utility",    // pi-model-roles role for summarization
       "enabled": true        // set false to disable

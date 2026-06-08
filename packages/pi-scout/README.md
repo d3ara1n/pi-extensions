@@ -9,6 +9,32 @@ Before each conversation turn, a cheap side agent model analyzes the user's prom
 
 Both modules can be independently toggled on/off.
 
+## Why model-router is disabled by default
+
+Model-router switches the active model role based on task complexity, which can:
+
+- **Break prompt caching**: Different models don't share cache, causing cache write costs on each switch
+- **Increase API costs**: Frequent model switching adds ~118% overhead in typical workloads
+- **Reduce performance**: Cache misses mean re-uploading system prompt and tools each time
+
+We recommend keeping model-router disabled unless you specifically need it. Enable it via:
+
+```bash
+/scout:model-router on        # Temporary (current session)
+```
+
+Or add to `settings.json` for persistent enablement:
+
+```jsonc
+{
+  "scout": {
+    "modules": {
+      "modelRouter": true
+    }
+  }
+}
+```
+
 ## How it works
 
 ```
@@ -27,7 +53,7 @@ before_agent_start hook fires
 ## Requirements
 
 - **@d3ara1n/pi-model-roles** must be installed and configured
-- A cheap role must be defined in `modelRoles` configuration or use default(may be much more expansive) instead
+- A cheap role must be defined in `modelRoles` configuration or use the default (may be much more expensive) instead
 
 ## Installation
 
@@ -47,7 +73,7 @@ Edit `~/.pi/agent/settings.json`:
     "maxSelectedSkills": 5,
     "modules": {
       "skillRouter": true,
-      "modelRouter": true
+      "modelRouter": false
     }
   }
 }
@@ -56,18 +82,18 @@ Edit `~/.pi/agent/settings.json`:
 | Field | Default | Description |
 |-------|---------|-------------|
 | `enabled` | `true` | Global on/off |
-| `sideAgentRole` | `"fast"` | pi-model-roles role for the side agent |
+| `sideAgentRole` | `"utility"` | pi-model-roles role for the side agent |
 | `maxSelectedSkills` | `5` | Max skills the side agent can select |
 | `modules.skillRouter` | `true` | Enable/disable skill routing |
-| `modules.modelRouter` | `true` | Enable/disable model routing |
+| `modules.modelRouter` | `false` | Enable/disable model routing (disabled by default to avoid cache inefficiency and extra costs) |
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
 | `/scout` | Show scout status and last decision |
-| `/scout skill-router on/off` | Toggle skill-router module |
-| `/scout model-router on/off` | Toggle model-router module |
+| `/scout:skill-router on/off` | Toggle skill-router module |
+| `/scout:model-router on/off` | Toggle model-router module |
 
 ## Performance
 

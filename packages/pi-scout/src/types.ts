@@ -33,6 +33,6 @@ export const DEFAULT_CONFIG: ScoutConfig = {
   maxSelectedSkills: 5,
   modules: {
     skillRouter: true,
-    modelRouter: true,
+    modelRouter: false,
   },
 };

@@ -17,6 +17,9 @@ import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 import {
 	Container,
 	type SelectItem,
+	fuzzyFilter,
+	Key,
+	matchesKey,
 	SelectList,
 	Text,
 } from "@earendil-works/pi-tui";
@@ -188,9 +191,25 @@ async function showModelSelector(pi: ExtensionAPI, ctx: ExtensionContext): Promi
 		selectList.onSelect = (item) => done(item.value);
 		selectList.onCancel = () => done(null);
 
+		// Type-to-filter state
+		let query = "";
+		const queryText = new Text(theme.fg("accent", "> "), 1, 0);
+
+		function applyQuery() {
+			const filtered = query
+				? fuzzyFilter(items, query, (item: SelectItem) => `${item.label} ${item.description ?? ""}`)
+				: items;
+			(selectList as any).filteredItems = filtered;
+			selectList.setSelectedIndex(0);
+			queryText.setText(theme.fg("accent", `> ${query}▎`));
+			container.invalidate();
+			tui.requestRender();
+		}
+
+		container.addChild(queryText);
 		container.addChild(selectList);
 		container.addChild(
-			new Text(theme.fg("dim", "↑↓ navigate • enter select • esc cancel"), 1, 0),
+			new Text(theme.fg("dim", "type to filter • ↑↓ navigate • enter select • esc cancel"), 1, 0),
 		);
 		container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
 
@@ -202,6 +221,21 @@ async function showModelSelector(pi: ExtensionAPI, ctx: ExtensionContext): Promi
 				container.invalidate();
 			},
 			handleInput(data: string) {
+				// Backspace → trim query
+				if (matchesKey(data, Key.backspace)) {
+					if (query.length > 0) {
+						query = query.slice(0, -1);
+						applyQuery();
+					}
+					return;
+				}
+				// Printable character → append to query
+				if (data.length === 1 && data.charCodeAt(0) >= 32) {
+					query += data;
+					applyQuery();
+					return;
+				}
+				// Navigation / confirm / cancel → pass to SelectList
 				selectList.handleInput(data);
 				tui.requestRender();
 			},
@@ -256,6 +290,22 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionContext): Prom
 			};
 			selectList.onCancel = () => done(null);
 
+			// Type-to-filter state
+			let query = "";
+			const queryText = new Text(theme.fg("accent", "> "), 1, 0);
+
+			function applyQuery() {
+				const filtered = query
+					? fuzzyFilter(selectItems, query, (item: SelectItem) => `${item.label} ${item.description ?? ""}`)
+					: selectItems;
+				(selectList as any).filteredItems = filtered;
+				selectList.setSelectedIndex(0);
+				queryText.setText(theme.fg("accent", `> ${query}▎`));
+				container.invalidate();
+				tui.requestRender();
+			}
+
+			container.addChild(queryText);
 			container.addChild(selectList);
 			container.addChild(
 				new Text(theme.fg("dim", "type to filter • ↑↓ navigate • enter select • esc cancel"), 1, 0),
@@ -270,6 +320,21 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionContext): Prom
 					container.invalidate();
 				},
 				handleInput(data: string) {
+					// Backspace → trim query
+					if (matchesKey(data, Key.backspace)) {
+						if (query.length > 0) {
+							query = query.slice(0, -1);
+							applyQuery();
+						}
+						return;
+					}
+					// Printable character → append to query
+					if (data.length === 1 && data.charCodeAt(0) >= 32) {
+						query += data;
+						applyQuery();
+						return;
+					}
+					// Navigation / confirm / cancel → pass to SelectList
 					selectList.handleInput(data);
 					tui.requestRender();
 				},

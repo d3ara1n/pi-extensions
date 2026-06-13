@@ -48,6 +48,17 @@ export interface SubagentRole {
 /** Status of an individual tool call within a subagent run. */
 export type ToolStatus = "running" | "done" | "failed";
 
+/** A single entry in the real-time activity log (thinking block or tool call). */
+export interface ActivityEntry {
+  kind: "thinking" | "toolCall";
+  /** Synthetic id (thinking-N) or the toolCallId from the event stream. */
+  id: string;
+  status: ToolStatus;
+  /** Tool name + args (toolCall only). */
+  toolName?: string;
+  args?: Record<string, any>;
+}
+
 /** Usage statistics from a subagent execution. */
 export interface SubagentUsage {
   input: number;
@@ -107,8 +118,8 @@ export interface SubagentResult {
   stopReason?: string;
   /** Error message if failed */
   errorMessage?: string;
-  /** Per-tool-call status keyed by toolCallId (running/done/failed), for TUI coloring. */
-  toolStatuses: Record<string, ToolStatus>;
+  /** Real-time activity log: thinking blocks and tool calls in arrival order. */
+  activityLog: ActivityEntry[];
 }
 
 /** TUI details structure passed via tool result details. */

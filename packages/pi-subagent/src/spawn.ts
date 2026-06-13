@@ -140,7 +140,7 @@ export async function spawnSubagent(
 		output: "",
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-		toolStatuses: {},
+		activityLog: [],
 	};
 
 	let tmpDir: string | null = null;
@@ -184,9 +184,11 @@ export async function spawnSubagent(
 				usage: { ...result.usage },
 				model: result.model,
 				stopReason: result.stopReason,
-				toolStatuses: { ...result.toolStatuses },
+				activityLog: result.activityLog.map((a) => ({ ...a })),
 			});
 		};
+
+		let thinkingCounter = 0;
 
 		const processLine = (line: string) => {
 			if (!line.trim()) return;
@@ -227,15 +229,46 @@ export async function spawnSubagent(
 				emitProgress();
 			}
 
-			// Per-tool-call lifecycle: track running/done/failed by toolCallId.
-			// pi emits these via the JSON event stream (session.subscribe re-emits
-			// agent events verbatim). tool_execution_end carries isError.
+			// Activity log: track thinking blocks and tool calls in arrival order.
+			// Both update in place so the TUI reflects real-time state.
 			if (event.type === "tool_execution_start" && event.toolCallId) {
-				result.toolStatuses[event.toolCallId] = "running";
+				result.activityLog.push({
+					kind: "toolCall",
+					id: event.toolCallId,
+					status: "running",
+					toolName: event.toolName,
+					args: event.args ?? {},
+				});
 				emitProgress();
 			} else if (event.type === "tool_execution_end" && event.toolCallId) {
-				result.toolStatuses[event.toolCallId] = event.isError ? "failed" : "done";
+				const entry = result.activityLog.find((a) => a.id === event.toolCallId);
+				if (entry) entry.status = event.isError ? "failed" : "done";
 				emitProgress();
+			}
+
+			// Thinking-block lifecycle: pi wraps thinking_start/end inside
+			// message_update.assistantMessageEvent. These arrive BEFORE message_end,
+			// so we can't rely on messages[] to show real-time thinking state —
+			// register them in the activity log directly.
+			const aev = event.assistantMessageEvent;
+			if (event.type === "message_update" && aev) {
+				if (aev.type === "thinking_start") {
+					result.activityLog.push({
+						kind: "thinking",
+						id: `thinking-${thinkingCounter++}`,
+						status: "running",
+					});
+					emitProgress();
+				} else if (aev.type === "thinking_end") {
+					// Mark the most recent still-running thinking block as done.
+					for (let i = result.activityLog.length - 1; i >= 0; i--) {
+						if (result.activityLog[i].kind === "thinking" && result.activityLog[i].status === "running") {
+							result.activityLog[i].status = "done";
+							break;
+						}
+					}
+					emitProgress();
+				}
 			}
 		};
 

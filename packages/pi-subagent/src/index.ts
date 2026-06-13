@@ -15,7 +15,7 @@ import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { ModelRolesAPI } from "@d3ara1n/pi-model-roles";
 import { getModelRolesAPI } from "@d3ara1n/pi-model-roles";
-import type { SubagentConfig, SubagentDetails, SubagentResult, SubagentRole, ToolStatus } from "./types.ts";
+import type { SubagentConfig, SubagentDetails, SubagentResult, SubagentRole, ToolStatus, ActivityEntry } from "./types.ts";
 import { DEFAULT_CONFIG } from "./types.ts";
 import { loadSubagentConfig } from "./config.ts";
 import { BUILTIN_ROLES } from "./roles.ts";
@@ -44,31 +44,16 @@ function formatUsageStats(usage: SubagentResult["usage"], model?: string): strin
 }
 
 type DisplayItem =
-	| { type: "text"; text: string }
-	| { type: "toolCall"; name: string; args: Record<string, any>; status?: ToolStatus };
+	| { type: "toolCall"; name: string; args: Record<string, any>; status?: ToolStatus }
+	| { type: "thinking"; status?: ToolStatus };
 
-function getDisplayItems(
-	messages: SubagentResult["messages"],
-	toolStatuses?: Record<string, ToolStatus>,
-): DisplayItem[] {
-	const items: DisplayItem[] = [];
-	for (const msg of messages) {
-		if (msg.role === "assistant") {
-			for (const part of msg.content) {
-				if (part.type === "text" && part.text) items.push({ type: "text", text: part.text });
-				else if (part.type === "toolCall" && part.name) {
-					const id = part.id ?? (part as any).toolCallId;
-					items.push({
-						type: "toolCall",
-						name: part.name,
-						args: part.arguments ?? {},
-						status: id ? toolStatuses?.[id] : undefined,
-					});
-				}
-			}
-		}
-	}
-	return items;
+/** Map the real-time activity log into renderable display items (in order). */
+function buildDisplayItems(activityLog: ActivityEntry[]): DisplayItem[] {
+	return activityLog.map((a) =>
+		a.kind === "thinking"
+			? { type: "thinking", status: a.status }
+			: { type: "toolCall", name: a.toolName ?? "?", args: a.args ?? {}, status: a.status },
+	);
 }
 
 function shortenPath(p: string): string {
@@ -143,13 +128,26 @@ function statusStyle(
 ): { prefix: string; color: (c: string, text: string) => string } {
 	switch (status) {
 		case "running":
-			return { prefix: fg("warning", "\u25CF "), color: fg };
+			return { prefix: fg("accent", "\u25CF "), color: fg };
 		case "failed":
 			return { prefix: fg("error", "\u2717 "), color: (_c, text) => fg("error", text) };
 		case "done":
 		default:
 			return { prefix: fg("dim", "\u2192 "), color: (_c, text) => fg("dim", text) };
 	}
+}
+
+/** Render a thinking-block row: diamond glyph + label, colored by status.
+ * Running = hollow diamond (unformed thought); done = solid diamond (settled). */
+function formatThinking(
+	status: ToolStatus | undefined,
+	fg: (color: string, text: string) => string,
+): string {
+	if (status === "running") {
+		return fg("accent", "\u25C7 thinking");
+	}
+	// done (or unknown) — dim past tense, solid diamond
+	return fg("dim", "\u25C6 thought");
 }
 
 function renderDisplayItems(
@@ -162,9 +160,8 @@ function renderDisplayItems(
 	let text = "";
 	if (skipped > 0) text += fg("muted", `... ${skipped} earlier items\n`);
 	for (const item of toShow) {
-		if (item.type === "text") {
-			const preview = item.text.split("\n").slice(0, 3).join("\n");
-			text += `${fg("toolOutput", preview.length > 120 ? preview.slice(0, 120) + "..." : preview)}\n`;
+		if (item.type === "thinking") {
+			text += `${formatThinking(item.status, fg)}\n`;
 		} else {
 			const { prefix, color } = statusStyle(item.status, fg);
 			text += `${prefix}${formatToolCall(item.name, item.args, color)}\n`;
@@ -401,7 +398,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 					output: "",
 					stderr: "",
 					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-					toolStatuses: {},
+					activityLog: [],
 				};
 				onUpdate({
 					content: [{ type: "text", text: `${params.role}: running...` }],
@@ -438,7 +435,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 							},
 							model: partial.model,
 							stopReason: partial.stopReason,
-							toolStatuses: partial.toolStatuses ?? {},
+							activityLog: partial.activityLog ?? [],
 						};
 						const statusText = `${params.role}  ${elapsed}s  ${liveResult.usage.turns} turn${liveResult.usage.turns !== 1 ? "s" : ""}`;
 						onUpdate({
@@ -543,7 +540,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			} else {
 				icon = theme.fg("success", "\u2713");
 			}
-			const displayItems = getDisplayItems(r.messages, r.toolStatuses);
+			const displayItems = buildDisplayItems(r.activityLog);
 			const finalOutput = getFinalOutput(r.messages);
 			const mdTheme = getMarkdownTheme();
 
@@ -564,21 +561,21 @@ export default function subagentExtension(pi: ExtensionAPI) {
 				}
 
 				container.addChild(new Spacer(1));
-				const toolCalls = displayItems.filter((item) => item.type === "toolCall");
-				if (toolCalls.length === 0) {
+				const activity = displayItems.filter((item) => item.type === "toolCall" || item.type === "thinking");
+				if (activity.length === 0) {
 					const runningLabel = isRunning ? "(waiting for first event...)" : "(none)";
 					container.addChild(new Text(theme.fg("muted", runningLabel), 0, 0));
 				} else {
-					for (const item of toolCalls) {
-						const fg = theme.fg.bind(theme) as (color: string, text: string) => string;
-						const { prefix, color } = statusStyle(item.status, fg);
-						container.addChild(
-							new Text(
-								prefix + formatToolCall(item.name, item.args, color),
-								0,
-								0,
-							),
-						);
+					const fg = theme.fg.bind(theme) as (color: string, text: string) => string;
+					for (const item of activity) {
+						if (item.type === "thinking") {
+							container.addChild(new Text(formatThinking(item.status, fg), 0, 0));
+						} else {
+							const { prefix, color } = statusStyle(item.status, fg);
+							container.addChild(
+								new Text(prefix + formatToolCall(item.name, item.args, color), 0, 0),
+							);
+						}
 					}
 				}
 
@@ -602,11 +599,11 @@ export default function subagentExtension(pi: ExtensionAPI) {
 
 			if (isRunning) {
 				// Running: show recent tool calls only
-				const toolCalls = displayItems.filter((item) => item.type === "toolCall");
-				if (toolCalls.length === 0) {
+				const activity = displayItems.filter((item) => item.type === "toolCall" || item.type === "thinking");
+				if (activity.length === 0) {
 					text += `\n${theme.fg("muted", "(running...)")}`;
 				} else {
-					const rendered = renderDisplayItems(toolCalls, 5, theme.fg.bind(theme) as (color: string, text: string) => string);
+					const rendered = renderDisplayItems(activity, 5, theme.fg.bind(theme) as (color: string, text: string) => string);
 					if (rendered) text += `\n${rendered}`;
 				}
 			} else {

@@ -140,6 +140,7 @@ export async function spawnSubagent(
 		output: "",
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
+		toolStatuses: {},
 	};
 
 	let tmpDir: string | null = null;
@@ -183,6 +184,7 @@ export async function spawnSubagent(
 				usage: { ...result.usage },
 				model: result.model,
 				stopReason: result.stopReason,
+				toolStatuses: { ...result.toolStatuses },
 			});
 		};
 
@@ -225,8 +227,14 @@ export async function spawnSubagent(
 				emitProgress();
 			}
 
-			if (event.type === "tool_result_end" && event.message) {
-				result.messages.push(event.message as SubagentMessage);
+			// Per-tool-call lifecycle: track running/done/failed by toolCallId.
+			// pi emits these via the JSON event stream (session.subscribe re-emits
+			// agent events verbatim). tool_execution_end carries isError.
+			if (event.type === "tool_execution_start" && event.toolCallId) {
+				result.toolStatuses[event.toolCallId] = "running";
+				emitProgress();
+			} else if (event.type === "tool_execution_end" && event.toolCallId) {
+				result.toolStatuses[event.toolCallId] = event.isError ? "failed" : "done";
 				emitProgress();
 			}
 		};

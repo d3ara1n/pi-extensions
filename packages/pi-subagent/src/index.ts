@@ -15,7 +15,7 @@ import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { ModelRolesAPI } from "@d3ara1n/pi-model-roles";
 import { getModelRolesAPI } from "@d3ara1n/pi-model-roles";
-import type { SubagentConfig, SubagentDetails, SubagentResult, SubagentRole } from "./types.ts";
+import type { SubagentConfig, SubagentDetails, SubagentResult, SubagentRole, ToolStatus } from "./types.ts";
 import { DEFAULT_CONFIG } from "./types.ts";
 import { loadSubagentConfig } from "./config.ts";
 import { BUILTIN_ROLES } from "./roles.ts";
@@ -45,16 +45,26 @@ function formatUsageStats(usage: SubagentResult["usage"], model?: string): strin
 
 type DisplayItem =
 	| { type: "text"; text: string }
-	| { type: "toolCall"; name: string; args: Record<string, any> };
+	| { type: "toolCall"; name: string; args: Record<string, any>; status?: ToolStatus };
 
-function getDisplayItems(messages: SubagentResult["messages"]): DisplayItem[] {
+function getDisplayItems(
+	messages: SubagentResult["messages"],
+	toolStatuses?: Record<string, ToolStatus>,
+): DisplayItem[] {
 	const items: DisplayItem[] = [];
 	for (const msg of messages) {
 		if (msg.role === "assistant") {
 			for (const part of msg.content) {
 				if (part.type === "text" && part.text) items.push({ type: "text", text: part.text });
-				else if (part.type === "toolCall" && part.name)
-					items.push({ type: "toolCall", name: part.name, args: part.arguments ?? {} });
+				else if (part.type === "toolCall" && part.name) {
+					const id = part.id ?? (part as any).toolCallId;
+					items.push({
+						type: "toolCall",
+						name: part.name,
+						args: part.arguments ?? {},
+						status: id ? toolStatuses?.[id] : undefined,
+					});
+				}
 			}
 		}
 	}
@@ -126,6 +136,22 @@ function formatToolCall(
 	}
 }
 
+/** Per-tool-call visual styling: prefix glyph + color function keyed by status. */
+function statusStyle(
+	status: ToolStatus | undefined,
+	fg: (color: string, text: string) => string,
+): { prefix: string; color: (c: string, text: string) => string } {
+	switch (status) {
+		case "running":
+			return { prefix: fg("warning", "\u25CF "), color: fg };
+		case "failed":
+			return { prefix: fg("error", "\u2717 "), color: (_c, text) => fg("error", text) };
+		case "done":
+		default:
+			return { prefix: fg("dim", "\u2192 "), color: (_c, text) => fg("dim", text) };
+	}
+}
+
 function renderDisplayItems(
 	items: DisplayItem[],
 	limit: number | undefined,
@@ -140,7 +166,8 @@ function renderDisplayItems(
 			const preview = item.text.split("\n").slice(0, 3).join("\n");
 			text += `${fg("toolOutput", preview.length > 120 ? preview.slice(0, 120) + "..." : preview)}\n`;
 		} else {
-			text += `${fg("muted", "\u2192 ")}${formatToolCall(item.name, item.args, fg)}\n`;
+			const { prefix, color } = statusStyle(item.status, fg);
+			text += `${prefix}${formatToolCall(item.name, item.args, color)}\n`;
 		}
 	}
 	return text.trimEnd();
@@ -374,6 +401,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 					output: "",
 					stderr: "",
 					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
+					toolStatuses: {},
 				};
 				onUpdate({
 					content: [{ type: "text", text: `${params.role}: running...` }],
@@ -410,6 +438,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 							},
 							model: partial.model,
 							stopReason: partial.stopReason,
+							toolStatuses: partial.toolStatuses ?? {},
 						};
 						const statusText = `${params.role}  ${elapsed}s  ${liveResult.usage.turns} turn${liveResult.usage.turns !== 1 ? "s" : ""}`;
 						onUpdate({
@@ -514,7 +543,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			} else {
 				icon = theme.fg("success", "\u2713");
 			}
-			const displayItems = getDisplayItems(r.messages);
+			const displayItems = getDisplayItems(r.messages, r.toolStatuses);
 			const finalOutput = getFinalOutput(r.messages);
 			const mdTheme = getMarkdownTheme();
 
@@ -541,10 +570,11 @@ export default function subagentExtension(pi: ExtensionAPI) {
 					container.addChild(new Text(theme.fg("muted", runningLabel), 0, 0));
 				} else {
 					for (const item of toolCalls) {
+						const fg = theme.fg.bind(theme) as (color: string, text: string) => string;
+						const { prefix, color } = statusStyle(item.status, fg);
 						container.addChild(
 							new Text(
-								theme.fg("muted", "\u2192 ") +
-									formatToolCall(item.name, item.args, theme.fg.bind(theme) as (color: string, text: string) => string),
+								prefix + formatToolCall(item.name, item.args, color),
 								0,
 								0,
 							),

@@ -45,6 +45,9 @@ export interface SubagentRole {
   fallbackRole?: string;
 }
 
+/** Status of an individual tool call within a subagent run. */
+export type ToolStatus = "running" | "done" | "failed";
+
 /** Usage statistics from a subagent execution. */
 export interface SubagentUsage {
   input: number;
@@ -104,6 +107,8 @@ export interface SubagentResult {
   stopReason?: string;
   /** Error message if failed */
   errorMessage?: string;
+  /** Per-tool-call status keyed by toolCallId (running/done/failed), for TUI coloring. */
+  toolStatuses: Record<string, ToolStatus>;
 }
 
 /** TUI details structure passed via tool result details. */

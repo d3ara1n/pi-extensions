@@ -1,6 +1,6 @@
 # @d3ara1n/pi-ask-user
 
-A collapsible **ask-user** tool for [pi](https://github.com/earendil-works/pi-mono).
+A collapsible **ask-user** tool for [pi](https://github.com/earendil-works/pi).
 
 ## Why
 
@@ -30,6 +30,7 @@ This tool fixes that:
   "questions": [
     {
       "header": "Which layout?",
+      "label": "layout",
       "prompt": "Pick the layout for the new settings page.",
       "options": [
         { "value": "sidebar", "label": "Sidebar", "description": "Nav on the left…" },
@@ -47,9 +48,8 @@ This tool fixes that:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `header` | string | yes | Short title shown in the panel header |
+| `label` | string | yes | Short keyword shown on the tab bar and returned to identify this question. Must be unique across all questions in one call |
 | `options` | array | yes | 2–4 options |
-| `id` | string | no | Unique id. Defaults to `q1`, `q2`, … |
-| `label` | string | no | Tab label (multi-question). Defaults to `Q1`, … |
 | `prompt` | string | no | Longer body text under the header |
 | `allowOther` | boolean | no | Allow "Type something." custom input. Default `true` |
 | `multiSelect` | boolean | no | Check multiple options. Default `false` |
@@ -61,8 +61,8 @@ This tool fixes that:
 |-------|------|----------|-------------|
 | `label` | string | yes | Display label |
 | `value` | string | no | Returned value. Defaults to `label` if omitted |
-| `description` | string | no | Explanation under the label (wraps). For ASCII diagrams/code use `preview` |
-| `preview` | string | no | Rich preview shown in a right-hand column when focused. Triggers two-column layout if any option has it |
+| `description` | string | no | Short explanation under the label (wraps). Add one when the label alone isn't self-explanatory |
+| `preview` | string | no | Only add when `description` alone can't make the option clear — ASCII layout demo, code snippet, or detailed reasoning. Most options need only `description`. Triggers a side column when present |
 
 ### Icons
 
@@ -102,24 +102,27 @@ allowed so they can review/edit earlier questions.
 
 ### Rich previews
 
-If **any** option of a question carries a `preview` field, that question
-renders in **two columns**: option list on the left, the focused option's
-preview on the right. Moving the cursor updates the right pane. Ideal for
-comparing ASCII layouts / code samples:
+`description` is the default way to explain an option; reserve `preview` for
+the rare case where a description can't fully convey it. If **any** option of
+a question carries a `preview` field, that question renders in **two columns**:
+option list on the left, the focused option's preview on the right. Moving the
+cursor updates the right pane. Ideal for comparing ASCII layouts / code samples:
 
 ```jsonc
 {
-  "id": "layout",
   "header": "Which layout?",
+  "label": "layout",
   "options": [
     {
       "label": "Sidebar",
       "value": "sidebar",
+      "description": "Left-side navigation with the main content to its right.",
       "preview": "┌──┬────────┐\n│导│  正文  │\n│航│        │\n└──┴────────┘\n左侧固定导航"
     },
     {
       "label": "Top bar",
       "value": "topbar",
+      "description": "Top horizontal nav with the main content below.",
       "preview": "┌──────────────┐\n│    导航条    │\n├──────────────┤\n│     正文     │\n└──────────────┘\n顶部横向导航"
     }
   ]
@@ -133,9 +136,18 @@ contains a newline renders verbatim as a fixed-width block.
 
 After the last question is answered, a **review screen** lists every question
 and its answer (multi-select answers are comma-joined and truncated with `…`
-when too long; skipped questions show `(skipped)`):
+when too long; skipped questions show `(skipped)`). Each entry spans two rows:
+the question header and, below it, the answer:
+
+```
+▸ Which layout?
+     Sidebar
+  Which database?
+     Postgres
+```
 
 - `↑`/`↓` — move the cursor between questions
+- `PgUp`/`PgDn` — scroll by page (when there are more questions than rows)
 - `Tab` — jump to the focused question to edit it (returns to the review after)
 - `Enter` — confirm and submit all answers
 - `Esc` — cancel

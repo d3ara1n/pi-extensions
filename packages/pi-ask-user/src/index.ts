@@ -62,8 +62,7 @@ interface RenderOption extends QuestionOption {
 }
 
 interface Question {
-	id: string;
-	label?: string;
+	label: string;
 	header: string;
 	prompt?: string;
 	options: QuestionOption[];
@@ -73,15 +72,15 @@ interface Question {
 }
 
 interface Answer {
-	id: string;
+	label: string;
 	/** Single-select: the chosen value. Multi-select: empty string. */
 	value: string;
 	/** Multi-select: the chosen values. Single-select: absent. */
 	values?: string[];
-	/** Single-select label. */
-	label: string;
-	/** Multi-select labels. */
-	labels?: string[];
+	/** Single-select answer label. */
+	answerLabel: string;
+	/** Multi-select answer labels. */
+	answerLabels?: string[];
 	wasCustom: boolean;
 	index?: number;
 	/** True for multi-select answers. */
@@ -125,37 +124,28 @@ const QuestionOptionSchema = Type.Object({
 	label: Type.String({ description: "Short display label for the option (shown on the selection row)" }),
 	description: Type.Optional(
 		Type.String({
-			description:
-				"Optional short explanation shown under the label (wraps). For ASCII diagrams/code use `preview`.",
+			description: "Short explanation shown under the label (wraps). Add one when the label alone isn't self-explanatory.",
 		}),
 	),
 	preview: Type.Optional(
 		Type.String({
 			description:
-				"Optional rich preview (ASCII diagram, code sample, etc.) shown in a dedicated right-hand column when this option is focused. Triggers two-column layout for the whole question if any option has it.",
+			"Only add this when `description` alone can't make the option clear — e.g. an ASCII layout demo, a code snippet, or detailed reasoning. Omit it otherwise; most options need only `description`. Triggers a side column when present.",
 		}),
 	),
 });
 
 const QuestionSchema = Type.Object({
-	id: Type.Optional(
-		Type.String({
-			description: "Unique identifier for this question. Defaults to `q1`, `q2`, ... if omitted.",
-		}),
-	),
 	header: Type.String({
 		description: "Short question title shown in the panel header, e.g. 'Which layout?'",
 	}),
-	label: Type.Optional(
-		Type.String({
-			description: "Short tab label for multi-question mode (defaults to Q1, Q2, ...)",
-		}),
-	),
+	label: Type.String({
+		description: "Short keyword shown on the tab bar and returned to identify this question. Must be unique across all questions in one call." }),
 	prompt: Type.Optional(
 		Type.String({ description: "Optional longer body text shown under the header" }),
 	),
 	options: Type.Array(QuestionOptionSchema, {
-		description: "Available options. Pass 2-4; each may carry a description and/or preview.",
+		description: "Available options. Pass 2-4; each needs a short `label` + a `description`, and a `preview` only when a description can't fully convey the option.",
 	}),
 	allowOther: Type.Optional(
 		Type.Boolean({ description: "Allow a 'Type something.' custom-input option (default: true)" }),
@@ -277,6 +267,10 @@ class AskUserPanel implements Component, Focusable {
 	private reviewMode = false;
 	/** Cursor row in the review summary. */
 	private reviewCursor = 0;
+	/** Vertical scroll offset for the review viewport. */
+	private reviewScrollOffset = 0;
+	/** Visible review rows (recomputed each render). */
+	private reviewViewportH = 8;
 	/** True after jumping from review mode to edit a question; makes answering
 	 *  return to review instead of advancing to the next question. */
 	private editingFromReview = false;
@@ -321,10 +315,10 @@ class AskUserPanel implements Component, Focusable {
 			if (tabIndex === this.currentTab) this.invalidate();
 			return;
 		}
-		this.answers.set(q.id, {
-			id: q.id,
+		this.answers.set(q.label, {
+			label: q.label,
 			value: trimmed,
-			label: trimmed,
+			answerLabel: trimmed,
 			wasCustom: true,
 		});
 		st.inputMode = false;
@@ -355,6 +349,7 @@ class AskUserPanel implements Component, Focusable {
 		if (this.editingFromReview) {
 			this.editingFromReview = false;
 			this.reviewMode = true;
+			this.reviewScrollOffset = 0;
 			this.invalidate();
 			return;
 		}
@@ -365,6 +360,7 @@ class AskUserPanel implements Component, Focusable {
 		// Last question answered: enter review mode instead of submitting.
 		this.reviewMode = true;
 		this.reviewCursor = 0;
+		this.reviewScrollOffset = 0;
 		this.invalidate();
 	}
 
@@ -377,12 +373,12 @@ class AskUserPanel implements Component, Focusable {
 	private markSkippedIfNeeded(): boolean {
 		const q = this.currentQuestion();
 		if (!q) return true;
-		if (this.answers.has(q.id)) return true;
+		if (this.answers.has(q.label)) return true;
 		if (!canSkip(q)) return false; // required question: block
-		this.answers.set(q.id, {
-			id: q.id,
+		this.answers.set(q.label, {
+			label: q.label,
 			value: "",
-			label: "",
+			answerLabel: "",
 			wasCustom: false,
 			skipped: true,
 		});
@@ -528,10 +524,10 @@ class AskUserPanel implements Component, Focusable {
 			const opt = opts[st.cursor];
 			if (opt && !opt.isOther) {
 				st.selectedSingle = st.cursor;
-				this.answers.set(q.id, {
-					id: q.id,
+				this.answers.set(q.label, {
+					label: q.label,
 					value: opt.value,
-					label: opt.label,
+					answerLabel: opt.label,
 					wasCustom: false,
 					index: st.cursor,
 				});
@@ -549,7 +545,7 @@ class AskUserPanel implements Component, Focusable {
 				// Prefill the editor with the committed custom text (if any) so the
 				// user can edit rather than retype. Per-tab editor keeps the text
 				// for Esc-discard semantics automatically.
-				const existing = this.answers.get(q.id);
+				const existing = this.answers.get(q.label);
 				if (existing?.wasCustom && existing.value) {
 					st.editor.setText(existing.value);
 				}
@@ -563,12 +559,12 @@ class AskUserPanel implements Component, Focusable {
 					.map((i) => opts[i])
 					.filter((o): o is RenderOption => !!o && !o.isOther);
 				if (picked.length === 0) return;
-				this.answers.set(q.id, {
-					id: q.id,
+				this.answers.set(q.label, {
+					label: q.label,
 					value: "",
 					values: picked.map((o) => o.value),
-					label: "",
-					labels: picked.map((o) => o.label),
+					answerLabel: "",
+					answerLabels: picked.map((o) => o.label),
 					wasCustom: false,
 					multiSelect: true,
 				});
@@ -577,10 +573,10 @@ class AskUserPanel implements Component, Focusable {
 			}
 			// single-select: commit cursor position as the selection
 			st.selectedSingle = st.cursor;
-			this.answers.set(q.id, {
-				id: q.id,
+			this.answers.set(q.label, {
+				label: q.label,
 				value: opt.value,
-				label: opt.label,
+				answerLabel: opt.label,
 				wasCustom: false,
 				index: st.cursor,
 			});
@@ -624,6 +620,16 @@ class AskUserPanel implements Component, Focusable {
 			if (this.reviewCursor < n - 1) { this.reviewCursor++; this.invalidate(); }
 			return;
 		}
+		if (matchesKey(data, Key.pageUp)) {
+			this.reviewCursor = Math.max(0, this.reviewCursor - Math.max(1, this.reviewViewportH));
+			this.invalidate();
+			return;
+		}
+		if (matchesKey(data, Key.pageDown)) {
+			this.reviewCursor = Math.min(n - 1, this.reviewCursor + Math.max(1, this.reviewViewportH));
+			this.invalidate();
+			return;
+		}
 	}
 
 	// ── render ──
@@ -646,8 +652,8 @@ class AskUserPanel implements Component, Focusable {
 		const th = this.theme;
 		const tabsPart = this.questions
 			.map((q, i) => {
-				const label = q.label || `Q${i + 1}`;
-				const done = this.answers.has(q.id);
+				const label = q.label;
+				const done = this.answers.has(q.label);
 				return th.fg(done ? "success" : "dim", `${label}${done ? "✓" : "○"}`);
 			})
 			.join(th.fg("dim", " "));
@@ -672,9 +678,9 @@ class AskUserPanel implements Component, Focusable {
 		// ── Tab bar ──
 		if (this.questions.length > 1) {
 			const tabCells = this.questions.map((q, i) => {
-				const label = q.label || `Q${i + 1}`;
+				const label = q.label;
 				const active = i === this.currentTab;
-				const ans = this.answers.get(q.id);
+				const ans = this.answers.get(q.label);
 				let mark = " ";
 				let baseColor: import("@earendil-works/pi-coding-agent").ThemeColor = active ? "accent" : "muted";
 				if (ans?.skipped) { mark = "—"; baseColor = "warning"; }
@@ -752,8 +758,8 @@ class AskUserPanel implements Component, Focusable {
 		if (!ans) return th.fg("dim", "(no answer)");
 		if (ans.skipped) return th.fg("warning", "(skipped)");
 		let text: string;
-		if (ans.multiSelect) text = (ans.labels?.length ? ans.labels : ans.values ?? []).join(", ");
-		else text = ans.wasCustom ? ans.value : (ans.label || ans.value);
+		if (ans.multiSelect) text = (ans.answerLabels?.length ? ans.answerLabels : ans.values ?? []).join(", ");
+		else text = ans.wasCustom ? ans.value : (ans.answerLabel || ans.value);
 		const vw = visibleWidth(text);
 		if (vw <= maxW) return th.fg("text", text);
 		// truncate: keep prefix, append “…”
@@ -761,25 +767,46 @@ class AskUserPanel implements Component, Focusable {
 		return th.fg("text", cut) + th.fg("dim", "…");
 	}
 
-	/** Review summary: one row per question showing its answer. */
+	/** Clamp the review scroll offset so the cursor stays visible. */
+	private clampReviewScroll(): void {
+		const n = this.questions.length;
+		if (n === 0) return;
+		const viewH = this.reviewViewportH;
+		if (this.reviewCursor < this.reviewScrollOffset) this.reviewScrollOffset = this.reviewCursor;
+		else if (this.reviewCursor >= this.reviewScrollOffset + viewH)
+			this.reviewScrollOffset = this.reviewCursor - viewH + 1;
+		if (this.reviewScrollOffset < 0) this.reviewScrollOffset = 0;
+	}
+
+	/** Review summary: one question per entry, header row + answer row, with
+	 *  viewport scrolling reusing the option-screen layout primitives. */
 	private renderReview(width: number, innerW: number, row: (s: string) => string, th: Theme): string[] {
 		const lines: string[] = [];
 		lines.push(th.fg("border", `╭${"─".repeat(innerW)}╮`));
 		lines.push(row(` ${th.fg("accent", th.bold("Review your answers"))}`));
 		lines.push(th.fg("border", `├${"─".repeat(innerW)}┤`));
 		const n = this.questions.length;
-		for (let i = 0; i < n; i++) {
+		this.reviewViewportH = Math.max(3, Math.min(n, 10));
+		this.clampReviewScroll();
+		const start = this.reviewScrollOffset;
+		const end = Math.min(n, start + this.reviewViewportH);
+		for (let i = start; i < end; i++) {
 			const q = this.questions[i]!;
 			const isCursor = i === this.reviewCursor;
-			const ans = this.answers.get(q.id);
+			const ans = this.answers.get(q.label);
+			// Header row: cursor + label, same coloring as the option screen.
 			const prefix = isCursor ? `${th.fg("accent", ICON_CURSOR)} ` : "  ";
-			const header = q.header;
-			const labelW = Math.min(20, innerW - 4);
-			const headerStr = truncateToWidth(header, labelW, "");
 			const headerColor = isCursor ? "accent" : "muted";
-			const ansW = innerW - labelW - 5; // prefix + ": " + answer + padding
-			const ansStr = this.formatAnswerText(ans, Math.max(10, ansW), th);
-			lines.push(row(` ${prefix}${th.fg(headerColor, headerStr)}${th.fg("dim", ": ")}${ansStr}`));
+			lines.push(row(` ${prefix}${th.fg(headerColor, q.header)}`));
+			// Answer row: reuse the description renderer's indent/wrap, fed the
+			// formatted answer text. Skipped/custom/multi-select all flow through
+			// formatAnswerText, so the coloring matches the option screen.
+			const maxW = innerW - 2 - "     ".length;
+			const ansText = this.formatAnswerText(ans, maxW, th);
+			lines.push(row(`     ${ansText}`));
+		}
+		if (n > this.reviewViewportH) {
+			lines.push(row(th.fg("dim", `     ↑↓/PgUp/PgDn scroll · ${start + 1}-${end}/${n}`)));
 		}
 		lines.push(th.fg("border", `├${"─".repeat(innerW)}┤`));
 		lines.push(row(th.fg("dim", " ↑↓ navigate · Tab edit selected · Enter confirm · Esc cancel")));
@@ -802,10 +829,10 @@ class AskUserPanel implements Component, Focusable {
 			const opt = opts[i]!;
 			const isCursor = i === st.cursor;
 			const prefix = isCursor ? `${th.fg("accent", ICON_CURSOR)} ` : "  ";
-			const customAnswered = !multi && !!this.answers.get(q.id)?.wasCustom;
+			const customAnswered = !multi && !!this.answers.get(q.label)?.wasCustom;
 			const glyph = this.optionGlyph(opt, i, st, multi, th, isCursor, customAnswered);
 			// For "Type something.", show the committed text instead of the placeholder.
-			const displayLabel = opt.isOther && customAnswered ? this.answers.get(q.id)!.value : opt.label;
+			const displayLabel = opt.isOther && customAnswered ? this.answers.get(q.label)!.value : opt.label;
 			const labelColor = isCursor ? "accent" : opt.isOther ? (customAnswered ? "text" : "dim") : "text";
 			const labelText = th.fg(labelColor, displayLabel);
 			out.push(row(` ${prefix}${glyph} ${labelText}`));
@@ -844,13 +871,13 @@ class AskUserPanel implements Component, Focusable {
 
 		// ── build left column lines (options) ──
 		const leftLines: string[] = [];
-		const customAnswered = !multi && !!this.answers.get(q.id)?.wasCustom;
+		const customAnswered = !multi && !!this.answers.get(q.label)?.wasCustom;
 		for (let i = start; i < end; i++) {
 			const opt = opts[i]!;
 			const isCursor = i === st.cursor;
 			const prefix = isCursor ? `${th.fg("accent", ICON_CURSOR)} ` : "  ";
 			const glyph = this.optionGlyph(opt, i, st, multi, th, isCursor, customAnswered);
-			const displayLabel = opt.isOther && customAnswered ? this.answers.get(q.id)!.value : opt.label;
+			const displayLabel = opt.isOther && customAnswered ? this.answers.get(q.label)!.value : opt.label;
 			const labelColor = isCursor ? "accent" : opt.isOther ? (customAnswered ? "text" : "dim") : "text";
 			const labelLine = `${prefix}${glyph} ${th.fg(labelColor, displayLabel)}`;
 			leftLines.push(truncateToWidth(labelLine, leftW - 1, ""));
@@ -866,11 +893,6 @@ class AskUserPanel implements Component, Focusable {
 			// Render preview verbatim (preserve ASCII layout), truncate to rightW.
 			for (const ln of cursorOpt.preview.split("\n")) {
 				rightLines.push(th.fg("muted", truncateToWidth(ln, rightW - 1, "")));
-			}
-		} else if (cursorOpt?.description) {
-			// Fall back to wrapped description if no preview.
-			for (const ln of wrapTextWithAnsi(th.fg("muted", cursorOpt.description), rightW - 1)) {
-				rightLines.push(ln);
 			}
 		} else {
 			rightLines.push(th.fg("dim", truncateToWidth("(no preview)", rightW - 1, "")));
@@ -932,7 +954,7 @@ export default function askUserExtension(pi: ExtensionAPI) {
 		name: "ask_user",
 		label: "Ask User",
 		description:
-			"Ask the user one or more questions with options. Supports single-select (◎→◉) and multi-select (□→▣, space toggles), per-question 'Type something.' custom input with draft preserved across tab switches, and rich per-option previews (ASCII diagrams render verbatim in a side column when any option has a `preview` field). The panel is collapsible (Ctrl+\\). Use for clarifying requirements, getting preferences, or confirming decisions.",
+			"Ask the user one or more questions with options. Supports single-select (◎→◉) and multi-select (□→▣, space toggles), per-question 'Type something.' custom input with draft preserved across tab switches, and a focused side panel for extended detail (ASCII layouts, code, reasoning) when an option carries a `preview` field. Each option needs a short `label` + a `description` (shown beneath it); add a `preview` field only when a description can't fully convey the option. The panel is collapsible (Ctrl+\\). Use for clarifying requirements, getting preferences, or confirming decisions.",
 		parameters: AskUserParams,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -943,18 +965,8 @@ export default function askUserExtension(pi: ExtensionAPI) {
 				return errorResult("Error: No questions provided");
 			}
 
-			// Default id: use `header` when unique, else fall back to `q{n}`.
-			// This keeps the result summary readable for both the LLM and the user
-			// (e.g. "颜色: 红色" instead of "q1: 红色").
-			const headerCounts = new Map<string, number>();
-			for (const q of params.questions) {
-				const h = q.id ? null : (q.header ?? "");
-				if (h) headerCounts.set(h, (headerCounts.get(h) ?? 0) + 1);
-			}
-			const questions: Question[] = params.questions.map((q, i) => ({
+			const questions: Question[] = params.questions.map((q) => ({
 				...q,
-				id: q.id || (q.header && (headerCounts.get(q.header) ?? 0) === 1 ? q.header : `q${i + 1}`),
-				label: q.label || `Q${i + 1}`,
 				allowOther: q.allowOther !== false,
 				options: q.options.map((o) => ({ ...o, value: o.value ?? o.label })),
 			}));
@@ -999,9 +1011,9 @@ export default function askUserExtension(pi: ExtensionAPI) {
 				? `User cancelled the question(s). ${result.answers.length} question(s) were answered before cancellation.`
 				: result.answers
 						.map((a) => {
-							if (a.skipped) return `${a.id}: (skipped)`;
-							if (a.multiSelect) return `${a.id}: ${a.labels?.join(", ") ?? a.values?.join(", ") ?? ""}`;
-							return `${a.id}: ${a.wasCustom ? "(custom) " : ""}${a.label || a.value}`;
+							if (a.skipped) return `${a.label}: (skipped)`;
+							if (a.multiSelect) return `${a.label}: ${a.answerLabels?.join(", ") ?? a.values?.join(", ") ?? ""}`;
+							return `${a.label}: ${a.wasCustom ? "(custom) " : ""}${a.answerLabel || a.value}`;
 						})
 						.join("\n");
 

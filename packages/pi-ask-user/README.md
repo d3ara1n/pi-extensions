@@ -1,0 +1,170 @@
+# @d3ara1n/pi-ask-user
+
+A collapsible **ask-user** tool for [pi](https://github.com/earendil-works/pi-mono).
+
+## Why
+
+Other ask-user tools render a panel that covers the transcript, and even when
+they "collapse" they keep keyboard focus locked on the panel — so you **can't
+scroll the conversation** to read the analysis that should inform your choice.
+You end up choosing blind.
+
+This tool fixes that:
+
+- **Collapse actually releases focus.** Press `Ctrl+\` and the panel shrinks to
+  a single status row while `OverlayHandle.unfocus()` hands focus back to the
+  transcript. Your normal scroll mechanisms work again — mouse wheel,
+  `Shift+PgUp`, `Ctrl+Left`/`Ctrl+Right` tree nav, `/tree`.
+- **Re-expand works from anywhere.** A global shortcut (`pi.registerShortcut`)
+  captures `Ctrl+\` from the editor, so pressing it again re-expands and
+  re-focuses the panel — no matter where focus currently is.
+
+> **Note:** Because pi removes the editor from the UI tree while an overlay is
+> active, full transcript scrolling while collapsed depends on pi's overlay
+> behavior. The collapse affordance is kept as best-effort.
+
+## Tool: `ask_user`
+
+```jsonc
+{
+  "questions": [
+    {
+      "header": "Which layout?",
+      "prompt": "Pick the layout for the new settings page.",
+      "options": [
+        { "value": "sidebar", "label": "Sidebar", "description": "Nav on the left…" },
+        { "value": "tabs", "label": "Tabs", "description": "Top tabs…" }
+      ]
+    }
+  ]
+}
+```
+
+### Fields
+
+**Question**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `header` | string | yes | Short title shown in the panel header |
+| `options` | array | yes | 2–4 options |
+| `id` | string | no | Unique id. Defaults to `q1`, `q2`, … |
+| `label` | string | no | Tab label (multi-question). Defaults to `Q1`, … |
+| `prompt` | string | no | Longer body text under the header |
+| `allowOther` | boolean | no | Allow "Type something." custom input. Default `true` |
+| `multiSelect` | boolean | no | Check multiple options. Default `false` |
+| `allowSkip` | boolean | no | If `false`, the user MUST answer before proceeding. Default `true` |
+
+**Option**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `label` | string | yes | Display label |
+| `value` | string | no | Returned value. Defaults to `label` if omitted |
+| `description` | string | no | Explanation under the label (wraps). For ASCII diagrams/code use `preview` |
+| `preview` | string | no | Rich preview shown in a right-hand column when focused. Triggers two-column layout if any option has it |
+
+### Icons
+
+All selection icons live in the `U+25A0–25FF` Geometric Shapes block, so any
+font that renders one renders all of them consistently:
+
+- Single-select: `○` (white circle) → `◉` (fisheye) when committed
+- Multi-select: `□` (white square) → `▣` (square with fill) when checked
+- Cursor: `▸` marks the current position, **independent** of selection
+
+Moving `↑`/`↓` only moves the cursor; selection is committed separately.
+
+### Single-select vs multi-select
+
+- **Single-select**: `Space` selects (fills the circle) **without** advancing;
+  `Enter` selects **and** advances to the next question.
+- **Multi-select** (`multiSelect: true`): `Space` toggles a checkbox; `Enter`
+  commits all checked options and advances.
+
+### Custom input ("Type something.")
+
+When `allowOther` is `true` (default), a "Type something." row appears. Press
+`Enter` on it to open a text editor:
+
+- After submitting, the row displays the committed text with a filled glyph
+  (`◉ ✎ your text`).
+- Press `Enter` again to re-edit it — the editor **prefills** the committed
+  text so you can tweak it.
+- `Esc` discards the edit (the original answer is kept); `Enter` confirms the
+  change (the answer is updated).
+
+### Required questions
+
+Set `allowSkip: false` to force an answer. The user cannot advance forward
+(`Tab`/`→`) until they answer. Backward navigation (`Shift+Tab`/`←`) is always
+allowed so they can review/edit earlier questions.
+
+### Rich previews
+
+If **any** option of a question carries a `preview` field, that question
+renders in **two columns**: option list on the left, the focused option's
+preview on the right. Moving the cursor updates the right pane. Ideal for
+comparing ASCII layouts / code samples:
+
+```jsonc
+{
+  "id": "layout",
+  "header": "Which layout?",
+  "options": [
+    {
+      "label": "Sidebar",
+      "value": "sidebar",
+      "preview": "┌──┬────────┐\n│导│  正文  │\n│航│        │\n└──┴────────┘\n左侧固定导航"
+    },
+    {
+      "label": "Top bar",
+      "value": "topbar",
+      "preview": "┌──────────────┐\n│    导航条    │\n├──────────────┤\n│     正文     │\n└──────────────┘\n顶部横向导航"
+    }
+  ]
+}
+```
+
+Plain `description` text (no newline) wraps normally. A `description` that
+contains a newline renders verbatim as a fixed-width block.
+
+### Review screen
+
+After the last question is answered, a **review screen** lists every question
+and its answer (multi-select answers are comma-joined and truncated with `…`
+when too long; skipped questions show `(skipped)`):
+
+- `↑`/`↓` — move the cursor between questions
+- `Tab` — jump to the focused question to edit it (returns to the review after)
+- `Enter` — confirm and submit all answers
+- `Esc` — cancel
+
+### Result
+
+The tool returns a summary plus structured `answers`. If the user cancelled
+mid-way, the message notes how many questions were answered before cancellation.
+
+## Keys
+
+| Key | Action |
+|-----|--------|
+| `↑` `↓` / `PgUp` `PgDn` | Move cursor / scroll options |
+| `Space` | Commit selection (single: select-only; multi: toggle) |
+| `Enter` | Confirm & advance (single) / commit checked (multi) / enter custom input |
+| `Tab` / `Shift+Tab` | Next / previous question (option list only — not hijacked inside the editor) |
+| `→` / `←` | Same as `Tab` / `Shift+Tab` |
+| `Esc` | Cancel (or exit custom-input editor without saving) |
+| `Ctrl+\` | Collapse / expand the panel |
+
+## Install
+
+Add to `~/.pi/agent/settings.json`:
+
+```jsonc
+{
+  "extensions": [
+    "/path/to/pi-extensions/packages/pi-ask-user"
+  ]
+}
+```

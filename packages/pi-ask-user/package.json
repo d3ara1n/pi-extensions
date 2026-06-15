@@ -1,0 +1,33 @@
+{
+  "name": "@d3ara1n/pi-ask-user",
+  "version": "0.1.0",
+  "description": "Ask-user tool for pi — collapsible question overlay that releases focus so you can scroll the transcript while deciding",
+  "main": "src/index.ts",
+  "keywords": [
+    "pi-package",
+    "pi"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    }
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/d3ara1n/pi-extensions",
+    "directory": "packages/pi-ask-user"
+  },
+  "license": "MIT"
+}

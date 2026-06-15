@@ -6,6 +6,7 @@ A collection of small extensions for [Pi Coding Agent](https://pi.dev).
 
 | Package | Description |
 |---------|-------------|
+| [`pi-ask-user`](./packages/pi-ask-user) | Collapsible ask-user tool — panel can shrink to a status row, releasing focus so you can read the transcript |
 | [`pi-context-include`](./packages/pi-context-include) | `@path` syntax for AGENTS.md — include files by reference |
 | [`pi-provider-zhipu-coding-plan`](./packages/pi-provider-zhipu-coding-plan) | Zhipu AI Coding Plan provider — auto-discover models, report usage |
 | [`pi-usage-block`](./packages/pi-usage-block) | Usage quota status bar block for powerline |

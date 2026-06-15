@@ -77,21 +77,23 @@ export function buildScoutSystemPrompt(
 	parts.push(`- Be conservative: prefer fewer skills and no role change when uncertain.`);
 	parts.push(`- Use the Previous Turn context to understand follow-up requests (e.g. "continue", "change that", "no, the other one").`);
 
-	if (!config.modules.modelRouter) {
-		parts.push(`- IMPORTANT: model routing is disabled. Always return role: null.`);
+	// Stable prefix ends here. Sections below are injected conditionally per
+	// module toggle: a disabled module contributes no candidates, so the side
+	// agent has nothing to choose from for it (and the application layer zeros
+	// out its field regardless). The longer section (skills) comes first so
+	// toggling the later module (roles) only invalidates the cache tail —
+	// Anthropic prefix-cache matches the longest common prefix.
+	if (config.modules.skillRouter) {
+		parts.push(``);
+		parts.push(`## Available Skills`);
+		parts.push(skillsList || "(none)");
 	}
 
-	if (!config.modules.skillRouter) {
-		parts.push(`- IMPORTANT: skill routing is disabled. Always return skills: [].`);
+	if (config.modules.modelRouter) {
+		parts.push(``);
+		parts.push(`## Available Roles`);
+		parts.push(rolesList);
 	}
-
-	parts.push(``);
-	parts.push(`## Available Skills`);
-	parts.push(skillsList || "(none)");
-
-	parts.push(``);
-	parts.push(`## Available Roles`);
-	parts.push(rolesList);
 
 	return parts.join("\n");
 }

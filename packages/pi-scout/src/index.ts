@@ -250,6 +250,12 @@ export default function scoutExtension(pi: ExtensionAPI) {
 			userMessage,
 		);
 
+		// Enforce module toggles at the application layer, regardless of what
+		// the side agent returned. A disabled module's decision field is zeroed
+		// so the status bar, /scout command, and apply logic all see clean
+		// values (no misleading "→ fast" when model-router is off).
+		if (!config.modules.modelRouter) decision.role = null;
+		if (!config.modules.skillRouter) decision.skills = [];
 		lastDecision = decision;
 
 		let systemPrompt = event.systemPrompt;

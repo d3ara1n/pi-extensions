@@ -259,7 +259,7 @@ async function showModelSelector(pi: ExtensionAPI, ctx: ExtensionContext): Promi
 // ── Command palette overlay ────────────────────────────────────────
 
 async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
-	if (ctx.mode !== "tui") return;
+	if (!ctx.hasUI) return;
 
 	const paletteItems = buildPaletteItems(pi, ctx);
 	const selectItems: SelectItem[] = paletteItems.map((item) => ({

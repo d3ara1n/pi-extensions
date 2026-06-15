@@ -6,13 +6,13 @@
     "pi-package",
     "pi"
   ],
-  "main": "index.ts",
+  "main": "src/index.ts",
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
   },
   "pi": {
     "extensions": [
-      "./index.ts"
+      "./src/index.ts"
     ]
   },
   "repository": {

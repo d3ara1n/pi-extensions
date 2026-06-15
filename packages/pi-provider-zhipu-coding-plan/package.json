@@ -6,7 +6,7 @@
     "pi-package",
     "pi"
   ],
-  "main": "index.ts",
+  "main": "src/index.ts",
   "dependencies": {
     "@d3ara1n/pi-usage-block-core": "^2.0.0"
   },
@@ -15,7 +15,7 @@
   },
   "pi": {
     "extensions": [
-      "./index.ts"
+      "./src/index.ts"
     ]
   },
   "license": "MIT",

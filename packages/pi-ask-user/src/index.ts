@@ -62,7 +62,7 @@ interface RenderOption extends QuestionOption {
 }
 
 interface Question {
-	label: string;
+	tab: string;
 	header: string;
 	prompt?: string;
 	options: QuestionOption[];
@@ -72,7 +72,7 @@ interface Question {
 }
 
 interface Answer {
-	label: string;
+	tab: string;
 	/** Single-select: the chosen value. Multi-select: empty string. */
 	value: string;
 	/** Multi-select: the chosen values. Single-select: absent. */
@@ -139,8 +139,8 @@ const QuestionSchema = Type.Object({
 	header: Type.String({
 		description: "Short question title shown in the panel header, e.g. 'Which layout?'",
 	}),
-	label: Type.String({
-		description: "Short keyword shown on the tab bar and returned to identify this question. Must be unique across all questions in one call." }),
+	tab: Type.String({
+		description: "Short label shown on the tab bar and returned to identify this question. Must be unique across all questions in one call." }),
 	prompt: Type.Optional(
 		Type.String({ description: "Optional longer body text shown under the header" }),
 	),
@@ -315,8 +315,8 @@ class AskUserPanel implements Component, Focusable {
 			if (tabIndex === this.currentTab) this.invalidate();
 			return;
 		}
-		this.answers.set(q.label, {
-			label: q.label,
+		this.answers.set(q.tab, {
+			tab: q.tab,
 			value: trimmed,
 			answerLabel: trimmed,
 			wasCustom: true,
@@ -373,10 +373,10 @@ class AskUserPanel implements Component, Focusable {
 	private markSkippedIfNeeded(): boolean {
 		const q = this.currentQuestion();
 		if (!q) return true;
-		if (this.answers.has(q.label)) return true;
+		if (this.answers.has(q.tab)) return true;
 		if (!canSkip(q)) return false; // required question: block
-		this.answers.set(q.label, {
-			label: q.label,
+		this.answers.set(q.tab, {
+			tab: q.tab,
 			value: "",
 			answerLabel: "",
 			wasCustom: false,
@@ -524,8 +524,8 @@ class AskUserPanel implements Component, Focusable {
 			const opt = opts[st.cursor];
 			if (opt && !opt.isOther) {
 				st.selectedSingle = st.cursor;
-				this.answers.set(q.label, {
-					label: q.label,
+				this.answers.set(q.tab, {
+					tab: q.tab,
 					value: opt.value,
 					answerLabel: opt.label,
 					wasCustom: false,
@@ -545,7 +545,7 @@ class AskUserPanel implements Component, Focusable {
 				// Prefill the editor with the committed custom text (if any) so the
 				// user can edit rather than retype. Per-tab editor keeps the text
 				// for Esc-discard semantics automatically.
-				const existing = this.answers.get(q.label);
+				const existing = this.answers.get(q.tab);
 				if (existing?.wasCustom && existing.value) {
 					st.editor.setText(existing.value);
 				}
@@ -559,8 +559,8 @@ class AskUserPanel implements Component, Focusable {
 					.map((i) => opts[i])
 					.filter((o): o is RenderOption => !!o && !o.isOther);
 				if (picked.length === 0) return;
-				this.answers.set(q.label, {
-					label: q.label,
+				this.answers.set(q.tab, {
+					tab: q.tab,
 					value: "",
 					values: picked.map((o) => o.value),
 					answerLabel: "",
@@ -573,8 +573,8 @@ class AskUserPanel implements Component, Focusable {
 			}
 			// single-select: commit cursor position as the selection
 			st.selectedSingle = st.cursor;
-			this.answers.set(q.label, {
-				label: q.label,
+			this.answers.set(q.tab, {
+				tab: q.tab,
 				value: opt.value,
 				answerLabel: opt.label,
 				wasCustom: false,
@@ -652,8 +652,8 @@ class AskUserPanel implements Component, Focusable {
 		const th = this.theme;
 		const tabsPart = this.questions
 			.map((q, i) => {
-				const label = q.label;
-				const done = this.answers.has(q.label);
+				const label = q.tab;
+				const done = this.answers.has(q.tab);
 				return th.fg(done ? "success" : "dim", `${label}${done ? "✓" : "○"}`);
 			})
 			.join(th.fg("dim", " "));
@@ -678,9 +678,9 @@ class AskUserPanel implements Component, Focusable {
 		// ── Tab bar ──
 		if (this.questions.length > 1) {
 			const tabCells = this.questions.map((q, i) => {
-				const label = q.label;
+				const label = q.tab;
 				const active = i === this.currentTab;
-				const ans = this.answers.get(q.label);
+				const ans = this.answers.get(q.tab);
 				let mark = " ";
 				let baseColor: import("@earendil-works/pi-coding-agent").ThemeColor = active ? "accent" : "muted";
 				if (ans?.skipped) { mark = "—"; baseColor = "warning"; }
@@ -793,7 +793,7 @@ class AskUserPanel implements Component, Focusable {
 		for (let i = start; i < end; i++) {
 			const q = this.questions[i]!;
 			const isCursor = i === this.reviewCursor;
-			const ans = this.answers.get(q.label);
+			const ans = this.answers.get(q.tab);
 			// Header row: cursor + label, same coloring as the option screen.
 			const prefix = isCursor ? `${th.fg("accent", ICON_CURSOR)} ` : "  ";
 			const headerColor = isCursor ? "accent" : "muted";
@@ -829,10 +829,10 @@ class AskUserPanel implements Component, Focusable {
 			const opt = opts[i]!;
 			const isCursor = i === st.cursor;
 			const prefix = isCursor ? `${th.fg("accent", ICON_CURSOR)} ` : "  ";
-			const customAnswered = !multi && !!this.answers.get(q.label)?.wasCustom;
+			const customAnswered = !multi && !!this.answers.get(q.tab)?.wasCustom;
 			const glyph = this.optionGlyph(opt, i, st, multi, th, isCursor, customAnswered);
 			// For "Type something.", show the committed text instead of the placeholder.
-			const displayLabel = opt.isOther && customAnswered ? this.answers.get(q.label)!.value : opt.label;
+			const displayLabel = opt.isOther && customAnswered ? this.answers.get(q.tab)!.value : opt.label;
 			const labelColor = isCursor ? "accent" : opt.isOther ? (customAnswered ? "text" : "dim") : "text";
 			const labelText = th.fg(labelColor, displayLabel);
 			out.push(row(` ${prefix}${glyph} ${labelText}`));
@@ -871,13 +871,13 @@ class AskUserPanel implements Component, Focusable {
 
 		// ── build left column lines (options) ──
 		const leftLines: string[] = [];
-		const customAnswered = !multi && !!this.answers.get(q.label)?.wasCustom;
+		const customAnswered = !multi && !!this.answers.get(q.tab)?.wasCustom;
 		for (let i = start; i < end; i++) {
 			const opt = opts[i]!;
 			const isCursor = i === st.cursor;
 			const prefix = isCursor ? `${th.fg("accent", ICON_CURSOR)} ` : "  ";
 			const glyph = this.optionGlyph(opt, i, st, multi, th, isCursor, customAnswered);
-			const displayLabel = opt.isOther && customAnswered ? this.answers.get(q.label)!.value : opt.label;
+			const displayLabel = opt.isOther && customAnswered ? this.answers.get(q.tab)!.value : opt.label;
 			const labelColor = isCursor ? "accent" : opt.isOther ? (customAnswered ? "text" : "dim") : "text";
 			const labelLine = `${prefix}${glyph} ${th.fg(labelColor, displayLabel)}`;
 			leftLines.push(truncateToWidth(labelLine, leftW - 1, ""));
@@ -1011,9 +1011,9 @@ export default function askUserExtension(pi: ExtensionAPI) {
 				? `User cancelled the question(s). ${result.answers.length} question(s) were answered before cancellation.`
 				: result.answers
 						.map((a) => {
-							if (a.skipped) return `${a.label}: (skipped)`;
-							if (a.multiSelect) return `${a.label}: ${a.answerLabels?.join(", ") ?? a.values?.join(", ") ?? ""}`;
-							return `${a.label}: ${a.wasCustom ? "(custom) " : ""}${a.answerLabel || a.value}`;
+							if (a.skipped) return `${a.tab}: (skipped)`;
+							if (a.multiSelect) return `${a.tab}: ${a.answerLabels?.join(", ") ?? a.values?.join(", ") ?? ""}`;
+							return `${a.tab}: ${a.wasCustom ? "(custom) " : ""}${a.answerLabel || a.value}`;
 						})
 						.join("\n");
 

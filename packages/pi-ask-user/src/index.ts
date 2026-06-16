@@ -954,7 +954,7 @@ export default function askUserExtension(pi: ExtensionAPI) {
 		name: "ask_user",
 		label: "Ask User",
 		description:
-			"Ask the user one or more questions with options. Supports single-select (◎→◉) and multi-select (□→▣, space toggles), per-question 'Type something.' custom input with draft preserved across tab switches, and a focused side panel for extended detail (ASCII layouts, code, reasoning) when an option carries a `preview` field. Each option needs a short `label` + a `description` (shown beneath it); add a `preview` field only when a description can't fully convey the option. The panel is collapsible (Ctrl+\\). Use for clarifying requirements, getting preferences, or confirming decisions.",
+			"Ask the user one or more questions with options. Supports single-select (◎→◉) and multi-select (□→▣, space toggles), per-question 'Type something.' custom input with draft preserved across tab switches, and a focused side panel for extended detail (ASCII layouts, code, reasoning) when an option carries a `preview` field. Each option needs a short `label` + a `description` (shown beneath it); add a `preview` field only when a description can't fully convey the option. The panel is collapsible (Ctrl+\\). Use for clarifying requirements, getting preferences, or confirming decisions. All displayed user-facing text should use the conversation's language.",
 		parameters: AskUserParams,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

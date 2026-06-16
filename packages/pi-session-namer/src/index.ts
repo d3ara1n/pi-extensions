@@ -33,10 +33,10 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
 
 	// ── before_agent_start: auto-name on first prompt ───────────────
 	pi.on("before_agent_start", async (event, ctx) => {
-		if (!config.enabled || hasNamed) return;
-
-		// Cache prompt for /namer:rename
+		// Always cache the latest prompt for /namer:rename, even if auto-naming is done
 		lastPrompt = event.prompt;
+
+		if (!config.enabled || hasNamed) return;
 
 		// Skip empty prompts (e.g. image-only messages)
 		if (!event.prompt?.trim()) return;

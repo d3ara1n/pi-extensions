@@ -82,6 +82,7 @@ const KNOWN_MODELS: Record<string, Partial<ModelMeta>> = {
   "glm-5":          { contextWindow: 205_000, maxTokens: 131_072, compat: ZAI_STREAM },
   "glm-5-turbo":    { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
   "glm-5.1":        { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
+  "glm-5.2":        { contextWindow: 1_000_000, maxTokens: 131_072, compat: ZAI_STREAM },
   "glm-5v-turbo":   { contextWindow: 200_000, maxTokens: 131_072, input: ["text", "image"], compat: ZAI_STREAM },
 };
 

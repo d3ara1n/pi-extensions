@@ -88,6 +88,21 @@ const roles: ModelRolesAPI = getModelRolesAPI();  // 完整类型推导
 
 纯依赖库插件（不注册工具/命令）也必须注册 `session_start` 等 hook 来初始化状态。pi 按扩展列表顺序加载，但 `session_start` 是所有扩展加载完后统一触发的，所以**依赖库不需要排在消费者前面**。
 
+### 扩展改动后的测试
+
+修改 `packages/*/src/**` 下的扩展源码，或改动了 `~/.pi/agent/settings.json` 的 `extensions`，都需要**用户手动重载** pi 才能生效——pi 在启动时加载扩展，运行中不会热更新。
+
+写完插件后**不要立刻测试**，要先提醒用户：
+- 用 `/reload` 重新加载扩展，或重启 pi
+- 等用户确认重载完成后再开始测试
+
+这一点对**需要 LLM 配合测试**的功能尤其重要（注册了 tool/command、改了 prompt 等）——这类功能刚写完时还没生效，此时马上测试，拿到的结果毫无意义，还会误导后续判断。
+
+agent 的边界：
+- ✅ 改源码、跑 `npm run typecheck`（`tsc --noEmit`）验证类型——这些在项目内，可自行完成
+- ✅ 改 `settings.json` 把扩展路径加进去（只读改这一个数组）
+- ❌ 不要自行 `pi --reload`、kill/restart pi 进程——重载由用户手动执行
+
 ### settings.json 中的插件配置结构
 
 插件配置字段名约定：去掉 `@d3ara1n/pi-` 前缀后**转 camelCase**：

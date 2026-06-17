@@ -71,19 +71,12 @@ const ZAI_STREAM = {
 const KNOWN_MODELS: Record<string, Partial<ModelMeta>> = {
   "glm-4.5":        { contextWindow: 131_072, maxTokens: 98_304 },
   "glm-4.5-air":    { contextWindow: 131_072, maxTokens: 98_304 },
-  "glm-4.5-flash":  { contextWindow: 131_072, maxTokens: 98_304 },
-  "glm-4.5v":       { contextWindow: 65_536,  maxTokens: 4_096, input: ["text", "image"] },
-  "glm-4.6":        { contextWindow: 205_000, maxTokens: 131_072 },
-  "glm-4.6v":       { contextWindow: 128_000, maxTokens: 4_096, input: ["text", "image"] },
-  "glm-4.6v-flash": { contextWindow: 128_000, maxTokens: 4_096, input: ["text", "image"] },
-  "glm-4.7":        { contextWindow: 205_000, maxTokens: 131_072, compat: ZAI_STREAM },
-  "glm-4.7-flash":  { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
-  "glm-4.7-flashx": { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
-  "glm-5":          { contextWindow: 205_000, maxTokens: 131_072, compat: ZAI_STREAM },
+  "glm-4.6":        { contextWindow: 200_000, maxTokens: 131_072 },
+  "glm-4.7":        { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
+  "glm-5":          { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
   "glm-5-turbo":    { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
   "glm-5.1":        { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
   "glm-5.2":        { contextWindow: 1_000_000, maxTokens: 131_072, compat: ZAI_STREAM },
-  "glm-5v-turbo":   { contextWindow: 200_000, maxTokens: 131_072, input: ["text", "image"], compat: ZAI_STREAM },
 };
 
 // ── API helpers ───────────────────────────────────────────────────────────

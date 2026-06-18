@@ -94,6 +94,15 @@ When `allowOther` is `true` (default), a "Type something." row appears. Press
 - `Esc` discards the edit (the original answer is kept); `Enter` confirms the
   change (the answer is updated).
 
+**Multi-select + custom input.** In `multiSelect` mode the custom text is an
+*extra* entry kept alongside the checked options — it never overwrites them.
+You can check several options, then open "Type something.", type a value, and
+submit: both the checks and the custom text are preserved and returned
+together. The same holds in reverse — edit the question later from the review
+screen to add or remove checks and the committed custom text stays intact
+(and vice versa). Submitting an empty custom value clears only the custom
+entry; any remaining checks are kept.
+
 ### Required questions
 
 Set `allowSkip: false` to force an answer. The user cannot advance forward

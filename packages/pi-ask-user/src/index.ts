@@ -102,6 +102,8 @@ interface TabState {
 	editor: Editor;
 	/** Indices of committed options (multi-select). */
 	multiChecked: Set<number>;
+	/** Committed custom text for multi-select mode (kept alongside multiChecked, never overwriting it). Null if none. */
+	customText: string | null;
 	/** Committed single-select index (or -1 if none yet, -2 = answered via type-something). */
 	selectedSingle: number;
 }
@@ -206,7 +208,7 @@ function isDualColumn(q: Question | undefined): boolean {
 function newTabState(tui: TuiLike, theme: EditorTheme, tabIndex: number, onSubmit: (tabIndex: number, value: string) => void): TabState {
 	const editor = new Editor(tui as never, theme);
 	editor.onSubmit = (value) => onSubmit(tabIndex, value);
-	return { cursor: 0, scrollOffset: 0, inputMode: false, editor, multiChecked: new Set(), selectedSingle: -1 };
+	return { cursor: 0, scrollOffset: 0, inputMode: false, editor, multiChecked: new Set(), customText: null, selectedSingle: -1 };
 }
 
 function errorResult(message: string, questions: Question[] = []): {
@@ -299,22 +301,62 @@ class AskUserPanel implements Component, Focusable {
 		if (!q || !st) return;
 		const trimmed = value.trim();
 		if (!trimmed) {
-			// empty → back to options, keep nothing
+			// empty → back to options. In multi-select mode, an empty submit also
+			// clears any previously committed custom text (blank = "remove my custom
+			// answer"), then re-commits the remaining checked options.
 			st.inputMode = false;
 			st.editor.setText("");
+			if (isMulti(q)) {
+				st.customText = null;
+				if (!this.commitMultiAnswer(q, st)) this.answers.delete(q.tab);
+			}
 			if (tabIndex === this.currentTab) this.invalidate();
 			return;
 		}
-		this.answers.set(q.tab, {
-			tab: q.tab,
-			answerLabel: trimmed,
-			wasCustom: true,
-		});
+		if (isMulti(q)) {
+			// Multi-select: the custom text is an extra entry kept ALONGSIDE the
+			// checked options — it must NOT overwrite them. (Previously this path
+			// did answers.set with only the custom text, dropping every check.)
+			st.customText = trimmed;
+			this.commitMultiAnswer(q, st);
+		} else {
+			this.answers.set(q.tab, {
+				tab: q.tab,
+				answerLabel: trimmed,
+				wasCustom: true,
+			});
+			st.selectedSingle = -2; // sentinel: "answered via type-something"
+		}
 		st.inputMode = false;
-		st.selectedSingle = -2; // sentinel: "answered via type-something"
 		if (tabIndex === this.currentTab) {
 			this.advanceAfterAnswer();
 		}
+	}
+
+	/**
+	 * Multi-select commit: merge the checked options (st.multiChecked) together
+	 * with the committed custom text (st.customText) into one multi-select
+	 * answer. Returns false when there is nothing to commit (no checks and no
+	 * custom text), so the caller can delete the stale answer if desired.
+	 */
+	private commitMultiAnswer(q: Question, st: TabState): boolean {
+		const opts = buildOptions(q);
+		const picked = Array.from(st.multiChecked)
+			.sort((a, b) => a - b)
+			.map((i) => opts[i])
+			.filter((o): o is RenderOption => !!o && !o.isOther);
+		const labels = picked.map((o) => o.label);
+		const hasCustom = !!st.customText;
+		if (hasCustom && st.customText) labels.push(st.customText);
+		if (labels.length === 0) return false;
+		this.answers.set(q.tab, {
+			tab: q.tab,
+			answerLabel: "",
+			answerLabels: labels,
+			wasCustom: hasCustom,
+			multiSelect: true,
+		});
+		return true;
 	}
 
 	// ── accessors ──
@@ -532,28 +574,19 @@ class AskUserPanel implements Component, Focusable {
 				// Prefill the editor with the committed custom text (if any) so the
 				// user can edit rather than retype. Per-tab editor keeps the text
 				// for Esc-discard semantics automatically.
+				//   - Single-select: custom text lives in answers[].answerLabel.
+				//   - Multi-select:  it lives in st.customText (kept alongside checks).
 				const existing = this.answers.get(q.tab);
-				if (existing?.wasCustom && existing.answerLabel) {
-					st.editor.setText(existing.answerLabel);
-				}
+				const prefill = multi ? st.customText : existing?.wasCustom ? existing.answerLabel : null;
+				if (prefill) st.editor.setText(prefill);
 				this.invalidate();
 				return;
 			}
 			if (multi) {
 				if (!st.multiChecked.has(st.cursor)) st.multiChecked.add(st.cursor);
-				const picked = Array.from(st.multiChecked)
-					.sort((a, b) => a - b)
-					.map((i) => opts[i])
-					.filter((o): o is RenderOption => !!o && !o.isOther);
-				if (picked.length === 0) return;
-				this.answers.set(q.tab, {
-					tab: q.tab,
-					answerLabel: "",
-					answerLabels: picked.map((o) => o.label),
-					wasCustom: false,
-					multiSelect: true,
-				});
-				this.advanceAfterAnswer();
+				// Re-commit merges checks + any previously entered custom text, so
+				// going back to add/remove a check never drops the custom value.
+				if (this.commitMultiAnswer(q, st)) this.advanceAfterAnswer();
 				return;
 			}
 			// single-select: commit cursor position as the selection
@@ -813,10 +846,12 @@ class AskUserPanel implements Component, Focusable {
 			const opt = opts[i]!;
 			const isCursor = i === st.cursor;
 			const prefix = isCursor ? `${th.fg("accent", ICON_CURSOR)} ` : "  ";
-			const customAnswered = !multi && !!this.answers.get(q.tab)?.wasCustom;
+			const ans = this.answers.get(q.tab);
+			const committedCustom = multi ? st.customText : ans?.wasCustom ? ans.answerLabel : null;
+			const customAnswered = !!committedCustom;
 			const glyph = this.optionGlyph(opt, i, st, multi, th, isCursor, customAnswered);
 			// For "Type something.", show the committed text instead of the placeholder.
-			const displayLabel = opt.isOther && customAnswered ? this.answers.get(q.tab)!.answerLabel : opt.label;
+			const displayLabel = opt.isOther && customAnswered ? committedCustom! : opt.label;
 			const labelColor = isCursor ? "accent" : opt.isOther ? (customAnswered ? "text" : "dim") : "text";
 			const labelText = th.fg(labelColor, displayLabel);
 			out.push(row(` ${prefix}${glyph} ${labelText}`));
@@ -855,13 +890,15 @@ class AskUserPanel implements Component, Focusable {
 
 		// ── build left column lines (options) ──
 		const leftLines: string[] = [];
-		const customAnswered = !multi && !!this.answers.get(q.tab)?.wasCustom;
+		const dualAns = this.answers.get(q.tab);
+		const dualCommittedCustom = multi ? st.customText : dualAns?.wasCustom ? dualAns.answerLabel : null;
+		const customAnswered = !!dualCommittedCustom;
 		for (let i = start; i < end; i++) {
 			const opt = opts[i]!;
 			const isCursor = i === st.cursor;
 			const prefix = isCursor ? `${th.fg("accent", ICON_CURSOR)} ` : "  ";
 			const glyph = this.optionGlyph(opt, i, st, multi, th, isCursor, customAnswered);
-			const displayLabel = opt.isOther && customAnswered ? this.answers.get(q.tab)!.answerLabel : opt.label;
+			const displayLabel = opt.isOther && customAnswered ? dualCommittedCustom! : opt.label;
 			const labelColor = isCursor ? "accent" : opt.isOther ? (customAnswered ? "text" : "dim") : "text";
 			const labelLine = `${prefix}${glyph} ${th.fg(labelColor, displayLabel)}`;
 			leftLines.push(truncateToWidth(labelLine, leftW - 1, ""));

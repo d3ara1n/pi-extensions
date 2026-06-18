@@ -317,16 +317,22 @@ class AskUserPanel implements Component, Focusable {
 			// Multi-select: the custom text is an extra entry kept ALONGSIDE the
 			// checked options — it must NOT overwrite them. (Previously this path
 			// did answers.set with only the custom text, dropping every check.)
+			// Committing custom text only records it — we return to the OPTION LIST
+			// (not advance) so the user can keep checking options and then press
+			// Enter on an option to confirm the whole question. Advancing here used
+			// to jump straight to review the moment the custom editor closed.
 			st.customText = trimmed;
 			this.commitMultiAnswer(q, st);
-		} else {
-			this.answers.set(q.tab, {
-				tab: q.tab,
-				answerLabel: trimmed,
-				wasCustom: true,
-			});
-			st.selectedSingle = -2; // sentinel: "answered via type-something"
+			st.inputMode = false;
+			if (tabIndex === this.currentTab) this.invalidate();
+			return;
 		}
+		this.answers.set(q.tab, {
+			tab: q.tab,
+			answerLabel: trimmed,
+			wasCustom: true,
+		});
+		st.selectedSingle = -2; // sentinel: "answered via type-something"
 		st.inputMode = false;
 		if (tabIndex === this.currentTab) {
 			this.advanceAfterAnswer();
@@ -624,9 +630,16 @@ class AskUserPanel implements Component, Focusable {
 		}
 		if (matchesKey(data, Key.tab)) {
 			// Jump to the question under the review cursor for editing.
+			// We set currentTab + invalidate directly rather than calling
+			// switchTab(): switchTab early-returns when next === currentTab, which
+			// happens whenever the review cursor sits on the already-active
+			// question (always true for a single-question call). That early return
+			// skipped invalidate(), so the panel kept showing the stale review
+			// render and Tab looked dead until ↑/↓ forced a redraw.
 			this.reviewMode = false;
 			this.editingFromReview = true;
-			this.switchTab(this.reviewCursor);
+			this.currentTab = this.reviewCursor;
+			this.invalidate();
 			return;
 		}
 		if (matchesKey(data, Key.up)) {

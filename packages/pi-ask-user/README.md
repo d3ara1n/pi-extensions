@@ -48,7 +48,7 @@ This tool fixes that:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `header` | string | yes | Short title shown in the panel header |
-| `label` | string | yes | Short keyword shown on the tab bar and returned to identify this question. Must be unique across all questions in one call |
+| `tab` | string | yes | Short keyword identifying this question. Shown on the tab bar when there are multiple questions, and returned in the result as the answer's prefix. Write it in the user's language, not as a programmatic identifier. Must be unique across all questions in one call |
 | `options` | array | yes | 2–4 options |
 | `prompt` | string | no | Longer body text under the header |
 | `allowOther` | boolean | no | Allow "Type something." custom input. Default `true` |
@@ -62,7 +62,7 @@ This tool fixes that:
 | `label` | string | yes | Display label |
 | `value` | string | no | Returned value. Defaults to `label` if omitted |
 | `description` | string | no | Short explanation under the label (wraps). Add one when the label alone isn't self-explanatory |
-| `preview` | string | no | Only add when `description` alone can't make the option clear — ASCII layout demo, code snippet, or detailed reasoning. Most options need only `description`. Triggers a side column when present |
+| `preview` | string | no | Use when `description` (a short one-liner) isn't enough and the user genuinely benefits from more detail in a side column — ASCII layout demo, code skeleton, Pro/Cons breakdown, or the reasoning behind the option and what choosing it entails. Rendered verbatim. Don't treat it as extra text capacity — every line competes for the user's attention. If a short `description` already conveys the option, leave empty. Most options need only `description` |
 
 ### Icons
 

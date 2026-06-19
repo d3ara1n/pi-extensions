@@ -122,7 +122,7 @@ const QuestionOptionSchema = Type.Object({
 	preview: Type.Optional(
 		Type.String({
 			description:
-			"Only add this when `description` alone can't make the option clear — e.g. an ASCII layout demo, a code snippet, or detailed reasoning. Omit it otherwise; most options need only `description`. Triggers a side column when present.",
+			"Use this when `description` (a short one-liner) is not enough and the user genuinely benefits from seeing more detail in a side column — e.g. an ASCII layout demo, a code skeleton, a Pro/Cons breakdown, or the reasoning behind why this option is offered and what choosing it entails. Rendered verbatim in a side column (spaces/newlines preserved). Do NOT treat preview as extra text capacity. Every line competes for the user's attention against the option list; only add a preview when the content is worth reading, not just because there's room for more words. If a short `description` already conveys the option, leave preview empty. Most options need only `description`.",
 		}),
 	),
 });
@@ -132,7 +132,7 @@ const QuestionSchema = Type.Object({
 		description: "Short question title shown in the panel header, e.g. 'Which layout?'",
 	}),
 	tab: Type.String({
-		description: "Short text shown on the tab bar for users to locate each question. Also serves as the answer key in the result. Prioritize readability for users over programmatic brevity — write in the user's language, e.g. \"Database\" or \"Layout\", not \"db_choice\". Must be unique across questions in one call." }),
+		description: "Short keyword that identifies this question. Shown on the tab bar when there are multiple questions, and returned in the result as the answer's prefix. Write it in the user's language (e.g. \"数据库\" or \"布局\" in a Chinese conversation, \"Database\" or \"Layout\" in English), not as a programmatic identifier like \"db_choice\". Must be unique across questions in one call." }),
 	prompt: Type.Optional(
 		Type.String({ description: "Optional longer body text shown under the header" }),
 	),

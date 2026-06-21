@@ -52,7 +52,15 @@ const MODE_ICON: Record<AccessMode, string> = { prompt: "🔐", deny: "🔒", al
 function updateStatus(ctx: ExtensionContext) {
 	const state = getState();
 	if (!state.alive) return;
-	ctx.ui.setStatus(STATUS_KEY, `${MODE_ICON[state.mode]} access:${state.mode}`);
+	const icon = MODE_ICON[state.mode];
+	// Only color the mode word after the colon; the icon + label stay default.
+	const modeWord =
+		state.mode === "deny"
+			? ctx.ui.theme.fg("error", state.mode)
+			: state.mode === "allow"
+				? ctx.ui.theme.fg("success", state.mode)
+				: state.mode;
+	ctx.ui.setStatus(STATUS_KEY, `${icon} access:${modeWord}`);
 }
 
 function formatPaths(paths: string[]): string {

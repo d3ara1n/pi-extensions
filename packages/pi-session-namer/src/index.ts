@@ -24,7 +24,7 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
 		hasNamed = false;
 		lastPrompt = "";
 
-		// 如果会话已有名称（resume/fork/用户手动命名），不再自动命名
+		// If the session already has a name (resume/fork/user-set), don't auto-name
 		const existingName = pi.getSessionName();
 		if (existingName) {
 			hasNamed = true;
@@ -41,10 +41,10 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
 		// Skip empty prompts (e.g. image-only messages)
 		if (!event.prompt?.trim()) return;
 
-		// 标记为已处理（无论后续成功与否，不重试）
+		// Mark as handled (no retry regardless of subsequent success/failure)
 		hasNamed = true;
 
-		// 异步命名，不阻塞主 agent 启动
+		// Name asynchronously so we don't block the main agent startup
 		(async () => {
 			let rolesApi;
 			try {

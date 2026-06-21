@@ -52,7 +52,6 @@ Under the `accessDenied` key in `settings.json` (global `~/.pi/agent/settings.js
       "/tmp/build-out"
     ],
     "extraSafePaths": [],                 // finer-grained paths that never prompt
-    "allowTempDir": true,                 // allow os.tmpdir() (per-user temp), default true
     "tools": ["write", "edit", "bash"]   // which tools to gate, default these three
   }
 }
@@ -60,12 +59,12 @@ Under the `accessDenied` key in `settings.json` (global `~/.pi/agent/settings.js
 
 ## Built-in safe paths (never prompt)
 
-Regardless of the allowlist, these paths are allowed by default because they are process-internal or legitimate temp usage:
+The gate's purpose is to stop an out-of-control agent from leaving **permanent footprints** outside the project (configs, user data, system files) — not to isolate users or hide other programs' data. So task-scoped scratch space that the OS reclaims is always allowed:
 
 - **Pseudo-devices**: `/dev/null`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr`, `/dev/zero`, `/dev/urandom`, `/dev/random`, `/dev/fd/` (the process's own file descriptors)
-- **User temp dir**: `os.tmpdir()` (macOS `/var/folders/.../T/`, Linux `/tmp`) — per-user isolated + auto-cleaned; disable with `allowTempDir: false`
+- **Scratch dirs**: `/tmp` (system shared, auto-cleaned) and `os.tmpdir()` (per-user temp; on Linux these are the same place). macOS `/tmp` -> `/private/tmp` symlink is handled.
 
-Deliberately **not** allowed: `/dev/tty` (can capture keyboard input), `/dev/disk*` (block devices), and the system-shared `/tmp` (only on Linux where `os.tmpdir()` happens to be `/tmp` is it allowed via `allowTempDir`).
+Deliberately **not** allowed: `/dev/tty` (can capture keyboard input), `/dev/disk*` (block devices), and anything that persists — home dir, `/etc`, `/var`, `/usr`, etc.
 
 Use `extraSafePaths` to add your own safe paths (e.g. a log dir you always read).
 

@@ -11,6 +11,7 @@
  * alone because the shell runs inside cwd. See README "Limitations".
  */
 
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -19,6 +20,12 @@ import * as path from "node:path";
  *   - `/dev/null`, `/dev/stdin|out|err`, `/dev/zero`, `/dev/u?random`
  *     (process-internal pseudo-devices, safe)
  *   - `/dev/fd/` (current process's own file descriptors, safe)
+ *
+ * The gate's purpose is to prevent an out-of-control agent from leaving
+ * *permanent* footprints outside the project (configs, user data, system
+ * files). Task-scoped scratch space that the OS reclaims is explicitly fine:
+ *   - `/tmp` (system shared, auto-cleaned)
+ *   - `os.tmpdir()` (per-user temp, auto-cleaned; on Linux it == /tmp)
  *
  * `/dev/tty` is intentionally NOT included — it can capture keyboard input.
  * `/dev/disk*`, `/dev/sda*` etc. are NOT included — block devices are dangerous.
@@ -34,10 +41,24 @@ const SAFE_DEV_PATHS: readonly string[] = [
 ];
 const SAFE_DEV_PREFIXES: readonly string[] = ["/dev/fd/"];
 
+/** Resolve `/tmp` to its real path (handles the macOS `private/tmp` symlink). */
+const TMP_REAL = (() => {
+	try {
+		return fs.realpathSync("/tmp");
+	} catch {
+		return "/tmp";
+	}
+})();
+
 /** True if `target` (normalized absolute) is an always-safe pseudo-device. */
 function isSafeDevice(target: string): boolean {
 	if (SAFE_DEV_PATHS.includes(target)) return true;
 	return SAFE_DEV_PREFIXES.some((p) => target.startsWith(p));
+}
+
+/** True if `target` is under a given normalized root dir. */
+function underRoot(target: string, root: string): boolean {
+	return target === root || target.startsWith(root + path.sep);
 }
 
 /** Expand a leading `~` or `$HOME` form to the home directory. Returns null if not a home form. */
@@ -76,19 +97,22 @@ export function isOutsideAllowlist(target: string, allowlist: string[]): boolean
 /**
  * True if `target` is always-safe (no prompt needed) regardless of allowlist:
  *   - built-in safe pseudo-devices (/dev/null, /dev/fd/, etc.)
- *   - the OS per-user temp dir (os.tmpdir()) when `allowTempDir`
+ *   - task-scoped scratch dirs: /tmp and os.tmpdir() (no permanent footprint)
  *   - any user-configured extra safe paths
  */
-export function isSafe(target: string, opts: { allowTempDir: boolean; extraSafePaths: string[] }): boolean {
+export function isSafe(target: string, opts: { extraSafePaths: string[] }): boolean {
 	if (isSafeDevice(target)) return true;
-	if (opts.allowTempDir) {
-		const tmp = path.normalize(os.tmpdir());
-		if (target === tmp || target.startsWith(tmp + path.sep)) return true;
-	}
+	// /tmp and os.tmpdir(): task-scoped, OS-reclaimed, no permanent footprint.
+	// Match both the literal "/tmp" prefix and its realpath (macOS: /tmp -> /private/tmp)
+	// so LLM-provided paths like "/tmp/foo" are recognized without a realpath round-trip.
+	if (underRoot(target, "/tmp")) return true;
+	if (TMP_REAL !== "/tmp" && underRoot(target, TMP_REAL)) return true;
+	const tmp = path.normalize(os.tmpdir());
+	if (underRoot(target, tmp)) return true;
 	for (const p of opts.extraSafePaths) {
 		const resolved = expandHome(p) ?? p;
 		const norm = path.isAbsolute(resolved) ? path.normalize(resolved) : path.resolve(process.cwd(), resolved);
-		if (target === norm || target.startsWith(norm + path.sep)) return true;
+		if (underRoot(target, norm)) return true;
 	}
 	return false;
 }
@@ -122,7 +146,7 @@ export function extractBashViolations(
 	command: string,
 	cwd: string,
 	allowlist: string[],
-	safeOpts: { allowTempDir: boolean; extraSafePaths: string[] },
+	safeOpts: { extraSafePaths: string[] },
 ): string[] {
 	const violations = new Set<string>();
 	for (const raw of command.matchAll(TOKEN_RE)) {

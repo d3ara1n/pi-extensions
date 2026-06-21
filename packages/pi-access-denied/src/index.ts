@@ -133,10 +133,12 @@ export default function (pi: ExtensionAPI) {
 
 		if (isToolCallEventType("write", event) || isToolCallEventType("edit", event)) {
 			const target = resolveTarget(event.input.path, cwd);
-			if (isSafe(target, state.config)) return; // always-safe, passthrough
+			if (isSafe(target, { extraSafePaths: state.config.extraSafePaths })) return; // always-safe
 			violations = isOutsideAllowlist(target, allowlist) ? [target] : [];
 		} else if (isToolCallEventType("bash", event)) {
-			violations = extractBashViolations(event.input.command, cwd, allowlist, state.config);
+			violations = extractBashViolations(event.input.command, cwd, allowlist, {
+				extraSafePaths: state.config.extraSafePaths,
+			});
 		} else {
 			return; // tool not understood here — nothing to gate
 		}
@@ -217,8 +219,8 @@ export default function (pi: ExtensionAPI) {
 			const allowlist = buildAllowlist(ctx.cwd, state.config.extraAllowedDirs);
 			const safeLines: string[] = [
 				"/dev/null, /dev/std{in,out,err}, /dev/zero, /dev/{u,}random, /dev/fd/",
+				"/tmp, " + os.tmpdir(),
 			];
-			if (state.config.allowTempDir) safeLines.push(`temp: ${os.tmpdir()}`);
 			for (const p of state.config.extraSafePaths) safeLines.push(p);
 			const lines = [
 				`Mode: ${state.mode}   Tools: ${state.config.tools.join(", ")}`,

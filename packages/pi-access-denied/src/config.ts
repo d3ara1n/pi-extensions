@@ -62,7 +62,6 @@ export function loadConfig(cwd?: string): AccessDeniedConfig {
 		mode: asMode(raw.mode) ?? DEFAULT_CONFIG.mode,
 		extraAllowedDirs: asStringArray(raw.extraAllowedDirs) ?? DEFAULT_CONFIG.extraAllowedDirs,
 		extraSafePaths: asStringArray(raw.extraSafePaths) ?? DEFAULT_CONFIG.extraSafePaths,
-		allowTempDir: typeof raw.allowTempDir === "boolean" ? raw.allowTempDir : DEFAULT_CONFIG.allowTempDir,
 		tools: asStringArray(raw.tools) ?? DEFAULT_CONFIG.tools,
 	};
 }

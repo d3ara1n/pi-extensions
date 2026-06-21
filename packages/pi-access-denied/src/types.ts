@@ -27,13 +27,6 @@ export interface AccessDeniedConfig {
 	 * finer-grained escape hatch. Defaults to `[]`.
 	 */
 	extraSafePaths: string[];
-	/**
-	 * Allow the OS per-user temp dir (`os.tmpdir()`) without prompting.
-	 * Defaults to `true` — temp is per-user isolated and auto-cleaned, and
-	 * common agent workflows (build output, git clone, download cache) write
-	 * there legitimately. Set to `false` for strict sandboxing.
-	 */
-	allowTempDir: boolean;
 	/** Built-in tools to gate. Defaults to `["write", "edit", "bash"]`. */
 	tools: string[];
 }
@@ -42,6 +35,5 @@ export const DEFAULT_CONFIG: AccessDeniedConfig = {
 	mode: "prompt",
 	extraAllowedDirs: [],
 	extraSafePaths: [],
-	allowTempDir: true,
 	tools: ["write", "edit", "bash"],
 };

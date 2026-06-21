@@ -15,6 +15,7 @@ A collection of small extensions for [Pi Coding Agent](https://pi.dev).
 | [`pi-model-roles`](./packages/pi-model-roles) | Named model role definitions with resolution to Model instances |
 | [`pi-command-palette`](./packages/pi-command-palette) | Global command palette — Ctrl+Shift+P to search and run commands from anywhere |
 | [`pi-session-namer`](./packages/pi-session-namer) | Auto-name sessions using a cheap side agent |
+| [`pi-access-denied`](./packages/pi-access-denied) | Sandbox `write`/`edit`/`bash` to the project dir — prompt / deny / allow modes with per-session allow-deny memory |
 
 ## Libraries
 

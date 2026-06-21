@@ -126,13 +126,13 @@ cursor updates the right pane. Ideal for comparing ASCII layouts / code samples:
       "label": "Sidebar",
       "value": "sidebar",
       "description": "Left-side navigation with the main content to its right.",
-      "preview": "┌──┬────────┐\n│导│  正文  │\n│航│        │\n└──┴────────┘\n左侧固定导航"
+      "preview": "┌──┬────────┐\n│NA│  body  │\n│V │        │\n└──┴────────┘\nleft sidebar nav"
     },
     {
       "label": "Top bar",
       "value": "topbar",
       "description": "Top horizontal nav with the main content below.",
-      "preview": "┌──────────────┐\n│    导航条    │\n├──────────────┤\n│     正文     │\n└──────────────┘\n顶部横向导航"
+      "preview": "┌──────────────┐\n│    nav bar   │\n├──────────────┤\n│     body     │\n└──────────────┘\ntop horizontal nav"
     }
   ]
 }

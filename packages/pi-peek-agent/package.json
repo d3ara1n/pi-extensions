@@ -1,0 +1,36 @@
+{
+  "name": "@d3ara1n/pi-peek-agent",
+  "version": "0.1.0",
+  "description": "LLM tool for pi-peek — lets the main agent peek at another pi instance or ask it a question, without disturbing it",
+  "main": "src/index.ts",
+  "keywords": [
+    "pi-package",
+    "pi"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@d3ara1n/pi-peek": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@d3ara1n/pi-peek": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@d3ara1n/pi-peek": "^0.1.0"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/d3ara1n/pi-extensions",
+    "directory": "packages/pi-peek-agent"
+  },
+  "license": "MIT"
+}

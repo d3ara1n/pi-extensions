@@ -700,7 +700,7 @@ class AskUserPanel implements Component, Focusable {
 		const row = (content: string) => th.fg("border", "│") + padRight(content, innerW) + th.fg("border", "│");
 
 		if (this.reviewMode) {
-			return this.renderReview(width, innerW, row, th);
+			return this.renderReview(width, innerW, th);
 		}
 
 		lines.push(th.fg("border", `╭${"─".repeat(innerW)}╮`));
@@ -810,11 +810,16 @@ class AskUserPanel implements Component, Focusable {
 
 	/** Review summary: one question per entry, header row + answer row, with
 	 *  viewport scrolling reusing the option-screen layout primitives. */
-	private renderReview(width: number, innerW: number, row: (s: string) => string, th: Theme): string[] {
+	private renderReview(width: number, innerW: number, th: Theme): string[] {
 		const lines: string[] = [];
-		lines.push(th.fg("border", `╭${"─".repeat(innerW)}╮`));
+		// Review uses a distinct border color (success/green) so it's visually
+		// unmistakable as the review/confirm screen — not another question. The
+		// question screen keeps the default "border" color.
+		const bc: import("@earendil-works/pi-coding-agent").ThemeColor = "success";
+		const row = (content: string) => th.fg(bc, "│") + padRight(content, innerW) + th.fg(bc, "│");
+		lines.push(th.fg(bc, `╭${"─".repeat(innerW)}╮`));
 		lines.push(row(` ${th.fg("accent", th.bold("Review your answers"))}`));
-		lines.push(th.fg("border", `├${"─".repeat(innerW)}┤`));
+		lines.push(th.fg(bc, `├${"─".repeat(innerW)}┤`));
 		const n = this.questions.length;
 		this.reviewViewportH = Math.max(3, Math.min(n, 10));
 		this.clampReviewScroll();
@@ -838,9 +843,9 @@ class AskUserPanel implements Component, Focusable {
 		if (n > this.reviewViewportH) {
 			lines.push(row(th.fg("dim", `     ↑↓/PgUp/PgDn scroll · ${start + 1}-${end}/${n}`)));
 		}
-		lines.push(th.fg("border", `├${"─".repeat(innerW)}┤`));
+		lines.push(th.fg(bc, `├${"─".repeat(innerW)}┤`));
 		lines.push(row(th.fg("dim", " ↑↓ navigate · Tab edit selected · Enter confirm · Esc cancel")));
-		lines.push(th.fg("border", `╰${"─".repeat(innerW)}╯`));
+		lines.push(th.fg(bc, `╰${"─".repeat(innerW)}╯`));
 		return lines;
 	}
 

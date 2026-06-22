@@ -95,6 +95,53 @@ export function isOutsideAllowlist(target: string, allowlist: string[]): boolean
 }
 
 /**
+ * Return the entry in `roots` that covers `target` (equals it or is one of its
+ * ancestors), or undefined if none. Lets a caller both *test* coverage and
+ * recover the covering root — e.g. to look up the reason attached to a deny
+ * root. Mirrors `underRoot` but across a set.
+ */
+export function coveringRoot(target: string, roots: Iterable<string>): string | undefined {
+	for (const r of roots) {
+		if (underRoot(target, r)) return r;
+	}
+	return undefined;
+}
+
+/** True if `target` equals or sits beneath any entry in `roots` (prefix match). */
+export function isCoveredBy(target: string, roots: Iterable<string>): boolean {
+	return coveringRoot(target, roots) !== undefined;
+}
+
+/**
+ * Remember `dir` as an always-allow root with prefix semantics:
+ *   - if some remembered root already covers `dir`, do nothing (redundant);
+ *   - otherwise drop any remembered roots that sit *beneath* `dir` (they are
+ *     now subsumed by the broader entry) and add `dir`.
+ *
+ * This keeps the set minimal and the status view free of odd “parent listed
+ * next to its own child” duplication.
+ */
+export function rememberAllowed(set: Set<string>, dir: string): void {
+	if (isCoveredBy(dir, set)) return; // a parent already covers dir
+	for (const existing of [...set]) {
+		if (existing !== dir && underRoot(existing, dir)) set.delete(existing);
+	}
+	set.add(dir);
+}
+
+/**
+ * Mirror of {@link rememberAllowed} for the deny map (path → reason): keeps the
+ * widest deny, drops narrower denies subsumed by the new `dir`.
+ */
+export function rememberDenied(map: Map<string, string>, dir: string, reason: string): void {
+	if (isCoveredBy(dir, map.keys())) return; // a parent already denies dir
+	for (const existing of [...map.keys()]) {
+		if (existing !== dir && underRoot(existing, dir)) map.delete(existing);
+	}
+	map.set(dir, reason);
+}
+
+/**
  * True if `target` is always-safe (no prompt needed) regardless of allowlist:
  *   - built-in safe pseudo-devices (/dev/null, /dev/fd/, etc.)
  *   - task-scoped scratch dirs: /tmp and os.tmpdir() (no permanent footprint)
@@ -138,19 +185,34 @@ function isEscapingCandidate(token: string): boolean {
 // `; | & < > ( ) { }`. Quoted runs are kept whole so paths with spaces survive.
 const TOKEN_RE = /"[^"]*"|'[^']*'|[^\s"'`;|&<>(){}=]+/g;
 
+// Heredoc opener: `<<DELIM`, `<<-DELIM`, `<<'DELIM'`, `<<"DELIM"`, `<<\DELIM`.
+// Captures the bare delimiter word (quotes/escape stripped) so we can find the
+// matching terminator line and skip the body. Here-strings (`<<<`) don't match
+// because the third `<` fails the `[A-Za-z_]` start requirement.
+const HEREDOC_RE = /<<-?\s*(?:\\|["']?)([A-Za-z_][\w-]*)["']?/;
+
 /**
- * Extract the set of normalized absolute paths a bash command appears to touch
- * OUTSIDE the allowlist. Heuristic — see README for known blind spots.
+ * Scan a single command line's tokens for out-of-allowlist paths. Mutates
+ * `violations`. Shared by the per-line loop in {@link extractBashViolations}.
+ *
+ * Quoted tokens are **skipped**: a quoted run is a data literal passed to a
+ * program (e.g. `echo '...'`, `sed 's|a|b|g'`, `printf '%s' ...`), not a path
+ * the command opens. Treating such literals as paths was the root cause of
+ * code-content false positives — e.g. a JS block comment at the start of a
+ * quoted string was mistaken for absolute path `/`.
  */
-export function extractBashViolations(
-	command: string,
+function scanLine(
+	line: string,
 	cwd: string,
 	allowlist: string[],
 	safeOpts: { extraSafePaths: string[] },
-): string[] {
-	const violations = new Set<string>();
-	for (const raw of command.matchAll(TOKEN_RE)) {
-		const token = stripQuotes(raw[0]);
+	violations: Set<string>,
+): void {
+	for (const raw of line.matchAll(TOKEN_RE)) {
+		const r = raw[0];
+		// Quoted run = data literal, not a path. See method comment.
+		if (r[0] === '"' || r[0] === "'") continue;
+		const token = stripQuotes(r);
 		if (!token) continue;
 		if (token.startsWith("-")) continue; // option flag
 		// Unresolved $VAR (other than $HOME) can't be analyzed statically — skip.
@@ -159,6 +221,43 @@ export function extractBashViolations(
 		const target = resolveTarget(token, cwd);
 		if (isSafe(target, safeOpts)) continue; // always-safe, not a violation
 		if (isOutsideAllowlist(target, allowlist)) violations.add(target);
+	}
+}
+
+/** If `line` opens a heredoc (`<<DELIM` forms), return the bare delimiter word. */
+function heredocDelim(line: string): string | null {
+	const m = line.match(HEREDOC_RE);
+	return m ? m[1] : null;
+}
+
+/**
+ * Extract the set of normalized absolute paths a bash command appears to touch
+ * OUTSIDE the allowlist. Heuristic — see README for known blind spots.
+ *
+ * Processes the command **line by line** so it can skip heredoc bodies: a line
+ * that opens `<<DELIM` flips on body-skipping until the matching `DELIM`
+ * terminator line. Inside the body, lines are stdin data, not paths. This is
+ * what stops a `cat > f <<'EOF' ... code ... EOF` from flagging every
+ * `/...` token in the embedded code.
+ */
+export function extractBashViolations(
+	command: string,
+	cwd: string,
+	allowlist: string[],
+	safeOpts: { extraSafePaths: string[] },
+): string[] {
+	const violations = new Set<string>();
+	let pendingDelim: string | null = null;
+	for (const line of command.split("\n")) {
+		if (pendingDelim !== null) {
+			// Heredoc body: stdin data, never a path. Terminated by a line equal to
+			// the delimiter; `<<-` permits leading tabs, so strip those before compare.
+			if (line.replace(/^\t+/, "").trim() === pendingDelim) pendingDelim = null;
+			continue;
+		}
+		const delim = heredocDelim(line);
+		if (delim) pendingDelim = delim;
+		scanLine(line, cwd, allowlist, safeOpts, violations);
 	}
 	return [...violations];
 }

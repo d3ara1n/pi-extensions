@@ -17,7 +17,17 @@ import { isToolCallEventType, type ExtensionAPI, type ExtensionContext } from "@
 import * as os from "node:os";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { loadConfig } from "./config.ts";
-import { buildAllowlist, extractBashViolations, isOutsideAllowlist, isSafe, resolveTarget } from "./paths.ts";
+import {
+	buildAllowlist,
+	coveringRoot,
+	extractBashViolations,
+	isCoveredBy,
+	isOutsideAllowlist,
+	isSafe,
+	rememberAllowed,
+	rememberDenied,
+	resolveTarget,
+} from "./paths.ts";
 import { DEFAULT_CONFIG, type AccessMode, type Decision } from "./types.ts";
 
 const GLOBAL_KEY = "__piAccessDenied";
@@ -146,14 +156,17 @@ export default function (pi: ExtensionAPI) {
 		if (violations.length === 0) return; // in-bounds, passthrough
 		if (state.mode === "allow") return; // gate disabled
 
-		// Cached session decisions short-circuit the prompt.
+		// Cached session decisions short-circuit the prompt. Both memories use
+		// prefix coverage: remembering a parent covers its whole subtree.
 		if (state.alwaysDeny.size) {
-			const hit = violations.find((v) => state.alwaysDeny.has(v));
-			if (hit) {
-				return { block: true, reason: `Always denied (${state.alwaysDeny.get(hit)})` };
+			for (const v of violations) {
+				const root = coveringRoot(v, state.alwaysDeny.keys());
+				if (root) {
+					return { block: true, reason: `Always denied (${state.alwaysDeny.get(root)})` };
+				}
 			}
 		}
-		if (violations.every((v) => state.alwaysAllow.has(v))) return; // all whitelisted
+		if (violations.every((v) => isCoveredBy(v, state.alwaysAllow))) return; // all whitelisted
 
 		// deny mode blocks without asking.
 		if (state.mode === "deny") {
@@ -170,13 +183,13 @@ export default function (pi: ExtensionAPI) {
 			case "allow-once":
 				return; // passthrough this one call
 			case "allow-always":
-				for (const v of violations) state.alwaysAllow.add(v);
+				for (const v of violations) rememberAllowed(state.alwaysAllow, v);
 				return;
 			case "deny-once":
 				return { block: true, reason: await askReason(ctx) };
 			case "deny-always": {
 				const reason = await askReason(ctx);
-				for (const v of violations) state.alwaysDeny.set(v, reason);
+				for (const v of violations) rememberDenied(state.alwaysDeny, v, reason);
 				return { block: true, reason };
 			}
 			default:

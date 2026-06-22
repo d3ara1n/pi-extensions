@@ -19,11 +19,11 @@ By default, pi's `write` / `edit` / `bash` can read and write any file the agent
 Authorization dialog options (`prompt` mode only):
 
 - **Accept (this once)** — allow this one call
-- **Always accept (remember path this session)** — remember the path, don't ask again this session
+- **Always accept (remember path this session)** — remember the path **and everything beneath it**, don't ask again this session
 - **Deny** — block this one call; an optional reason input appears (leave empty for a default reason)
-- **Always deny (remember path this session)** — permanently block that path this session; optional reason
+- **Always deny (remember path this session)** — permanently block that path **and everything beneath it** this session; optional reason
 
-"Always" memory is keyed by the **normalized target path** and is **session-only** — restarting pi, `/reload`, `/new`, `/resume` all clear it.
+"Always" memory uses **prefix coverage** (not exact paths): authorizing `/a/b` also covers `/a/b/c`, `/a/b/c/d`, … so you never get re-prompted for a path whose ancestor you already decided on. When you remember a **broader** path, any narrower entries it now subsumes are dropped, keeping the list minimal and the status view free of "parent listed next to its own child" oddity. Memory is **session-only** — restarting pi, `/reload`, `/new`, `/resume` all clear it.
 
 ## Install
 
@@ -91,6 +91,8 @@ A target path is `resolve`d + `normalize`d; if it falls inside any allowed dir (
 
   Relative paths under `cwd` (e.g. `src/foo.ts`, `cat README.md`) are left alone by default.
 
+**Quoted strings and heredoc bodies are treated as data, not paths.** A quoted run (`echo '...'`, `sed 's|a|b|g'`, `printf '%s' ...`) is a literal passed to a program, so it's skipped entirely — this is what stops a JS block comment like `'/* header */ code'` at the start of a quoted string from being mistaken for absolute path `/`. Likewise, a `<<DELIM ... DELIM` heredoc body is stdin data, so every `/...` token inside embedded code is ignored. Only the opener line (e.g. `cat /etc/passwd <<EOF`) is still scanned.
+
 Note: read-only commands that traverse outside `cwd` (like `find /`, `ls /etc`) are also gated — bash access outside the project is blocked regardless of read/write, by design.
 
 ## Limitations (bash heuristic)
@@ -100,6 +102,7 @@ A bash command is an arbitrary shell string, so **perfect static path analysis i
 - **Unexpanded `$VAR`** (other than `$HOME`) can't be analyzed statically and is skipped (allowed). e.g. `cat $SECRET_FILE`.
 - **Paths produced by command substitution / pipelines** are invisible, e.g. `cat $(somecmd)`, `echo {a,b}` brace expansion.
 - An assignment like `X=/etc/passwd` generally triggers no real access and is skipped.
+- **Quoted real paths are no longer caught** as a side effect of treating quoted runs as data: `cat '/etc/passwd'` passes through even though `cat /etc/passwd` (bare) is blocked. The bare-path check still covers the common case; this only loosens quoted-path arguments.
 - Complex quoting / escaping can in theory cause misjudgment.
 
 This is a **protection layer**, not an **absolute sandbox** — it blocks the vast majority of straightforward out-of-bounds access (`cat /etc/passwd`, `rm ~/notes`, `echo x > /etc/foo`) but not deliberate evasion. For strong isolation, combine with pi's containerization / SSH remote execution.

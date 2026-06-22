@@ -1,0 +1,40 @@
+{
+  "name": "@d3ara1n/pi-peek-user",
+  "version": "0.1.0",
+  "description": "User-facing overlay for pi-peek — /peek opens a look-out panel to see what other pi instances are doing, or ask one a question with streamed answers",
+  "main": "src/index.ts",
+  "keywords": [
+    "pi-package",
+    "pi"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "@d3ara1n/pi-peek": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    },
+    "@d3ara1n/pi-peek": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@d3ara1n/pi-peek": "^0.1.0"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/d3ara1n/pi-extensions",
+    "directory": "packages/pi-peek-user"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,41 @@
+{
+  "name": "@d3ara1n/pi-peek",
+  "version": "0.1.0",
+  "description": "Cross-instance peek for pi — glimpse what another pi instance is doing, or ask it a question without disturbing its main conversation (read-after-burn ephemeral side-channel)",
+  "main": "src/index.ts",
+  "types": "src/types.ts",
+  "keywords": [
+    "pi-package",
+    "pi"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@d3ara1n/pi-model-roles": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@d3ara1n/pi-model-roles": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@d3ara1n/pi-model-roles": "^0.1.0"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/d3ara1n/pi-extensions",
+    "directory": "packages/pi-peek"
+  },
+  "license": "MIT"
+}

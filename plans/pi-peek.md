@@ -1,6 +1,31 @@
 # pi-peek — 跨实例瞥一眼（阅后即焚）
 
-> **状态：待实施** — 由 [`pi-aside`](./archived/pi-aside.md)（已归档）演进而来。
+> **状态：已实施 v0.4 · overlay 真修复（footer 顾虑澄清）** — 由 [`pi-aside`](./archived/pi-aside.md)（已归档）演进。
+>
+> **v0.3 改动（本次）**：
+> - **prompt 拼接修复（关键 bug）**——原设计把序列化记录 + 问题拼成一条 user message，
+>   导致问"你好"被记录污染（被拉去讲 UDS）。改为：记录进 system（`<session_record>` 标签），
+>   问题独立 user message。自测验证 "你好" → 简短问候，不再被污染。
+>   （pi-aside.md 原设计的拼接方式是错的，本应是常识）
+> - **overlay 重写**——清晰分区（header / answer / composer / status）；
+>   header 单行（peek + 主 agent 状态括号）；answer 区域自动高度（1..16 行，封顶滚动）；
+>   status 行显示 **utility 模型名** + **peek 累计 token**（从 investigate 返回，不是主对话的 ctx）
+> - **名字池 16→480 种**（形容词+名词组合，如 VividMaple）——降低 reload 碰撞率
+> - **peek tool 拆成两个**——peek_list（列表）+ peek（提问，question 必填）。
+>   framework schema 校验替代手写 "missing question" 提示；renderResult 遵循 built-in 约定不重复 tool 名；isError 时红色
+>
+> **v0.4 改动（本次）**：overlay 真修复。v0.3 的“overlay 重写”有三个渲染 bug，
+> 一直被误诊为“pi footer 顶掉底框”，实际与 footer 无关：
+> - **右框被顶掉**——`row()` 在已 pad 到 `innerW` 的内容外又加前导空格，
+>   实际可见宽度 = `1 + innerW`，被 pi-tui 按声明宽度硬截断。改用 `truncateToWidth(s, innerW, "", true)` 既截又填到精确宽度。
+> - **末尾不渲染/不换行**——手写 `wrap()` 按 `.length` 量 ANSI 文本（含转义码字节）、
+>   长词不打断。换成 pi-tui 自带 `wrapTextWithAnsi`（ANSI 感知 + CJK 断行 + 长词按字打断）。
+> - **假自动高度**——`Component.render(width)` 只给 width，旧代码硬编码 `MAX_BODY_ROWS=16`。
+>   改读 `tui.terminal.rows`，cap = `floor(termRows × 0.8) − 固定开销`，与 `maxHeight:"80%"` 对齐。
+> - **布局**：标题独立成行（顶边框 + 标题 + 分割线 + 内容区）；补回底边框，盒子完整封口。
+>
+> **footer 顾虑已澄清（关闭“待排查”）**：pi 的 footer（`ctx.ui.setFooter()`）渲染在 overlay 之外的
+> 终端底部，与 overlay 底框不冲突。`margin:{bottom:2}` 保留视觉间距即可，overlay 正常画完整边框。
 > pi-aside 的核心设计（序列化注入、阅后即焚、utility 模型、入口无关 `investigate()`）
 > **全部保留**；本文档在其基础上：
 > - **重命名**：`pi-aside` → `pi-peek`（意象从"旁白"改为"瞥一眼/偷瞄"，更贴合跨实例观察的动作）
@@ -90,29 +115,43 @@ ROI 低。**UDS 天然是流**：`streamSimple()` 的 `onToken` 直接 `socket.w
 沿用 monorepo 已验证的 [`pi-model-roles`](./archived/model-roles-and-skill-router-v2.md) 模式
 （globalThis 状态 + `getPeekAPI()` + `session_start` 初始化 + 消费者 import 类型）。
 
+### 架构修正（v0.2）
+
+初版把 UDS 传输 + 发现机制放在了 pi-peek 核心，导致 peek-user 被迫依赖一套它用不上的跨实例机制。
+修正后的准则：**只装 pi-peek 什么都不会发生**——它是纯能力库。跨实例全套（UDS/registry/tool/widget）
+是 pi-peek-agent 的职责。**“一个实例能否被跨实例 peek” = “是否装了 pi-peek-agent”**。
+
 ```
-packages/pi-peek/           核心库（不注册工具/命令，只提供能力 + 注册 hook）
-  ├─ serialize.ts     ~80行  序列化主对话 → referenceText（继承 pi-aside，格式+截断）
-  ├─ investigate.ts   ~60行  入口无关核心: 序列化 + complete/stream + 自有 system prompt
-  ├─ tracker.ts       ~50行  主 agent 状态快照（hook 驱动，存 globalThis）
-  ├─ ipc.ts           ~50行  [新] UDS server/client + JSON-per-line 分帧 + request/response 关联 + emit
-  ├─ discovery.ts     ~40行  [新] PID-file registry + kill(pid,0) 验活 + socket 试探 + 清理
-  ├─ api.ts           ~40行  getPeekAPI() / initPeekAPI()（globalThis 单例）
-  ├─ types.ts         ~30行  PeekAPI / PeerInfo / AskOptions 等
-  └─ index.ts         ~30行  session_start 初始化 + 注册 tracker hook + 起 ipc server
+packages/pi-peek/           核心能力库（零网络，被调用方能力）
+  ├─ serialize.ts     ~90行  序列化主对话 → referenceText（格式+截断）
+  ├─ investigate.ts   ~60行  入口无关核心: 序列化 + streamSimple + 自有 system prompt
+  ├─ tracker.ts       ~50行  主 agent 状态快照（hook 驱动，module-level）
+  ├─ config.ts        ~60行  读 settings.json 的 peek 块（仅序列化调优字段）
+  ├─ api.ts           ~50行  getPeekAPI() / initPeekAPI()（globalThis 单例，仅本地能力）
+  ├─ types.ts         ~50行  PeekAPI / MainAgentStatus / InvestigateOptions
+  └─ index.ts         ~25行  session_start 初始化 + 注册 tracker hook（无 server/marker/心跳）
 
-packages/pi-peek-user/      用户入口（TUI overlay）
-  ├─ overlay.ts      ~200行 overlay 组件（瞭望台面板 + 提问 + 等待 UX + 多轮）
-  ├─ session.ts       ~50行 overlay 自维护 messages 累积（不碰主 session）
-  └─ index.ts         ~40行 /peek 命令 + Alt+/ 焦点切换
+packages/pi-peek-user/      用户入口（本实例旁白 overlay）
+  ├─ overlay.ts      ~170行 overlay（tracker 状态行 + 多轮 QA + 流式渲染）
+  └─ index.ts         ~25行 /peek 命令（仅调 getPeekAPI().investigate，零跨实例）
 
-packages/pi-peek-agent/     LLM 入口（同步 tool）
-  ├─ tool.ts         ~60行  peek tool（connect 对方 socket → request → 等 response → 返回 tool result）
-  └─ index.ts         ~30行 注册 peek tool
+packages/pi-peek-agent/     跨实例入口（LLM tool + UDS mesh + 发现 + widget）
+  ├─ ipc.ts          ~260行 UDS server/client + JSON-per-line 分帧 + request/response + emit
+  ├─ discovery.ts    ~120行 PID-file registry + kill(pid,0) 验活 + ghost 清理 + 项目分组
+  ├─ tool.ts          ~95行 peek tool（connect 对方 socket → request → 返回 tool result）
+  ├─ api.ts          ~100行 getPeekAgentAPI() 单例（跨实例：listPeers/resolvePeer/askPeer/countPeers）
+  ├─ config.ts        ~60行 读 peek 块的跨实例字段（registry/heartbeat/timeout）
+  ├─ types.ts        ~120行 PeerInfo / Ipc* / AskOptions / AgentConfig / PeekAgentAPI
+  └─ index.ts        ~140行 session_start 起 server+写 marker+心跳 + statusbar widget + 注册 tool
 ```
 
-**入口无关设计**（继承 pi-aside）：`investigate()` 是纯函数，签名不依赖任何 UI/IPC 形态。
-peek-user（overlay）和 peek-agent（tool）共用同一个 `getPeekAPI()`，核心零重复。
+**职责准则**：
+- **pi-peek** 只提供本地能力（serialize + investigate + tracker），不注册工具/命令/服务。
+- **pi-peek-user** 问本实例（/peek overlay → investigate），不需要 UDS/发现。
+- **pi-peek-agent** 问别的实例（peek tool + 跨实例 mesh），是唯一碰 socket/registry 的包。
+
+**入口无关设计**（继承 pi-aside）：pi-peek 的 `investigate()` 是纯函数，
+peek-user（本实例）和 peek-agent（跨实例 server 端）共用它。
 
 ## 发现机制（PID-file registry + socket 验活）
 
@@ -462,6 +501,22 @@ const resolved = await rolesApi.resolveRoleAsync("utility");
 4. `pi-peek-agent` tool（同步，每问即连即断，先做先验证管道）
 5. `pi-peek-user` overlay（瞭望台 + 提问 + 流式等待 UX + 多轮，最复杂放最后）
 6. 用户 `/reload` 后实测（按 AGENTS.md，扩展改动需手动重载）
+
+## 实测记录（2026-06-22）
+
+单实例端到端自测（node 扮演远端客户端，连本实例 UDS server，触发完整 onAsk 链路）：
+
+| 验证项 | 结果 |
+|--------|------|
+| UDS 连接 + JSON 分帧 | ✅ |
+| emit status（tracker 即时推送） | ✅ `activity=bash: …` 反映触发测试的那个命令本身 |
+| emit stage（阶段进度） | ✅ `investigating → done` |
+| 流式 token emit | ✅ 82 个 token emit，逐字到达 |
+| investigate 调 utility 模型 | ✅ deepseek-v4-flash，2.77s 完成 |
+| 序列化正确性 | ✅ 答案准确概括会话内容（pi-messenger→pi-peek、UDS 取代文件系统） |
+| peek tool 注册 + 链路 | ✅ `peek({action:"list"})` 返回空列表（单实例符合预期） |
+
+唯一未覆盖：真·双 pi 进程互 peek（需开第二个终端）。但 IPC 传输/协议/服务端处理/investigate 全链路已由自测验证——双实例只是 discovery 多读一个 marker，逻辑已由 `list` 验证。
 
 ### settings.json 加载
 

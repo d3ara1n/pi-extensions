@@ -7,6 +7,9 @@
     "pi"
   ],
   "main": "src/index.ts",
+  "scripts": {
+    "test": "node --test src/paths.test.ts"
+  },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
   },

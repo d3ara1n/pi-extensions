@@ -171,6 +171,11 @@ function stripQuotes(t: string): string {
 	return t;
 }
 
+/** Strip a single backslash from every `\X` escape: `\ ` -> ` `, `\;` -> `;`, `\\` -> `\`. */
+function unescapeBackslash(t: string): string {
+	return t.replace(/\\(.)/g, "$1");
+}
+
 /** Does this token look like it could escape cwd? */
 function isEscapingCandidate(token: string): boolean {
 	if (token.startsWith("/")) return true; // absolute
@@ -183,7 +188,10 @@ function isEscapingCandidate(token: string): boolean {
 
 // Shell token splitter. Separators: whitespace, quotes, and shell metachars
 // `; | & < > ( ) { }`. Quoted runs are kept whole so paths with spaces survive.
-const TOKEN_RE = /"[^"]*"|'[^']*'|[^\s"'`;|&<>(){}=]+/g;
+// A backslash escape (`\X`) is consumed inside a token via the `\\.` branch, so
+// `/a/Agent\ Workspace/b` stays ONE token instead of splitting on the escaped
+// space. The escape is later stripped by {@link unescapeBackslash}.
+const TOKEN_RE = /"[^"]*"|'[^']*'|(?:\\.|[^\s"'`;|&<>(){}=])+/g;
 
 // Heredoc opener: `<<DELIM`, `<<-DELIM`, `<<'DELIM'`, `<<"DELIM"`, `<<\DELIM`.
 // Captures the bare delimiter word (quotes/escape stripped) so we can find the
@@ -212,7 +220,7 @@ function scanLine(
 		const r = raw[0];
 		// Quoted run = data literal, not a path. See method comment.
 		if (r[0] === '"' || r[0] === "'") continue;
-		const token = stripQuotes(r);
+		const token = unescapeBackslash(stripQuotes(r));
 		if (!token) continue;
 		if (token.startsWith("-")) continue; // option flag
 		// Unresolved $VAR (other than $HOME) can't be analyzed statically — skip.

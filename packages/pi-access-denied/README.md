@@ -93,6 +93,8 @@ A target path is `resolve`d + `normalize`d; if it falls inside any allowed dir (
 
 **Quoted strings and heredoc bodies are treated as data, not paths.** A quoted run (`echo '...'`, `sed 's|a|b|g'`, `printf '%s' ...`) is a literal passed to a program, so it's skipped entirely — this is what stops a JS block comment like `'/* header */ code'` at the start of a quoted string from being mistaken for absolute path `/`. Likewise, a `<<DELIM ... DELIM` heredoc body is stdin data, so every `/...` token inside embedded code is ignored. Only the opener line (e.g. `cat /etc/passwd <<EOF`) is still scanned.
 
+**Backslash escapes are honored inside unquoted tokens.** `Agent\ Workspace` is one token (a path containing a literal space), not two — the `\` + next char is kept together and the backslash stripped, so `/a/Agent\ Workspace/b` is treated as `/a/Agent Workspace/b`. This covers `\ ` (space), `\;`, `\(`, `\|`, even `\\` → `\`. It applies only to **unquoted** tokens; inside quotes the backslash is left untouched (quotes already protect the content).
+
 Note: read-only commands that traverse outside `cwd` (like `find /`, `ls /etc`) are also gated — bash access outside the project is blocked regardless of read/write, by design.
 
 ## Limitations (bash heuristic)
@@ -103,7 +105,7 @@ A bash command is an arbitrary shell string, so **perfect static path analysis i
 - **Paths produced by command substitution / pipelines** are invisible, e.g. `cat $(somecmd)`, `echo {a,b}` brace expansion.
 - An assignment like `X=/etc/passwd` generally triggers no real access and is skipped.
 - **Quoted real paths are no longer caught** as a side effect of treating quoted runs as data: `cat '/etc/passwd'` passes through even though `cat /etc/passwd` (bare) is blocked. The bare-path check still covers the common case; this only loosens quoted-path arguments.
-- Complex quoting / escaping can in theory cause misjudgment.
+- Complex quoting can in theory cause misjudgment. Plain backslash escapes in unquoted tokens are handled (see Path resolution), but nested/layered quoting (`"'$x'"`) is not.
 
 This is a **protection layer**, not an **absolute sandbox** — it blocks the vast majority of straightforward out-of-bounds access (`cat /etc/passwd`, `rm ~/notes`, `echo x > /etc/foo`) but not deliberate evasion. For strong isolation, combine with pi's containerization / SSH remote execution.
 

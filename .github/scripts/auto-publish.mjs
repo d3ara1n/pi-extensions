@@ -88,16 +88,23 @@ for (const dir of packageDirs) {
   const lastTag = `${fullName}@${remoteVersion}`;
   const tagExists = run(`git tag -l "${lastTag}"`, { allowFail: true });
 
-  let commitsToCheck;
   if (!tagExists) {
-    // Tag doesn't exist (e.g. first publish was manual).
-    // Create a baseline tag at current HEAD so future runs start from here.
-    run(`git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" tag ${lastTag}`);
-    log(`Created baseline tag: ${lastTag}`);
-    commitsToCheck = [];
-  } else {
-    commitsToCheck = run(`git log --format="%H" ${lastTag}..HEAD`).split("\n").filter(Boolean);
+    if (remoteVersion === "0.0.0") {
+      // Never published — create baseline tag at HEAD so future runs work.
+      run(`git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" tag ${lastTag}`);
+      log(`Created baseline tag: ${lastTag}`);
+      log("No previous publish, skipping");
+      continue;
+    }
+    // Published but missing tag — this is a bug (tag was never pushed / created).
+    // Bail out rather than silently baseline and skip commits.
+    console.error(`  ❌ Tag missing: ${lastTag} — npm has ${remoteVersion} but no matching git tag.`);
+    console.error(`     Create the tag manually at the release commit and re-run.`);
+    failed++;
+    continue;
   }
+
+  const commitsToCheck = run(`git log --format="%H" ${lastTag}..HEAD`).split("\n").filter(Boolean);
 
   if (commitsToCheck.length === 0) {
     log("No new commits, skipping");

@@ -1,6 +1,7 @@
 {
   "name": "@d3ara1n/pi-access-denied",
   "version": "0.2.0",
+  "type": "module",
   "description": "Sandbox write/edit/bash to the project dir — prompt / deny / allow modes with per-session allow-deny memory",
   "keywords": [
     "pi-package",

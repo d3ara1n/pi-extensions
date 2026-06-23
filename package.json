@@ -1,5 +1,6 @@
 {
   "name": "pi-extensions-monorepo",
+  "type": "module",
   "private": true,
   "workspaces": [
     "packages/*"

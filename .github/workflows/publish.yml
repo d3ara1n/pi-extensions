@@ -28,5 +28,5 @@ jobs:
         run: node .github/scripts/auto-publish.mjs
 
       - name: Push tags and version commits
-        run: git push --follow-tags
-        if: success()
+        run: git push && git push --tags
+        if: always()

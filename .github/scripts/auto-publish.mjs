@@ -202,6 +202,7 @@ if (failed > 0) {
 }
 
 if (published > 0) {
-  // Push version commits and tags
-  run("git push --follow-tags");
+  // Push version bump commits + all tags (lightweight tags aren't picked up by --follow-tags)
+  run("git push");
+  run("git push --tags");
 }

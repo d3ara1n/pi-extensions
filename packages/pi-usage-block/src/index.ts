@@ -11,10 +11,6 @@
  * @d3ara1n/pi-usage-block-core. The display only queries the one
  * whose id matches ctx.model.provider.
  *
- * powerline config example:
- *   "customItems": [{ "id": "usage", "statusKey": "usage-block",
- *                     "position": "right", "prefix": "⚡", "color": "accent" }]
- *
  * Optional settings under "usageBlock":
  *   refreshIntervalMs — poll interval in ms for api-source providers (default 60000)
  */
@@ -22,6 +18,9 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { usageRegistry, parseHeaderUsage, type UsageWindow } from "@d3ara1n/pi-usage-block-core";
 
 const STATUS_KEY = "usage-block";
+
+// Nerd Font nf-fa-circle (U+F111) — single glyph, colored per severity via theme.
+type Theme = { fg(color: string, text: string): string };
 
 // ── Formatting ────────────────────────────────────────────────────────────
 
@@ -41,18 +40,18 @@ function fmtCountdown(ms: number): string {
   return rh ? `${d}d${rh}h` : `${d}d`;
 }
 
-function fmtWindow(w: UsageWindow): string {
+function fmtWindow(w: UsageWindow, theme: Theme): string {
   const ratio = w.limit > 0 && Number.isFinite(w.used) ? w.used / w.limit : 0;
-  const dot = ratio >= 0.9 ? "🔴" : ratio >= 0.7 ? "🟡" : "🟢";
-  let text = `${dot}${fmtPct(w.used, w.limit)}`;
-  if (w.resetAt) text += ` ↺${fmtCountdown(w.resetAt.getTime() - Date.now())}`;
+  const level = ratio >= 0.9 ? "error" : ratio >= 0.7 ? "warning" : "success";
+  let text = `${theme.fg(level, "\uf111")}${theme.fg("dim", fmtPct(w.used, w.limit))}`;
+  if (w.resetAt) text += theme.fg("dim", ` ↺${fmtCountdown(w.resetAt.getTime() - Date.now())}`);
   return text;
 }
 
-function fmtProvider(name: string, windows: UsageWindow[]): string {
+function fmtProvider(name: string, windows: UsageWindow[], theme: Theme): string {
   if (!windows.length) return name;
-  const parts = windows.map(w => fmtWindow(w));
-  return `${name} ${parts.join(" ")}`;
+  const parts = windows.map(w => fmtWindow(w, theme));
+  return `${theme.fg("dim", name)} ${parts.join(" ")}`;
 }
 
 // ── Extension ─────────────────────────────────────────────────────────────
@@ -81,7 +80,7 @@ export default function (pi: ExtensionAPI) {
     }
     const provider = getActiveUsageProvider();
     const name = provider?.name ?? activeProviderId ?? "usage";
-    ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("dim", fmtProvider(name, windows)));
+    ctx.ui.setStatus(STATUS_KEY, fmtProvider(name, windows, ctx.ui.theme));
   }
 
   /** Remove the status bar entry. */

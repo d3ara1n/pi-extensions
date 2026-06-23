@@ -144,26 +144,61 @@ contains a newline renders verbatim as a fixed-width block.
 
 After the last question is answered, a **review screen** lists every question
 and its answer (multi-select answers are comma-joined and truncated with `…`
-when too long; skipped questions show `(skipped)`). Each entry spans two rows:
-the question header and, below it, the answer:
+when too long; skipped questions show `(skipped)`). Each question entry spans
+two rows (header + answer), followed by a trailing **note entry**:
 
 ```
-▸ Which layout?
-     Sidebar
-  Which database?
-     Postgres
+▸ 1. Which layout?
+       Sidebar
+  2. Which database?
+       Postgres
+
+  ✎  Note to assistant
+       (optional — Tab to add a note)
 ```
 
-- `↑`/`↓` — move the cursor between questions
-- `PgUp`/`PgDn` — scroll by page (when there are more questions than rows)
-- `Tab` — jump to the focused question to edit it (returns to the review after)
-- `Enter` — confirm and submit all answers
+Each title carries a fixed-width marker (`1.`/`2.`… for questions, `✎ ` for
+the note) so every title aligns; the body is indented one level deeper to keep
+header vs content visually distinct. An empty line sets the note apart from
+the Q&A list above it.
+
+Each title carries a fixed-width marker (`1.`/`2.`… for questions, `✎ ` for
+the note) so every title aligns; the body is indented one level deeper to keep
+header vs content visually distinct.
+
+- `↑`/`↓` — move the cursor between entries (questions + the note)
+- `PgUp`/`PgDn` — scroll by page (when there are more entries than rows)
+- `Tab` — edit the focused entry: a question (returns to review after) or the
+  note (opens a free-form editor)
+- `Enter` — confirm and submit all answers. `Enter` is always "submit" on the
+  review screen, never "edit" — this deliberately differs from the question
+  screens (where `Enter` edits/advances) so you can never submit by
+  double-tapping `Enter` while trying to edit something. Use `Tab` to edit.
 - `Esc` — cancel
+
+### Note to assistant
+
+The review screen ends with a **note** entry — a free-form message the user
+can attach for the assistant, about anything *beyond* the specific questions
+(overall direction, pacing, priorities, a correction to the premise, …).
+
+- Move the cursor to the note row and press `Tab` to open the editor.
+- `Enter` saves the note (empty = no note); `Esc` returns to the review without
+  saving (the in-progress draft is kept).
+- The note is **out-of-band**: it is not part of `questions`/`options` and the
+  assistant cannot request or pre-fill it. It surfaces only in the tool result
+  as `message`, and only when non-empty.
+
+Because the note can reframe or override the answers, the assistant is told to
+treat it as high-priority context.
 
 ### Result
 
-The tool returns a summary plus structured `answers`. If the user cancelled
-mid-way, the message notes how many questions were answered before cancellation.
+The tool returns a summary plus structured `answers`, and optionally a
+`message` (the user's review-screen note, only when non-empty). If the user
+cancelled mid-way, the summary notes how many questions were answered before
+cancellation. When present, the note is appended as a separate `Note from user:`
+block so it's visually distinct from the per-question answers.
 
 ## Keys
 

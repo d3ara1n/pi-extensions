@@ -87,6 +87,8 @@ interface AskUserResult {
 	questions: Question[];
 	answers: Answer[];
 	cancelled: boolean;
+	/** Free-form note the user can attach on the review screen. Absent when empty. */
+	message?: string;
 }
 
 /** Per-tab ephemeral UI state. Preserved across tab switches. */
@@ -260,6 +262,15 @@ class AskUserPanel implements Component, Focusable {
 	/** True after jumping from review mode to edit a question; makes answering
 	 *  return to review instead of advancing to the next question. */
 	private editingFromReview = false;
+	/** True while the user is editing the free-form "note to assistant" on the
+	 *  review screen. While true, all input goes to messageEditor. */
+	private messageEditing = false;
+	/** Committed note text (trimmed). Empty string = no note. Lives only on the
+	 *  review screen; the LLM cannot set it. */
+	private messageText = "";
+	/** Dedicated editor for the note. Single-line semantics: Enter saves (like
+	 *  the per-question "Type something." editor). */
+	private messageEditor: Editor;
 
 	// ── render cache ──
 	private cachedWidth?: number;
@@ -286,6 +297,11 @@ class AskUserPanel implements Component, Focusable {
 		// draft-loss bug (previously a single shared editor was swapped in/out and
 		// the swap was lossy across the input-mode / tab-switch boundary).
 		this.tabs = questions.map((_, i) => newTabState(tui, editorTheme, i, (ti, v) => this.handleSubmit(ti, v)));
+		// Dedicated editor for the review-screen note. Enter saves (single-line),
+		// Esc returns to the review without saving — mirroring the per-question
+		// "Type something." editor's semantics.
+		this.messageEditor = new Editor(tui as never, editorTheme);
+		this.messageEditor.onSubmit = (value) => this.handleMessageSubmit(value);
 	}
 
 	/** Shared submit logic bound to each tab's editor. */
@@ -331,6 +347,14 @@ class AskUserPanel implements Component, Focusable {
 		if (tabIndex === this.currentTab) {
 			this.advanceAfterAnswer();
 		}
+	}
+
+	/** Save the review-screen note: trim, store, return to review. Empty = no note. */
+	private handleMessageSubmit(value: string): void {
+		this.messageText = value.trim();
+		this.messageEditing = false;
+		this.reviewMode = true;
+		this.invalidate();
 	}
 
 	/**
@@ -420,6 +444,9 @@ class AskUserPanel implements Component, Focusable {
 			questions: this.questions,
 			answers: Array.from(this.answers.values()),
 			cancelled,
+			// Only attach the note when non-empty. A cancelled submit still carries
+			// the note if the user wrote one (it may explain why they cancelled).
+			message: this.messageText || undefined,
 		});
 	}
 
@@ -447,6 +474,20 @@ class AskUserPanel implements Component, Focusable {
 	// ── input ──
 
 	handleInput(data: string): void {
+		// Note editor active: all keys go to the editor; Esc returns to review.
+		// (Ctrl+\ collapse is intentionally ignored here — note editing is brief.)
+		if (this.messageEditing) {
+			if (matchesKey(data, Key.escape)) {
+				this.messageEditing = false;
+				this.reviewMode = true;
+				this.invalidate();
+				return;
+			}
+			this.messageEditor.handleInput(data);
+			this.invalidate();
+			return;
+		}
+
 		if (matchesKey(data, TOGGLE_KEY)) {
 			this.setCollapsed(!this.collapsed);
 			return;
@@ -610,19 +651,34 @@ class AskUserPanel implements Component, Focusable {
 		this.invalidate();
 	}
 
-	/** Handle input while in review mode. */
+	/** Handle input while in review mode.
+	 *  The review list has N question entries plus one trailing "note to
+	 *  assistant" entry (index N), so the cursor ranges over [0, N]. */
 	private handleReviewInput(data: string): void {
 		const n = this.questions.length;
+		const total = n + 1; // include the note entry
 		if (matchesKey(data, Key.escape)) {
 			this.submit(true);
 			return;
 		}
 		if (matchesKey(data, Key.enter)) {
-			// Confirm: submit all answers.
+			// Enter ALWAYS submits the whole review, no matter where the cursor
+			// sits. This deliberately differs from the question screens (where
+			// Enter edits/advances): in review, Enter = "I'm done, send it". The
+			// cursor-position-sensitive action here is Tab (edit selected entry).
 			this.submit(false);
 			return;
 		}
 		if (matchesKey(data, Key.tab)) {
+			if (this.reviewCursor === n) {
+				// Note entry: open the note editor. Prefill with the committed note
+				// (if any) so the user can tweak rather than retype.
+				this.reviewMode = false;
+				this.messageEditing = true;
+				if (this.messageText) this.messageEditor.setText(this.messageText);
+				this.invalidate();
+				return;
+			}
 			// Jump to the question under the review cursor for editing.
 			// We set currentTab + invalidate directly rather than calling
 			// switchTab(): switchTab early-returns when next === currentTab, which
@@ -641,7 +697,7 @@ class AskUserPanel implements Component, Focusable {
 			return;
 		}
 		if (matchesKey(data, Key.down)) {
-			if (this.reviewCursor < n - 1) { this.reviewCursor++; this.invalidate(); }
+			if (this.reviewCursor < total - 1) { this.reviewCursor++; this.invalidate(); }
 			return;
 		}
 		if (matchesKey(data, Key.pageUp)) {
@@ -650,7 +706,7 @@ class AskUserPanel implements Component, Focusable {
 			return;
 		}
 		if (matchesKey(data, Key.pageDown)) {
-			this.reviewCursor = Math.min(n - 1, this.reviewCursor + Math.max(1, this.reviewViewportH));
+			this.reviewCursor = Math.min(total - 1, this.reviewCursor + Math.max(1, this.reviewViewportH));
 			this.invalidate();
 			return;
 		}
@@ -693,6 +749,9 @@ class AskUserPanel implements Component, Focusable {
 		const lines: string[] = [];
 		const row = (content: string) => th.fg("border", "│") + padRight(content, innerW) + th.fg("border", "│");
 
+		if (this.messageEditing) {
+			return this.renderMessageEditor(width, innerW, th);
+		}
 		if (this.reviewMode) {
 			return this.renderReview(width, innerW, th);
 		}
@@ -733,8 +792,10 @@ class AskUserPanel implements Component, Focusable {
 		// ── Prompt body ──
 		if (q?.prompt) {
 			for (const w of wrapTextWithAnsi(th.fg("muted", q.prompt), innerW - 2)) lines.push(row(` ${w}`));
-			lines.push(row(""));
 		}
+		// 空行分隔 header/prompt 与 options。原来只在有 prompt 时才加，导致无
+		// prompt 的问题其标题与选项紧贴（"粘在一起"）。现在无条件加。
+		lines.push(row(""));
 
 		// ── Body: options / preview / input editor ──
 		const st = this.currentTabState();
@@ -791,10 +852,11 @@ class AskUserPanel implements Component, Focusable {
 		return th.fg("text", cut) + th.fg("dim", "…");
 	}
 
-	/** Clamp the review scroll offset so the cursor stays visible. */
+	/** Clamp the review scroll offset so the cursor stays visible. The review
+	 *  list has N questions + 1 note entry, so the cursor may equal N. */
 	private clampReviewScroll(): void {
-		const n = this.questions.length;
-		if (n === 0) return;
+		const total = this.questions.length + 1;
+		if (total === 0) return;
 		const viewH = this.reviewViewportH;
 		if (this.reviewCursor < this.reviewScrollOffset) this.reviewScrollOffset = this.reviewCursor;
 		else if (this.reviewCursor >= this.reviewScrollOffset + viewH)
@@ -802,8 +864,9 @@ class AskUserPanel implements Component, Focusable {
 		if (this.reviewScrollOffset < 0) this.reviewScrollOffset = 0;
 	}
 
-	/** Review summary: one question per entry, header row + answer row, with
-	 *  viewport scrolling reusing the option-screen layout primitives. */
+	/** Review summary: one question per entry (header + answer), plus a trailing
+	 *  "note to assistant" entry. Viewport scrolling reuses the option-screen
+	 *  layout primitives. */
 	private renderReview(width: number, innerW: number, th: Theme): string[] {
 		const lines: string[] = [];
 		// Review uses a distinct border color (success/green) so it's visually
@@ -815,30 +878,77 @@ class AskUserPanel implements Component, Focusable {
 		lines.push(row(` ${th.fg("accent", th.bold("Review your answers"))}`));
 		lines.push(th.fg(bc, `├${"─".repeat(innerW)}┤`));
 		const n = this.questions.length;
-		this.reviewViewportH = Math.max(3, Math.min(n, 10));
+		const total = n + 1; // +1 for the note entry
+		// Body indent (6 cols): questions and the note carry a 2-visible-col marker
+		// (`1.` / `2.` … or `✎ ` for the note) right after the cursor, plus a
+		// separator space, so every title starts at the same column. The body is
+		// indented one past that so header vs content stay visually distinct —
+		// previously the body sat at 5 cols and the note's icon pushed its title
+		// out of alignment with the question titles.
+		const bodyIndent = "      "; // 6 spaces
+		const maxW = innerW - 2 - bodyIndent.length;
+		this.reviewViewportH = Math.max(3, Math.min(total, 10));
 		this.clampReviewScroll();
 		const start = this.reviewScrollOffset;
-		const end = Math.min(n, start + this.reviewViewportH);
+		const end = Math.min(total, start + this.reviewViewportH);
 		for (let i = start; i < end; i++) {
-			const q = this.questions[i]!;
 			const isCursor = i === this.reviewCursor;
-			const ans = this.answers.get(q.tab);
-			// Header row: cursor + label, same coloring as the option screen.
 			const prefix = isCursor ? `${th.fg("accent", ICON_CURSOR)} ` : "  ";
-			const headerColor = isCursor ? "accent" : "muted";
-			lines.push(row(` ${prefix}${th.fg(headerColor, q.header)}`));
+			const headerColor: import("@earendil-works/pi-coding-agent").ThemeColor = isCursor ? "accent" : "muted";
+			// marker: a fixed 2-visible-col slot + 1 separator space, so every title
+			// (questions + note) aligns regardless of icon width. `1.` is 2 cols;
+			// the note's ✎ is 1 col, padded to `✎ ` (hence one extra space between
+			// ✎ and its title — the deliberate tradeoff of this layout).
+			// ── Note entry (index n): always last, two rows like a question. ──
+			if (i === n) {
+				// 空行分隔：note 是异类条目（附加留言，非问答），用空行和上方
+				// 问答列表隔开。保持简单，不用点线/装饰。
+				lines.push(row(""));
+				const marker = th.fg(headerColor, `${ICON_OTHER} `);
+				lines.push(row(` ${prefix}${marker} ${th.fg(headerColor, "Note to assistant")}`));
+				const msg = this.messageText;
+				if (msg) {
+					const vw = visibleWidth(msg);
+					const body = vw <= maxW ? msg : `${truncateToWidth(msg, maxW - 1, "")}…`;
+					lines.push(row(`${bodyIndent}${th.fg("text", body)}`));
+				} else {
+					lines.push(row(`${bodyIndent}${th.fg("dim", "(optional — Tab to add a note)")}`));
+				}
+				continue;
+			}
+			const q = this.questions[i]!;
+			const ans = this.answers.get(q.tab);
+			// Header row: cursor + marker + title.
+			const marker = th.fg(headerColor, `${i + 1}.`);
+			lines.push(row(` ${prefix}${marker} ${th.fg(headerColor, q.header)}`));
 			// Answer row: reuse the description renderer's indent/wrap, fed the
 			// formatted answer text. Skipped/custom/multi-select all flow through
 			// formatAnswerText, so the coloring matches the option screen.
-			const maxW = innerW - 2 - "     ".length;
 			const ansText = this.formatAnswerText(ans, maxW, th);
-			lines.push(row(`     ${ansText}`));
+			lines.push(row(`${bodyIndent}${ansText}`));
 		}
-		if (n > this.reviewViewportH) {
-			lines.push(row(th.fg("dim", `     ↑↓/PgUp/PgDn scroll · ${start + 1}-${end}/${n}`)));
+		if (total > this.reviewViewportH) {
+			lines.push(row(th.fg("dim", `${bodyIndent}↑↓/PgUp/PgDn scroll · ${start + 1}-${end}/${total}`)));
 		}
 		lines.push(th.fg(bc, `├${"─".repeat(innerW)}┤`));
-		lines.push(row(th.fg("dim", " ↑↓ navigate · Tab edit selected · Enter confirm · Esc cancel")));
+		lines.push(row(th.fg("dim", " ↑↓ navigate · Tab edit · Enter confirm · Esc cancel")));
+		lines.push(th.fg(bc, `╰${"─".repeat(innerW)}╯`));
+		return lines;
+	}
+
+	/** Note editor screen: reached from the review's note entry via Tab. Uses
+	 *  the same success-bordered look as the review screen to signal it's part
+	 *  of the review flow, not a fresh question. */
+	private renderMessageEditor(width: number, innerW: number, th: Theme): string[] {
+		const lines: string[] = [];
+		const bc: import("@earendil-works/pi-coding-agent").ThemeColor = "success";
+		const row = (content: string) => th.fg(bc, "│") + padRight(content, innerW) + th.fg(bc, "│");
+		lines.push(th.fg(bc, `╭${"─".repeat(innerW)}╮`));
+		lines.push(row(` ${th.fg("accent", th.bold(`${ICON_OTHER} Note to assistant`))}`));
+		lines.push(th.fg(bc, `├${"─".repeat(innerW)}┤`));
+		for (const el of this.messageEditor.render(innerW - 2)) lines.push(row(` ${el}`));
+		lines.push(th.fg(bc, `├${"─".repeat(innerW)}┤`));
+		lines.push(row(th.fg("dim", " Esc back to review · Enter save note")));
 		lines.push(th.fg(bc, `╰${"─".repeat(innerW)}╯`));
 		return lines;
 	}
@@ -987,7 +1097,7 @@ export default function askUserExtension(pi: ExtensionAPI) {
 		name: "ask_user",
 		label: "Ask User",
 		description:
-			"Ask the user one or more questions with options. Supports single-select (◎→◉) and multi-select (□→▣, space toggles). Every question always includes a 'Type something.' row so the user can type a custom answer whenever none of the provided options fit — this is built in and cannot be disabled, so never assume the user is restricted to your listed options. The custom-input draft is preserved across tab switches, and a focused side panel shows extended detail (ASCII layouts, code, reasoning) when an option carries a `preview` field. Each option needs a short `label` + a `description` (shown beneath it); add a `preview` field only when a description can't fully convey the option. The panel is collapsible (Ctrl+\\). Use for clarifying requirements, getting preferences, or confirming decisions. All displayed user-facing text should use the conversation's language.",
+			"Ask the user one or more questions with options. Supports single-select (◎→◉) and multi-select (□→▣, space toggles). Every question always includes a 'Type something.' row so the user can type a custom answer whenever none of the provided options fit — this is built in and cannot be disabled, so never assume the user is restricted to your listed options. The custom-input draft is preserved across tab switches, and a focused side panel shows extended detail (ASCII layouts, code, reasoning) when an option carries a `preview` field. Each option needs a short `label` + a `description` (shown beneath it); add a `preview` field only when a description can't fully convey the option. The panel is collapsible (Ctrl+\\). Use for clarifying requirements, getting preferences, or confirming decisions. Avoid using this to pick one item from a long list you just enumerated (e.g. \"which of these 8 fixes should I start with?\"): options are capped at a handful for a reason, and if the choice isn't a real either/or, present the list in a normal message and let the user reply freely, or just proceed with the highest-priority item — reserve ask_user for genuine decisions with a few distinct, mutually-exclusive paths. All displayed user-facing text should use the conversation's language. The result may carry an optional `message` — a free-form note the user can attach on the review screen (about overall direction, pacing, or anything beyond the specific questions). It is user-provided and out-of-band: you cannot set it via the parameters, and it may be absent; when present, treat it as high-priority context that can override or reframe the answers above it.",
 		parameters: AskUserParams,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -1048,9 +1158,14 @@ export default function askUserExtension(pi: ExtensionAPI) {
 							return `${a.tab}: ${a.wasCustom ? "(custom) " : ""}${a.answerLabel}`;
 						})
 						.join("\n");
+			// Attach the user's free-form note only when present. When empty, say
+			// nothing — "user left no note" is noise the LLM doesn't need.
+			const withNote = result.message
+				? `${summary}\n\nNote from user:\n${result.message}`
+				: summary;
 
 			return {
-				content: [{ type: "text", text: summary }],
+				content: [{ type: "text", text: withNote }],
 				details: result,
 			};
 		},

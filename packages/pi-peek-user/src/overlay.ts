@@ -37,7 +37,7 @@ import {
 	type InvestigateResult,
 	type MainAgentStatus,
 } from "@d3ara1n/pi-peek";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, ThemeColor } from "@earendil-works/pi-coding-agent";
 
 /** Minimal slice of TUI we use: render trigger + terminal size. */
 interface PeekTui {
@@ -49,7 +49,7 @@ interface PeekTui {
 }
 
 interface PeekTheme {
-	fg(color: string, text: string): string;
+	fg(color: ThemeColor, text: string): string;
 	bold(text: string): string;
 }
 

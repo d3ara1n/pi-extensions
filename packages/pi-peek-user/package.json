@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-peek-user",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "User-facing overlay for pi-peek — /peek opens a look-out panel to see what other pi instances are doing, or ask one a question with streamed answers",
   "main": "src/index.ts",

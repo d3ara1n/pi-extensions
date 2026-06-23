@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-peek",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Cross-instance peek for pi — glimpse what another pi instance is doing, or ask it a question without disturbing its main conversation (read-after-burn ephemeral side-channel)",
   "main": "src/index.ts",

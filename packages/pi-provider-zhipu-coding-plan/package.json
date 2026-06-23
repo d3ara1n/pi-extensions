@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-provider-zhipu-coding-plan",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "type": "module",
   "description": "Zhipu AI Coding Plan provider for pi — auto-discovers models, reports usage quota",
   "keywords": [

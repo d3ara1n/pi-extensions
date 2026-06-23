@@ -1,6 +1,14 @@
 # pi-peek — 跨实例瞥一眼（阅后即焚）
 
-> **状态：已实施 v0.4 · overlay 真修复（footer 顾虑澄清）** — 由 [`pi-aside`](./archived/pi-aside.md)（已归档）演进。
+> **状态：已实施 v0.5 · 名字会话级稳定（确定性派生）** — 由 [`pi-aside`](./archived/pi-aside.md)（已归档）演进。
+>
+> **v0.5 改动（本次）**：名字不再随机，改为**会话级确定性派生**。
+> 根因：旧代码在 `session_start` 里 `crypto.randomUUID()` + `randomName()`，
+> 而 reload/new/resume/fork 都触发该 hook → 每次重载名字都变（“不稳定”的根源）。
+> 修法：名字 = sessionId 的纯函数（FNV-1a 散列 → 池索引）。同会话 → 同名，
+> 跨 reload/重启/机器都不变；resume/fork/换会话才换名。sessionId 也从自造改为
+> `ctx.sessionManager.getSessionId()`，连带 sockPath/registry marker 也跟会话稳定
+> （reload 不再产生残留 marker）。`PI_PEEK_NAME` 仍优先覆盖。
 >
 > **v0.3 改动（本次）**：
 > - **prompt 拼接修复（关键 bug）**——原设计把序列化记录 + 问题拼成一条 user message，

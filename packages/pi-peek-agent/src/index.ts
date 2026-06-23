@@ -7,7 +7,6 @@
  * installed are discoverable and can serve asks).
  */
 
-import * as crypto from "node:crypto";
 import { execSync } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getPeekAPI } from "@d3ara1n/pi-peek";
@@ -24,20 +23,49 @@ export type { PeekAgentAPI, PeerInfo, ResolvePeerOptions, AskPeerOptions, AgentC
 // Short, memorable names. Single-word so they collide rarely and read cleanly.
 // Adjective + noun combos (~500 distinct names) to keep collisions rare
 // across reloads. Short enough to stay readable in the statusbar widget.
+// Short, memorable name pools. Deterministically indexed by a hash of the
+// session id (see deriveName), so the same session always gets the same name.
+// ~3600 distinct combos: birthday-paradox collision only beyond ~70 sessions.
 const ADJECTIVES = [
 	"Swift", "Calm", "Bold", "Quiet", "Bright", "Lone", "Keen", "Merry",
 	"Brisk", "Steady", "Frost", "Sunny", "Dark", "Wild", "Wise", "Vivid",
-	"Amber", "Jade", "Onyx", "Coral",
+	"Amber", "Jade", "Onyx", "Coral", "Azure", "Ruby", "Indigo", "Olive",
+	"Crisp", "Warm", "Cool", "Sharp", "Soft", "Deep", "High", "Still",
+	"Lunar", "Solar", "Cosmic", "Misty", "Clear", "Rapid", "Slow", "Gold",
+	"Silver", "Bronze", "Iron", "Steel", "Glass", "Stone", "Mossy", "Sandy",
+	"Stormy", "Fair", "Pale", "Rich", "Pure", "Vast", "Dry", "Wet",
+	"Grand", "Prime", "Noble", "Mellow",
 ];
 const NOUNS = [
 	"Fox", "Badger", "Hare", "Otter", "Falcon", "Heron", "Lynx", "Magpie",
 	"Newt", "Owl", "Pika", "Raven", "Stoat", "Wren", "Robin", "Finch",
 	"Pine", "Birch", "Cedar", "Maple", "Elm", "Ash", "Reed", "Fern",
+	"Wolf", "Bear", "Hawk", "Doe", "Seal", "Crane", "Moth", "Bee",
+	"Oak", "Willow", "Aspen", "Spruce", "Laurel", "Iris", "Lotus", "Flax",
+	"Tide", "Gale", "Meadow", "Grove", "Crag", "Marsh", "Ridge", "Dune",
+	"Creek", "Pond", "River", "Cliff", "Peak", "Vale", "Glen", "Brook",
+	"Orchid", "Clover", "Sage", "Juniper",
 ];
 
-function randomName(): string {
-	const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)] ?? "Peek";
-	const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)] ?? "";
+/**
+ * Derive a stable, memorable name from a session id.
+ *
+ * The name is a PURE FUNCTION of the session id (hash → pool index), so the
+ * same session always gets the same name — across /reload, across restarts,
+ * across machines. No persistence needed: re-deriving is cheaper and can't
+ * drift. PI_PEEK_NAME still wins if set.
+ */
+function deriveName(sessionId: string): string {
+	// FNV-1a over the sessionId → two independent 16-bit indices.
+	let h1 = 0x811c9dc5;
+	let h2 = 0x811c9dc5;
+	for (let i = 0; i < sessionId.length; i++) {
+		const c = sessionId.charCodeAt(i);
+		h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+		h2 = Math.imul(h2 ^ (c + 0x9e3779b9), 0x01000193) >>> 0;
+	}
+	const adj = ADJECTIVES[h1 % ADJECTIVES.length] ?? "Peek";
+	const noun = NOUNS[h2 % NOUNS.length] ?? "";
 	return noun ? `${adj}${noun}` : "Peek";
 }
 
@@ -80,9 +108,14 @@ export default function registerPeekAgentExtension(pi: ExtensionAPI): void {
 	let latestCtx: ExtensionContext | null = null;
 
 	pi.on("session_start", async (_event, ctx) => {
-		const sessionId = crypto.randomUUID();
+		// Identity follows the SESSION, not the process or a random roll:
+		// sessionId + name + sockPath are all derived from the real session id,
+		// so /reload (same session) keeps the exact same identity, while resume /
+		// fork / new-session get a fresh one. The name is a deterministic hash of
+		// the id (no persistence, can't drift); PI_PEEK_NAME overrides if set.
+		const sessionId = ctx.sessionManager.getSessionId();
 		const sockPath = makeSockPath(sessionId);
-		const name = process.env["PI_PEEK_NAME"] || randomName();
+		const name = process.env["PI_PEEK_NAME"] || deriveName(sessionId);
 		const cwd = ctx.cwd;
 		const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "unknown";
 		const now = new Date().toISOString();

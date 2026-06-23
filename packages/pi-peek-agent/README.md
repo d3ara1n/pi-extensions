@@ -51,13 +51,20 @@ Optional, in `~/.pi/agent/settings.json` under `peek`:
 
 ## Naming
 
-Each instance gets a display name shown in `peek_list`. Set it explicitly:
+Each instance gets a stable display name shown in `peek_list`. The name is
+**derived deterministically from the session id** (a hash into an
+adjective+noun pool) — so the same session always gets the same name across
+`/reload`, restarts, even across machines. Switching sessions (resume / fork /
+new) yields a different name.
+
+Set it explicitly to override:
 
 ```bash
 PI_PEEK_NAME=Fox pi
 ```
 
-Otherwise a random adjective+noun name (e.g. `VividMaple`) is assigned.
+Otherwise the derived name (e.g. `QuietBrook`) is used. Name collisions across
+sessions are disambiguated by `peek({sessionId})`.
 
 ## License
 

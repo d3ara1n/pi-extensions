@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-peek-agent",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "LLM tool for pi-peek — lets the main agent peek at another pi instance or ask it a question, without disturbing it",
   "main": "src/index.ts",

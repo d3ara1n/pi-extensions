@@ -30,11 +30,11 @@ This tool fixes that:
   "questions": [
     {
       "header": "Which layout?",
-      "label": "layout",
+      "tab": "layout",
       "prompt": "Pick the layout for the new settings page.",
       "options": [
-        { "value": "sidebar", "label": "Sidebar", "description": "Nav on the left…" },
-        { "value": "tabs", "label": "Tabs", "description": "Top tabs…" }
+        { "label": "Sidebar", "description": "Nav on the left…" },
+        { "label": "Tabs", "description": "Top tabs…" }
       ]
     }
   ]
@@ -51,7 +51,6 @@ This tool fixes that:
 | `tab` | string | yes | Short keyword identifying this question. Shown on the tab bar when there are multiple questions, and returned in the result as the answer's prefix. Write it in the user's language, not as a programmatic identifier. Must be unique across all questions in one call |
 | `options` | array | yes | 2–4 options |
 | `prompt` | string | no | Longer body text under the header |
-| `allowOther` | boolean | no | Allow "Type something." custom input. Default `true` |
 | `multiSelect` | boolean | no | Check multiple options. Default `false` |
 | `allowSkip` | boolean | no | If `false`, the user MUST answer before proceeding. Default `true` |
 
@@ -60,7 +59,6 @@ This tool fixes that:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `label` | string | yes | Display label |
-| `value` | string | no | Returned value. Defaults to `label` if omitted |
 | `description` | string | no | Short explanation under the label (wraps). Add one when the label alone isn't self-explanatory |
 | `preview` | string | no | Use when `description` (a short one-liner) isn't enough and the user genuinely benefits from more detail in a side column — ASCII layout demo, code skeleton, Pro/Cons breakdown, or the reasoning behind the option and what choosing it entails. Rendered verbatim. Don't treat it as extra text capacity — every line competes for the user's attention. If a short `description` already conveys the option, leave empty. Most options need only `description` |
 
@@ -84,8 +82,9 @@ Moving `↑`/`↓` only moves the cursor; selection is committed separately.
 
 ### Custom input ("Type something.")
 
-When `allowOther` is `true` (default), a "Type something." row appears. Press
-`Enter` on it to open a text editor:
+Every question always shows a "Type something." row (this cannot be turned off),
+so the user is never locked into the provided options. Press `Enter` on it to
+open a text editor:
 
 - After submitting, the row displays the committed text with a filled glyph
   (`◉ ✎ your text`).
@@ -106,8 +105,10 @@ entry; any remaining checks are kept.
 ### Required questions
 
 Set `allowSkip: false` to force an answer. The user cannot advance forward
-(`Tab`/`→`) until they answer. Backward navigation (`Shift+Tab`/`←`) is always
-allowed so they can review/edit earlier questions.
+(`Tab`/`→`) until they answer; the built-in "Type something." row always lets
+them supply a custom answer, so they're never trapped by options they dislike.
+Backward navigation (`Shift+Tab`/`←`) is always allowed so they can review/edit
+earlier questions.
 
 ### Rich previews
 
@@ -120,17 +121,15 @@ cursor updates the right pane. Ideal for comparing ASCII layouts / code samples:
 ```jsonc
 {
   "header": "Which layout?",
-  "label": "layout",
+  "tab": "layout",
   "options": [
     {
       "label": "Sidebar",
-      "value": "sidebar",
       "description": "Left-side navigation with the main content to its right.",
       "preview": "┌──┬────────┐\n│NA│  body  │\n│V │        │\n└──┴────────┘\nleft sidebar nav"
     },
     {
       "label": "Top bar",
-      "value": "topbar",
       "description": "Top horizontal nav with the main content below.",
       "preview": "┌──────────────┐\n│    nav bar   │\n├──────────────┤\n│     body     │\n└──────────────┘\ntop horizontal nav"
     }

@@ -65,7 +65,6 @@ interface Question {
 	header: string;
 	prompt?: string;
 	options: QuestionOption[];
-	allowOther?: boolean;
 	multiSelect?: boolean;
 	allowSkip?: boolean;
 }
@@ -139,9 +138,6 @@ const QuestionSchema = Type.Object({
 	options: Type.Array(QuestionOptionSchema, {
 		description: "Available options. Pass 2-4; each needs a short `label` + a `description`, and a `preview` only when a description can't fully convey the option.",
 	}),
-	allowOther: Type.Optional(
-		Type.Boolean({ description: "Allow a 'Type something.' custom-input option (default: true)" }),
-	),
 	multiSelect: Type.Optional(
 		Type.Boolean({
 			description:
@@ -181,12 +177,10 @@ function wrapTab(index: number, total: number): number {
 	return ((index % total) + total) % total;
 }
 
-/** Build the full option list for a question, appending "Type something." if allowed. */
+/** Build the full option list for a question, always appending the "Type something." custom-input row. */
 function buildOptions(q: Question): RenderOption[] {
 	const opts: RenderOption[] = [...q.options];
-	if (q.allowOther !== false) {
-		opts.push({ label: "Type something.", isOther: true });
-	}
+	opts.push({ label: "Type something.", isOther: true });
 	return opts;
 }
 
@@ -993,7 +987,7 @@ export default function askUserExtension(pi: ExtensionAPI) {
 		name: "ask_user",
 		label: "Ask User",
 		description:
-			"Ask the user one or more questions with options. Supports single-select (◎→◉) and multi-select (□→▣, space toggles), per-question 'Type something.' custom input with draft preserved across tab switches, and a focused side panel for extended detail (ASCII layouts, code, reasoning) when an option carries a `preview` field. Each option needs a short `label` + a `description` (shown beneath it); add a `preview` field only when a description can't fully convey the option. The panel is collapsible (Ctrl+\\). Use for clarifying requirements, getting preferences, or confirming decisions. All displayed user-facing text should use the conversation's language.",
+			"Ask the user one or more questions with options. Supports single-select (◎→◉) and multi-select (□→▣, space toggles). Every question always includes a 'Type something.' row so the user can type a custom answer whenever none of the provided options fit — this is built in and cannot be disabled, so never assume the user is restricted to your listed options. The custom-input draft is preserved across tab switches, and a focused side panel shows extended detail (ASCII layouts, code, reasoning) when an option carries a `preview` field. Each option needs a short `label` + a `description` (shown beneath it); add a `preview` field only when a description can't fully convey the option. The panel is collapsible (Ctrl+\\). Use for clarifying requirements, getting preferences, or confirming decisions. All displayed user-facing text should use the conversation's language.",
 		parameters: AskUserParams,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -1006,7 +1000,6 @@ export default function askUserExtension(pi: ExtensionAPI) {
 
 			const questions: Question[] = params.questions.map((q) => ({
 				...q,
-				allowOther: q.allowOther !== false,
 				options: q.options.map((o) => ({ ...o })),
 			}));
 

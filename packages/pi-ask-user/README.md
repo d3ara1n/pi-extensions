@@ -207,8 +207,8 @@ block so it's visually distinct from the per-question answers.
 | `↑` `↓` / `PgUp` `PgDn` | Move cursor / scroll options |
 | `Space` | Commit selection (single: select-only; multi: toggle) |
 | `Enter` | Confirm & advance (single) / commit checked (multi) / enter custom input |
-| `Tab` / `Shift+Tab` | Next / previous question (option list only — not hijacked inside the editor) |
-| `→` / `←` | Same as `Tab` / `Shift+Tab` |
+| `Tab` / `Shift+Tab` | Next / previous question, **cycling** (last → first). Option list only — not hijacked inside the editor |
+| `→` / `←` | Next / previous question, but **stop at the boundary** (no cycle) — safer than Tab when there are many questions |
 | `Esc` | Cancel (or exit custom-input editor without saving) |
 | `Ctrl+\` | Collapse / expand the panel |
 

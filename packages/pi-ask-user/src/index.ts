@@ -531,20 +531,35 @@ class AskUserPanel implements Component, Focusable {
 		const opts = this.currentOptions();
 		const multi = isMulti(q);
 
-		// Tab navigation
+		// Tab navigation — Tab/Shift+Tab CYCLE through questions; arrow keys
+		// ←/→ navigate the same tabs but STOP at the boundary (no wrap).
+		// Cycling arrows was disorienting with many tabs: pressing → on the
+		// last question jumped back to the first, making it easy to lose your
+		// place and submit by accident. Arrows stopping at the edge fixes that
+		// while Tab keeps its familiar cycle for fast traversal.
 		if (this.questions.length > 1) {
-			if (matchesKey(data, Key.tab) || matchesKey(data, Key.right)) {
-				// Forward navigation: a required (allowSkip:false) question cannot be
-				// left unanswered, so block + record-skip is gated on markSkippedIfNeeded.
+			// Forward (Tab cycles, → stops at the last question)
+			if (matchesKey(data, Key.tab)) {
 				if (!this.markSkippedIfNeeded()) return;
 				this.switchTab(wrapTab(this.currentTab + 1, this.questions.length));
 				return;
 			}
-			if (matchesKey(data, Key.shift("tab")) || matchesKey(data, Key.left)) {
-				// Backward navigation is always allowed — reviewing/editing earlier
-				// questions doesn't let the user bypass a required question (forward
-				// nav re-checks when they come back forward).
+			if (matchesKey(data, Key.right)) {
+				if (!this.markSkippedIfNeeded()) return;
+				const next = this.currentTab + 1;
+				if (next >= this.questions.length) return; // boundary: stop
+				this.switchTab(next);
+				return;
+			}
+			// Backward (Shift+Tab cycles, ← stops at the first question)
+			if (matchesKey(data, Key.shift("tab"))) {
 				this.switchTab(wrapTab(this.currentTab - 1, this.questions.length));
+				return;
+			}
+			if (matchesKey(data, Key.left)) {
+				const prev = this.currentTab - 1;
+				if (prev < 0) return; // boundary: stop
+				this.switchTab(prev);
 				return;
 			}
 		}

@@ -57,7 +57,8 @@ function getState(): SessionState {
 
 // ── UI helpers ────────────────────────────────────────────────────────────
 
-const MODE_ICON: Record<AccessMode, string> = { prompt: "🔐", deny: "🔒", allow: "🔓" };
+// Nerd Font: nf-fa-key / nf-fa-lock / nf-fa-unlock
+const MODE_ICON: Record<AccessMode, string> = { prompt: "\uf084", deny: "\uf023", allow: "\uf13c" };
 
 function updateStatus(ctx: ExtensionContext) {
 	const state = getState();

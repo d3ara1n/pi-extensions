@@ -16,7 +16,7 @@ Opens a centered overlay that serializes the current conversation and streams an
 ├──────────────────────────────────────────────────┤
 │ › ask anything about this session…               │
 ├──────────────────────────────────────────────────┤
-│ model deepseek/deepseek-v4-flash   peek 1.2k     │
+│ model deepseek/deepseek-v4-flash   tokens 1.2k   │
 ├──────────────────────────────────────────────────┤
 │ Esc close · Enter send                           │
 ╰──────────────────────────────────────────────────╯
@@ -27,7 +27,7 @@ Opens a centered overlay that serializes the current conversation and streams an
 - **Streaming** — the answer appears token-by-token as it arrives
 - **Auto-height** — the message region grows with content up to ~80% of the terminal, then scrolls (↑/↓, auto-follows the tail while streaming)
 - **Multi-turn** — follow-up questions reuse the serialized context (cheaper, no re-serialization)
-- **Live status** — header shows what the main agent is doing right now; status line shows the utility model + cumulative peek tokens
+- **Live status** — header shows what the main agent is doing right now; status line shows the utility model + cumulative tokens
 - **Read-after-burn** — closing the overlay discards everything; the main session is never touched
 
 ## Install

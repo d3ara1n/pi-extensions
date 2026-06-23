@@ -16,7 +16,7 @@
  *   ├──────────────────────────────────────────────────────┤
  *   │ › <input or waiting…>                                │  composer
  *   ├──────────────────────────────────────────────────────┤
- *   │ model <utility>                   peek <tokens>      │  status
+ *   │ model <utility>                   tokens <n>         │  status
  *   ├──────────────────────────────────────────────────────┤
  *   │ Esc close · ↑↓ scroll · Enter send                   │  hotkeys
  *   ╰──────────────────────────────────────────────────────╯  bottom border
@@ -345,7 +345,7 @@ export class PeekOverlay {
 		}
 		out.push(row(composer));
 
-		// ── divider + status line (utility model + cumulative peek tokens) ──
+		// ── divider + status line (utility model + cumulative tokens) ──
 		out.push(divider());
 		const modelId = this.lastUtilityModel ?? "—";
 		const totalTokens = this.history.reduce(
@@ -358,7 +358,7 @@ export class PeekOverlay {
 				? `  ${th.fg("dim", `↑${this.scrollOffset} ↓${maxOffset - this.scrollOffset}`)}`
 				: "";
 		const leftInfo = `${th.fg("muted", "model")} ${th.fg("dim", modelId)}`;
-		const rightInfo = `${th.fg("muted", "peek")} ${th.fg("dim", tokensStr)}${scroll}`;
+		const rightInfo = `${th.fg("muted", "tokens")} ${th.fg("dim", tokensStr)}${scroll}`;
 		const gap = Math.max(
 			1,
 			innerW - 1 - visibleWidth(leftInfo) - visibleWidth(rightInfo),

@@ -47,8 +47,6 @@ export interface UsageProvider {
   id: string;
   /** Display name, e.g. "Zhipu Coding Plan" */
   name: string;
-  /** Optional icon character */
-  icon?: string;
   /**
    * Data source type.
    * - "api": fetch usage via an external API (requires `fetchUsage`)

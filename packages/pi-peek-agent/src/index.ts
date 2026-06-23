@@ -84,8 +84,21 @@ function getGitBranch(cwd: string): string | undefined {
 	}
 }
 
-/** macOS limits UDS paths to ~104 chars; keep it short. */
+/**
+ * Build the IPC endpoint path for this session.
+ *
+ * On Windows we use a named pipe (`\\.\pipe\pi-peek-<id>`) — Node/Bun's
+ * `node:net` transparently uses named pipes when the path is in the
+ * `\\.\pipe\` / `\\?\pipe\` namespace, and Windows removes the pipe
+ * automatically when the owning process exits (no unlink needed).
+ *
+ * On POSIX we use a Unix domain socket file under the temp dir. macOS limits
+ * UDS paths to ~104 chars (sun_path), so we fall back to /tmp if too long.
+ */
 function makeSockPath(sessionId: string): string {
+	if (process.platform === "win32") {
+		return `\\\\.\\pipe\\pi-peek-${sessionId}`;
+	}
 	const candidate = `${defaultSockDir()}/pi-peek-${sessionId}.sock`;
 	if (candidate.length <= 100) return candidate;
 	return `/tmp/pi-peek-${sessionId}.sock`;

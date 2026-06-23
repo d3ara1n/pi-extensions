@@ -56,11 +56,12 @@ export function initPeekAgentAPI(deps: PeekAgentDeps): PeekAgentAPI {
 		},
 
 		async listPeers(): Promise<PeerInfo[]> {
-			const peers = discovery.listPeersFromRegistry(
+			const candidates = discovery.listPeersFromRegistry(
 				state.registryDir,
 				state.self.sessionId,
 				cfg.staleMs,
-			);
+		);
+			const peers = await discovery.pruneDeadPeers(candidates, state.registryDir);
 			discovery.flagAmbiguous(peers);
 			return discovery.sortByProject(peers, state.self.cwd);
 		},

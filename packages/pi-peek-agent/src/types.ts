@@ -7,6 +7,8 @@
  * capability to answer remote asks.
  */
 
+import * as os from "node:os";
+import * as path from "node:path";
 import type { MainAgentStatus } from "@d3ara1n/pi-peek";
 
 // ---------------------------------------------------------------------------
@@ -143,14 +145,14 @@ export interface PeekAgentAPI {
 /** Global key for the PeekAgentAPI singleton. */
 export const PEEK_AGENT_GLOBAL_KEY = "__piPeekAgent";
 
-/** Default UDS directory: $TMPDIR or /tmp. */
+/** Default IPC socket directory (POSIX). Windows uses named pipes, not a file path. */
 export function defaultSockDir(): string {
-	const tmp = process.env["TMPDIR"] || process.env["TMP"] || "/tmp";
-	return tmp.replace(/\/$/, "");
+	// os.tmpdir() is cross-platform: $TMPDIR on POSIX, %TEMP% on Windows.
+	return os.tmpdir();
 }
 
-/** Default registry directory. */
+/** Default registry directory for PID-file markers. */
 export function defaultRegistryDir(): string {
-	const home = process.env["HOME"] || "/tmp";
-	return `${home}/.pi/peek/registry`;
+	// os.homedir() resolves to $HOME on POSIX and %USERPROFILE% on Windows.
+	return path.join(os.homedir(), ".pi", "peek", "registry");
 }

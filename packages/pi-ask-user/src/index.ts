@@ -28,7 +28,7 @@
  *   unscrollable, which was the original bug.) Collapses to one status row.
  */
 
-import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import {
 	type Component,
 	Editor,
@@ -240,6 +240,17 @@ function padRight(s: string, width: number): string {
 	return v >= width ? s : s + " ".repeat(width - v);
 }
 
+/** Truncate to a visible width, appending “…” only when the text actually
+ *  overflows. (truncateToWidth's third arg is a fill, not a suffix, so we
+ *  reserve one column and append the ellipsis ourselves when needed.) */
+function truncForDisplay(text: string, maxW: number): string {
+	if (maxW <= 0) return "";
+	if (maxW === 1) return "…";
+	const vw = visibleWidth(text);
+	if (vw <= maxW) return text;
+	return truncateToWidth(text, maxW - 1, "") + "…";
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // The overlay component
 // ────────────────────────────────────────────────────────────────────────────
@@ -438,16 +449,34 @@ class AskUserPanel implements Component, Focusable {
 	}
 
 	/**
-	 * Called when the user tries to leave the current question without answering.
-	 * - If the question is already answered: return true (leave freely).
-	 * - If unanswered + allowSkip is true: record a skipped answer, return true.
-	 * - If unanswered + allowSkip is false: return false (block navigation).
+	 * Called before navigating AWAY from a question tab (Tab/→/←/Shift+Tab).
+	 * Resolves the current question's state so it can be left cleanly:
+	 *
+	 *  - Already committed (answers.has): leave freely.
+	 *  - Multi-select with UNCOMMITTED checks (or a typed custom text): a check
+	 *    IS an answer — commit it first, then leave. Navigating away with
+	 *    pending checks must submit them (not skip, not block), regardless of
+	 *    allowSkip, because the user has already expressed a choice. (Single-
+	 *    select commits on Space, so it never has pending uncommitted state.)
+	 *  - Nothing selected at all:
+	 *      allowSkip true  → record a skipped answer, allow leaving.
+	 *      allowSkip false → block (a required question must be answered).
+	 *
+	 * Returns true when navigation may proceed.
 	 */
-	private markSkippedIfNeeded(): boolean {
+	private prepareQuestionForLeave(): boolean {
 		const q = this.currentQuestion();
 		if (!q) return true;
 		if (this.answers.has(q.tab)) return true;
-		if (!canSkip(q)) return false; // required question: block
+		const st = this.currentTabState();
+		// Multi-select: uncommitted checks count as an answer — commit them,
+		// then leave. commitMultiAnswer only returns false when there's nothing
+		// to commit (no checks, no custom), which the guard already rules out.
+		if (isMulti(q) && (st.multiChecked.size > 0 || !!st.customText)) {
+			this.commitMultiAnswer(q, st);
+			return true;
+		}
+		if (!canSkip(q)) return false; // required question, nothing chosen: block
 		this.answers.set(q.tab, {
 			tab: q.tab,
 			answerLabel: "",
@@ -691,20 +720,20 @@ class AskUserPanel implements Component, Focusable {
 	 *  - Shift+Tab / ← : backward. Shift+Tab wraps; ← stops at the first
 	 *                question.
 	 *
-	 *  Leaving a question tab may need to record a skip (when it's unanswered
-	 *  and required) — that's blocked by markSkippedIfNeeded. Leaving the
-	 *  review tab never needs a skip check (it isn't a question), so →/Tab
-	 *  work freely from review. */
+	 *  Leaving a question tab may need to commit pending multi-select checks
+	 *  or record a skip (when it's unanswered and required) — that's handled
+	 *  by prepareQuestionForLeave. Leaving the review tab never needs that
+	 *  check (it isn't a question), so →/Tab work freely from review. */
 	private handleTabNavigation(data: string): boolean {
 		if (this.totalTabs <= 1) return false;
 		// Forward
 		if (matchesKey(data, Key.tab)) {
-			if (!this.isReviewTab && !this.markSkippedIfNeeded()) return true; // required: blocked
+			if (!this.isReviewTab && !this.prepareQuestionForLeave()) return true; // required: blocked
 			this.switchTab(wrapTab(this.currentTab + 1, this.totalTabs));
 			return true;
 		}
 		if (matchesKey(data, Key.right)) {
-			if (!this.isReviewTab && !this.markSkippedIfNeeded()) return true; // required: blocked
+			if (!this.isReviewTab && !this.prepareQuestionForLeave()) return true; // required: blocked
 			if (this.currentTab + 1 >= this.totalTabs) return true; // stop at review
 			this.switchTab(this.currentTab + 1);
 			return true;
@@ -1174,11 +1203,134 @@ class AskUserPanel implements Component, Focusable {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Result view — static card shown in the message stream after ask_user.
+// Lets the user verify at a glance what they chose. Two states driven by
+// options.expanded: collapsed = one-line summary, expanded = bordered card.
+// Reuses AskUserPanel's visual language (same border glyphs, theme colors,
+// ✓/⊘/○ status icons, ✎ for custom) so it reads as a continuation of the
+// interaction, not a foreign element.
+// ────────────────────────────────────────────────────────────────────────────
+
+class AskUserResultView implements Component {
+	private questions: ReadonlyArray<Pick<Question, "header" | "tab">>;
+	private result: AskUserResult;
+	private theme: Theme;
+	private expanded = false;
+	private cachedWidth?: number;
+	private cachedLines?: string[];
+
+	constructor(questions: ReadonlyArray<Pick<Question, "header" | "tab">>, result: AskUserResult, theme: Theme) {
+		this.questions = questions;
+		this.result = result;
+		this.theme = theme;
+	}
+
+	setExpanded(expanded: boolean): void {
+		if (this.expanded !== expanded) {
+			this.expanded = expanded;
+			this.cachedWidth = undefined;
+		}
+	}
+
+	invalidate(): void {
+		this.cachedWidth = undefined;
+		this.cachedLines = undefined;
+	}
+
+	render(width: number): string[] {
+		if (this.cachedLines && this.cachedWidth === width) return this.cachedLines;
+		this.cachedWidth = width;
+		this.cachedLines = this.expanded ? this.renderCard(width) : this.renderCollapsed(width);
+		return this.cachedLines;
+	}
+
+	/** Overall status → icon + border color + optional label. */
+	private getStatus(): { icon: string; borderColor: ThemeColor; label: string } {
+		const th = this.theme;
+		if (this.result.cancelled) {
+			return {
+				icon: "⊘",
+				borderColor: "warning",
+				label: th.fg("warning", `cancelled · ${this.result.answers.length}/${this.questions.length} answered`),
+			};
+		}
+		const anySkipped = this.result.answers.some((a) => a.skipped);
+		return anySkipped
+			? { icon: "○", borderColor: "accent", label: "" }
+			: { icon: "✓", borderColor: "success", label: "" };
+	}
+
+	/** Format one answer into a human-readable string + color. Mirrors the JSON
+	 *  shape: option picks vs custom text (✎), with (none)/(skipped) markers. */
+	private formatAnswer(ans: Answer | undefined): { text: string; color: ThemeColor } {
+		if (!ans) return { text: "(no answer)", color: "dim" };
+		if (ans.skipped) return { text: "(skipped)", color: "warning" };
+		const parts: string[] = [];
+		if (ans.multiSelect) {
+			const labels = ans.answerLabels ?? [];
+			if (labels.length === 0 && !ans.customText) return { text: "(none)", color: "dim" };
+			parts.push(...labels);
+			if (ans.customText) parts.push(`${ICON_OTHER} ${ans.customText}`);
+		} else {
+			parts.push(ans.wasCustom && ans.customText ? `${ICON_OTHER} ${ans.customText}` : ans.answerLabel);
+		}
+		return { text: parts.join(", "), color: "text" };
+	}
+
+	private renderCollapsed(width: number): string[] {
+		const th = this.theme;
+		const { icon, borderColor: bc } = this.getStatus();
+		const pairs = this.questions.map((q) => {
+			const ans = this.result.answers.find((a) => a.tab === q.tab);
+			return `${q.header}=${this.formatAnswer(ans).text}`;
+		});
+		const head = `${th.fg(bc, icon)} ${th.fg("accent", "Ask User")}${th.fg("dim", ": ")}`;
+		const body = pairs.join(th.fg("dim", " · "));
+		return [th.fg("dim", truncForDisplay(head + body, width))];
+	}
+
+	private renderCard(width: number): string[] {
+		const th = this.theme;
+		const { icon, borderColor: bc, label } = this.getStatus();
+		const innerW = Math.max(20, width - 2);
+		const lines: string[] = [];
+		const row = (content: string) => th.fg(bc, "│") + padRight(content, innerW) + th.fg(bc, "│");
+
+		lines.push(th.fg(bc, `╭${"─".repeat(innerW)}╮`));
+		const title = `${icon} ${th.bold("Ask User")}` + (label ? `  ${label}` : "");
+		lines.push(row(` ${title}`));
+		lines.push(th.fg(bc, `├${"─".repeat(innerW)}┤`));
+
+		// Header column aligned to the widest header; answer follows after “→”.
+		const headerW = Math.max(...this.questions.map((q) => visibleWidth(q.header)), 4);
+		const sep = th.fg("dim", " → ");
+		const sepW = visibleWidth(sep);
+		for (const q of this.questions) {
+			const ans = this.result.answers.find((a) => a.tab === q.tab);
+			const { text, color } = this.formatAnswer(ans);
+			const headerCell = padRight(th.fg("muted", q.header), headerW);
+			const avail = innerW - 2 - headerW - sepW;
+			const answerCell = th.fg(color, truncForDisplay(text, Math.max(8, avail)));
+			lines.push(row(` ${headerCell}${sep}${answerCell}`));
+		}
+
+		if (this.result.message) {
+			lines.push(th.fg(bc, `├${"─".repeat(innerW)}┤`));
+			const prefix = `${th.fg("accent", ICON_OTHER)} `;
+			const avail = innerW - 2 - visibleWidth(prefix);
+			lines.push(row(` ${prefix}${th.fg("muted", truncForDisplay(this.result.message, Math.max(8, avail)))}`));
+		}
+		lines.push(th.fg(bc, `╰${"─".repeat(innerW)}╯`));
+		return lines;
+	}
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Extension entry
 // ────────────────────────────────────────────────────────────────────────────
 
 export default function askUserExtension(pi: ExtensionAPI) {
-	pi.registerTool({
+	pi.registerTool<typeof AskUserParams, AskUserResult>({
 		name: "ask_user",
 		label: "Ask User",
 		description:
@@ -1267,6 +1419,18 @@ export default function askUserExtension(pi: ExtensionAPI) {
 				content: [{ type: "text", text: JSON.stringify(payload) }],
 				details: result,
 			};
+		},
+		renderResult(result, options, theme, context) {
+			// context.args.questions is the schema-static type; AskUserResultView
+			// only needs header+tab, so the structural subtype is compatible.
+			const questions = context.args?.questions ?? [];
+			const details = result.details ?? { questions: [], answers: [], cancelled: true };
+			const comp =
+				context.lastComponent instanceof AskUserResultView
+					? context.lastComponent
+					: new AskUserResultView(questions, details, theme);
+			comp.setExpanded(options.expanded);
+			return comp;
 		},
 	});
 }

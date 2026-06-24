@@ -251,19 +251,14 @@ class AskUserPanel implements Component, Focusable {
 	private tabs: TabState[];
 	/** Visible option rows (recomputed each render). */
 	private optionViewportH = 8;
-	/** When true, the panel shows a review summary of all answers; Enter submits. */
-	private reviewMode = false;
-	/** Cursor row in the review summary. */
+	/** Cursor row in the review summary (shown on the review tab). */
 	private reviewCursor = 0;
 	/** Vertical scroll offset for the review viewport. */
 	private reviewScrollOffset = 0;
 	/** Visible review rows (recomputed each render). */
 	private reviewViewportH = 8;
-	/** True after jumping from review mode to edit a question; makes answering
-	 *  return to review instead of advancing to the next question. */
-	private editingFromReview = false;
 	/** True while the user is editing the free-form "note to assistant" on the
-	 *  review screen. While true, all input goes to messageEditor. */
+	 *  review tab. While true, all input goes to messageEditor. */
 	private messageEditing = false;
 	/** Committed note text (trimmed). Empty string = no note. Lives only on the
 	 *  review screen; the LLM cannot set it. */
@@ -349,11 +344,12 @@ class AskUserPanel implements Component, Focusable {
 		}
 	}
 
-	/** Save the review-screen note: trim, store, return to review. Empty = no note. */
+	/** Save the review-tab note: trim, store, return to the review tab.
+	 *  currentTab already points at the review tab (note editing is only
+	 *  entered from there), so we just clear the editing flag. Empty = no note. */
 	private handleMessageSubmit(value: string): void {
 		this.messageText = value.trim();
 		this.messageEditing = false;
-		this.reviewMode = true;
 		this.invalidate();
 	}
 
@@ -385,6 +381,17 @@ class AskUserPanel implements Component, Focusable {
 
 	// ── accessors ──
 
+	/** Total number of tabs: one per question, plus the trailing review tab. */
+	private get totalTabs(): number {
+		return this.questions.length + 1;
+	}
+
+	/** The review tab sits at index === questions.length (the last tab).
+	 *  While true, the panel renders the review summary instead of a question. */
+	private get isReviewTab(): boolean {
+		return this.currentTab === this.questions.length;
+	}
+
 	private currentQuestion(): Question | undefined {
 		return this.questions[this.currentTab];
 	}
@@ -399,24 +406,13 @@ class AskUserPanel implements Component, Focusable {
 	}
 
 	private advanceAfterAnswer(): void {
-		// If we came from review mode (editing a question), return to review
-		// instead of advancing to the next question.
-		if (this.editingFromReview) {
-			this.editingFromReview = false;
-			this.reviewMode = true;
-			this.reviewScrollOffset = 0;
-			this.invalidate();
-			return;
-		}
-		if (this.currentTab < this.questions.length - 1) {
-			this.switchTab(wrapTab(this.currentTab + 1, this.questions.length));
-			return;
-		}
-		// Last question answered: enter review mode instead of submitting.
-		this.reviewMode = true;
-		this.reviewCursor = 0;
-		this.reviewScrollOffset = 0;
-		this.invalidate();
+		// Advance to the next tab. The review tab is the last tab, so answering
+		// the final question lands the user on the review tab (where Enter
+		// submits). Navigation is now uniform: review is just the next tab,
+		// reached by the same Tab/→ keys as any question — no special "enter
+		// review" step. Safe because this is only called from question tabs
+		// (currentTab < questions.length), so currentTab + 1 <= reviewTabIndex.
+		this.switchTab(this.currentTab + 1);
 	}
 
 	/**
@@ -474,12 +470,12 @@ class AskUserPanel implements Component, Focusable {
 	// ── input ──
 
 	handleInput(data: string): void {
-		// Note editor active: all keys go to the editor; Esc returns to review.
-		// (Ctrl+\ collapse is intentionally ignored here — note editing is brief.)
+		// 1. Note editor (messageEditing): owns all input while active. Esc
+		//    returns to the review tab (currentTab already points there — note
+		//    editing is only entered from the review tab).
 		if (this.messageEditing) {
 			if (matchesKey(data, Key.escape)) {
 				this.messageEditing = false;
-				this.reviewMode = true;
 				this.invalidate();
 				return;
 			}
@@ -488,81 +484,61 @@ class AskUserPanel implements Component, Focusable {
 			return;
 		}
 
+		// 2. Collapse toggle (global, any tab).
 		if (matchesKey(data, TOGGLE_KEY)) {
 			this.setCollapsed(!this.collapsed);
 			return;
 		}
 
+		// 3. Collapsed: only Esc (cancel) is meaningful.
 		if (this.collapsed) {
 			if (matchesKey(data, Key.escape)) this.submit(true);
 			return;
 		}
 
-		// ── Review mode: list all answers, Enter submits, Tab/↑↓ jump to a question ──
-		if (this.reviewMode) {
-			return this.handleReviewInput(data);
-		}
-
-		const st = this.currentTabState();
-
-		// "Type something." input mode: ALL editing keys (Tab, arrows, etc.) go to
-		// the editor. Only Esc (exit) is handled here. Tab is NOT hijacked for
-		// question switching — that would break indentation / cursor movement.
-		// To switch questions, press Esc first to return to the option list.
-		if (st.inputMode) {
+		// 4. Question tab + "Type something." input mode: the editor owns ALL
+		//    editing keys (Tab, arrows, etc.). Tab is NOT hijacked for tab
+		//    switching here, because that would break indentation / cursor
+		//    movement. Esc exits back to the option list. The review tab has no
+		//    input mode (it never edits options), so it skips this branch — the
+		//    `!this.isReviewTab` short-circuit also avoids indexing tabs[] OOB.
+		if (!this.isReviewTab && this.currentTabState().inputMode) {
 			if (matchesKey(data, Key.escape)) {
+				const st = this.currentTabState();
 				st.inputMode = false;
 				// Keep the editor content (per-tab editor preserves it as draft).
 				this.invalidate();
 				return;
 			}
-			st.editor.handleInput(data);
+			this.currentTabState().editor.handleInput(data);
 			this.invalidate();
 			return;
 		}
 
+		// 5. Esc = cancel submission (any tab, when not editing).
 		if (matchesKey(data, Key.escape)) {
 			this.submit(true);
 			return;
 		}
 
+		// 6. Shared tab navigation — Tab/→ forward, Shift+Tab/← backward.
+		//    Runs on BOTH question tabs and the review tab, which is what makes
+		//    the review reachable by the same keys as any question. The skip
+		//    check only applies when LEAVING a question tab (never the review).
+		if (this.handleTabNavigation(data)) return;
+
+		// 7. Review tab: ↑↓ move · Space edit · Enter submit. (Esc + tab
+		//    navigation were already handled above.)
+		if (this.isReviewTab) {
+			return this.handleReviewInput(data);
+		}
+
+		// 8. Question tab: ↑↓ move cursor · Space toggle/commit · Enter confirm.
+		const st = this.currentTabState();
 		const q = this.currentQuestion();
 		if (!q) return;
 		const opts = this.currentOptions();
 		const multi = isMulti(q);
-
-		// Tab navigation — Tab/Shift+Tab CYCLE through questions; arrow keys
-		// ←/→ navigate the same tabs but STOP at the boundary (no wrap).
-		// Cycling arrows was disorienting with many tabs: pressing → on the
-		// last question jumped back to the first, making it easy to lose your
-		// place and submit by accident. Arrows stopping at the edge fixes that
-		// while Tab keeps its familiar cycle for fast traversal.
-		if (this.questions.length > 1) {
-			// Forward (Tab cycles, → stops at the last question)
-			if (matchesKey(data, Key.tab)) {
-				if (!this.markSkippedIfNeeded()) return;
-				this.switchTab(wrapTab(this.currentTab + 1, this.questions.length));
-				return;
-			}
-			if (matchesKey(data, Key.right)) {
-				if (!this.markSkippedIfNeeded()) return;
-				const next = this.currentTab + 1;
-				if (next >= this.questions.length) return; // boundary: stop
-				this.switchTab(next);
-				return;
-			}
-			// Backward (Shift+Tab cycles, ← stops at the first question)
-			if (matchesKey(data, Key.shift("tab"))) {
-				this.switchTab(wrapTab(this.currentTab - 1, this.questions.length));
-				return;
-			}
-			if (matchesKey(data, Key.left)) {
-				const prev = this.currentTab - 1;
-				if (prev < 0) return; // boundary: stop
-				this.switchTab(prev);
-				return;
-			}
-		}
 
 		// Up / Down — moves ONLY the cursor (▸), does not change selection
 		if (matchesKey(data, Key.up)) {
@@ -594,44 +570,20 @@ class AskUserPanel implements Component, Focusable {
 			return;
 		}
 
-		// Multi-select: space toggles the option under the cursor
-		if (multi && matchesKey(data, Key.space)) {
-			const opt = opts[st.cursor];
-			if (opt && !opt.isOther) {
-				if (st.multiChecked.has(st.cursor)) st.multiChecked.delete(st.cursor);
-				else st.multiChecked.add(st.cursor);
-				this.invalidate();
-			}
-			return;
-		}
-
-		// Single-select: space commits the selection WITHOUT advancing (stay on question)
-		if (!multi && matchesKey(data, Key.space)) {
-			const opt = opts[st.cursor];
-			if (opt && !opt.isOther) {
-				st.selectedSingle = st.cursor;
-				this.answers.set(q.tab, {
-					tab: q.tab,
-					answerLabel: opt.label,
-					wasCustom: false,
-					index: st.cursor,
-				});
-				this.invalidate();
-			}
-			return;
-		}
-
-		// Confirm
-		if (matchesKey(data, Key.enter)) {
+		// Space — the "interact" key: select (single), toggle (multi), or EDIT
+		// (the "Type something." row). It never advances — that's Enter's job.
+		// This mirrors the review tab (where Space opens an entry for editing),
+		// so "the key that modifies things" is the same on every screen.
+		if (matchesKey(data, Key.space)) {
 			const opt = opts[st.cursor];
 			if (!opt) return;
 			if (opt.isOther) {
-				st.inputMode = true;
-				// Prefill the editor with the committed custom text (if any) so the
-				// user can edit rather than retype. Per-tab editor keeps the text
-				// for Esc-discard semantics automatically.
+				// Enter edit mode for a custom answer. Prefill with any committed
+				// custom text so the user edits rather than retypes. Per-tab
+				// editor keeps the text for Esc-discard semantics automatically.
 				//   - Single-select: custom text lives in answers[].answerLabel.
 				//   - Multi-select:  it lives in st.customText (kept alongside checks).
+				st.inputMode = true;
 				const existing = this.answers.get(q.tab);
 				const prefill = multi ? st.customText : existing?.wasCustom ? existing.answerLabel : null;
 				if (prefill) st.editor.setText(prefill);
@@ -639,13 +591,45 @@ class AskUserPanel implements Component, Focusable {
 				return;
 			}
 			if (multi) {
-				if (!st.multiChecked.has(st.cursor)) st.multiChecked.add(st.cursor);
-				// Re-commit merges checks + any previously entered custom text, so
-				// going back to add/remove a check never drops the custom value.
+				if (st.multiChecked.has(st.cursor)) st.multiChecked.delete(st.cursor);
+				else st.multiChecked.add(st.cursor);
+				this.invalidate();
+				return;
+			}
+			// single-select: mark the selection WITHOUT advancing (stay on question)
+			st.selectedSingle = st.cursor;
+			this.answers.set(q.tab, {
+				tab: q.tab,
+				answerLabel: opt.label,
+				wasCustom: false,
+				index: st.cursor,
+			});
+			this.invalidate();
+			return;
+		}
+
+		// Enter — confirm + advance to the next tab. It does NOT enter edit mode
+		// (Space owns that now), keeping the two keys orthogonal: Space modifies,
+		// Enter commits. Single-select commits the cursor position and advances;
+		// multi-select commits the currently checked options as-is and advances
+		// (Space owns checking, so Enter no longer auto-checks the cursor option).
+		if (matchesKey(data, Key.enter)) {
+			const opt = opts[st.cursor];
+			if (!opt) return;
+			if (opt.isOther) {
+				// No edit on Enter (use Space). If a custom answer is already
+				// committed, honour it and advance; otherwise stay put.
+				if (multi ? !!st.customText : this.answers.get(q.tab)?.wasCustom) {
+					this.advanceAfterAnswer();
+				}
+				return;
+			}
+			if (multi) {
+				// Commit the current checks (+ any custom text) and advance.
 				if (this.commitMultiAnswer(q, st)) this.advanceAfterAnswer();
 				return;
 			}
-			// single-select: commit cursor position as the selection
+			// single-select: commit cursor position as the selection, then advance
 			st.selectedSingle = st.cursor;
 			this.answers.set(q.tab, {
 				tab: q.tab,
@@ -666,47 +650,56 @@ class AskUserPanel implements Component, Focusable {
 		this.invalidate();
 	}
 
-	/** Handle input while in review mode.
+	/** Shared tab navigation, invoked from handleInput for BOTH question tabs
+	 *  and the review tab. Returns true when the key was consumed.
+	 *
+	 *  - Tab / →   : forward. Tab WRAPS through every tab (questions → review →
+	 *                first question); → STOPS at the review tab (boundary).
+	 *  - Shift+Tab / ← : backward. Shift+Tab wraps; ← stops at the first
+	 *                question.
+	 *
+	 *  Leaving a question tab may need to record a skip (when it's unanswered
+	 *  and required) — that's blocked by markSkippedIfNeeded. Leaving the
+	 *  review tab never needs a skip check (it isn't a question), so →/Tab
+	 *  work freely from review. */
+	private handleTabNavigation(data: string): boolean {
+		if (this.totalTabs <= 1) return false;
+		// Forward
+		if (matchesKey(data, Key.tab)) {
+			if (!this.isReviewTab && !this.markSkippedIfNeeded()) return true; // required: blocked
+			this.switchTab(wrapTab(this.currentTab + 1, this.totalTabs));
+			return true;
+		}
+		if (matchesKey(data, Key.right)) {
+			if (!this.isReviewTab && !this.markSkippedIfNeeded()) return true; // required: blocked
+			if (this.currentTab + 1 >= this.totalTabs) return true; // stop at review
+			this.switchTab(this.currentTab + 1);
+			return true;
+		}
+		// Backward
+		if (matchesKey(data, Key.shift("tab"))) {
+			this.switchTab(wrapTab(this.currentTab - 1, this.totalTabs));
+			return true;
+		}
+		if (matchesKey(data, Key.left)) {
+			if (this.currentTab - 1 < 0) return true; // stop at first question
+			this.switchTab(this.currentTab - 1);
+			return true;
+		}
+		return false;
+	}
+
+	/** Handle input specific to the review tab. Esc and tab navigation
+	 *  (Tab/←/→) are already handled upstream in handleInput, so here we only
+	 *  deal with: ↑↓/PgUp/PgDn (move the review cursor), Space (open the entry
+	 *  under the cursor for editing), and Enter (submit the whole review).
+	 *
 	 *  The review list has N question entries plus one trailing "note to
 	 *  assistant" entry (index N), so the cursor ranges over [0, N]. */
 	private handleReviewInput(data: string): void {
 		const n = this.questions.length;
 		const total = n + 1; // include the note entry
-		if (matchesKey(data, Key.escape)) {
-			this.submit(true);
-			return;
-		}
-		if (matchesKey(data, Key.enter)) {
-			// Enter ALWAYS submits the whole review, no matter where the cursor
-			// sits. This deliberately differs from the question screens (where
-			// Enter edits/advances): in review, Enter = "I'm done, send it". The
-			// cursor-position-sensitive action here is Tab (edit selected entry).
-			this.submit(false);
-			return;
-		}
-		if (matchesKey(data, Key.tab)) {
-			if (this.reviewCursor === n) {
-				// Note entry: open the note editor. Prefill with the committed note
-				// (if any) so the user can tweak rather than retype.
-				this.reviewMode = false;
-				this.messageEditing = true;
-				if (this.messageText) this.messageEditor.setText(this.messageText);
-				this.invalidate();
-				return;
-			}
-			// Jump to the question under the review cursor for editing.
-			// We set currentTab + invalidate directly rather than calling
-			// switchTab(): switchTab early-returns when next === currentTab, which
-			// happens whenever the review cursor sits on the already-active
-			// question (always true for a single-question call). That early return
-			// skipped invalidate(), so the panel kept showing the stale review
-			// render and Tab looked dead until ↑/↓ forced a redraw.
-			this.reviewMode = false;
-			this.editingFromReview = true;
-			this.currentTab = this.reviewCursor;
-			this.invalidate();
-			return;
-		}
+		// ↑/↓/PgUp/PgDn — move the review cursor over [0, total-1]
 		if (matchesKey(data, Key.up)) {
 			if (this.reviewCursor > 0) { this.reviewCursor--; this.invalidate(); }
 			return;
@@ -723,6 +716,29 @@ class AskUserPanel implements Component, Focusable {
 		if (matchesKey(data, Key.pageDown)) {
 			this.reviewCursor = Math.min(total - 1, this.reviewCursor + Math.max(1, this.reviewViewportH));
 			this.invalidate();
+			return;
+		}
+		// Space — "select" the entry under the cursor: jump into editing it.
+		// (Mirrors the option screens, where Space = select/toggle.)
+		if (matchesKey(data, Key.space)) {
+			if (this.reviewCursor === n) {
+				// Note entry: open the note editor. Prefill with the committed note
+				// (if any) so the user can tweak rather than retype.
+				this.messageEditing = true;
+				if (this.messageText) this.messageEditor.setText(this.messageText);
+				this.invalidate();
+				return;
+			}
+			// Question entry: switch to that question's tab for editing.
+			// switchTab early-returns when next === currentTab, which is fine — that
+			// only happens on a single-question call where we're already on the
+			// question; nothing to redraw.
+			this.switchTab(this.reviewCursor);
+			return;
+		}
+		// Enter — submit the whole review, no matter where the cursor sits.
+		if (matchesKey(data, Key.enter)) {
+			this.submit(false);
 			return;
 		}
 	}
@@ -745,17 +761,46 @@ class AskUserPanel implements Component, Focusable {
 
 	private renderCollapsed(width: number): string[] {
 		const th = this.theme;
-		const tabsPart = this.questions
-			.map((q, i) => {
-				const label = q.tab;
-				const done = this.answers.has(q.tab);
-				return th.fg(done ? "success" : "dim", `${label}${done ? "✓" : "○"}`);
-			})
-			.join(th.fg("dim", " "));
+		const qParts = this.questions.map((q, i) => {
+			const done = this.answers.has(q.tab);
+			const active = i === this.currentTab && !this.isReviewTab;
+			const mark = active ? "▸" : done ? "✓" : "○";
+			const color = active ? "accent" : done ? "success" : "dim";
+			return th.fg(color, `${q.tab}${mark}`);
+		});
+		const reviewPart = this.isReviewTab
+			? th.fg("accent", "Review▸")
+			: th.fg("dim", "Review○");
+		const tabsPart = [...qParts, reviewPart].join(th.fg("dim", " "));
 		const inner = `${tabsPart}  ${th.fg("dim", ` ${TOGGLE_HINT} expand `)}${th.fg("dim", " Esc cancel ")}`;
 		const line =
 			th.fg("border", "│") + inner + " ".repeat(Math.max(0, width - 2 - visibleWidth(inner))) + th.fg("border", "│");
 		return [truncateToWidth(line, width)];
+	}
+
+	/** Build the tab-bar content line (without border wrapping). Shared by the
+	 *  question screen and the review screen so the bar is always visible —
+	 *  the review tab is a real tab, so it must highlight when active just like
+	 *  any question. Callers wrap the returned string in their own row() so the
+	 *  border color matches the surrounding screen. */
+	private renderTabBarContent(th: Theme): string {
+		const tabCells = this.questions.map((q, i) => {
+			const active = i === this.currentTab;
+			const ans = this.answers.get(q.tab);
+			let mark = " ";
+			let baseColor: import("@earendil-works/pi-coding-agent").ThemeColor = active ? "accent" : "muted";
+			if (ans?.skipped) { mark = "—"; baseColor = "warning"; }
+			else if (ans) { mark = "✓"; baseColor = "success"; }
+			else if (active) mark = "▸";
+			const color = active ? "accent" : baseColor;
+			return th.fg(color, `${mark} ${q.tab}`);
+		});
+		const reviewActive = this.isReviewTab;
+		const reviewMark = reviewActive ? "▸" : " ";
+		const reviewColor: import("@earendil-works/pi-coding-agent").ThemeColor = reviewActive ? "accent" : "muted";
+		const reviewCell = th.fg(reviewColor, `${reviewMark} [ Review ]`);
+		const sep = th.fg("dim", "  │");
+		return ` ${tabCells.join(th.fg("dim", "  "))}${sep}${reviewCell}`;
 	}
 
 	private renderExpanded(width: number): string[] {
@@ -767,29 +812,18 @@ class AskUserPanel implements Component, Focusable {
 		if (this.messageEditing) {
 			return this.renderMessageEditor(width, innerW, th);
 		}
-		if (this.reviewMode) {
+		if (this.isReviewTab) {
 			return this.renderReview(width, innerW, th);
 		}
 
 		lines.push(th.fg("border", `╭${"─".repeat(innerW)}╮`));
 
 		// ── Tab bar ──
-		if (this.questions.length > 1) {
-			const tabCells = this.questions.map((q, i) => {
-				const label = q.tab;
-				const active = i === this.currentTab;
-				const ans = this.answers.get(q.tab);
-				let mark = " ";
-				let baseColor: import("@earendil-works/pi-coding-agent").ThemeColor = active ? "accent" : "muted";
-				if (ans?.skipped) { mark = "—"; baseColor = "warning"; }
-				else if (ans) { mark = "✓"; baseColor = "success"; }
-				else if (active) mark = "▸";
-				const color = active ? "accent" : baseColor;
-				return th.fg(color, `${mark} ${label}`);
-			});
-			lines.push(row(` ${tabCells.join(th.fg("dim", "  "))}`));
-			lines.push(row(""));
-		}
+		// Always shown: there is always at least one question tab plus the
+		// trailing review tab. renderTabBarContent is shared with the review
+		// screen so the active tab stays visible across every screen.
+		lines.push(row(this.renderTabBarContent(th)));
+		lines.push(row(""));
 
 		// ── Question header ──
 		const q = this.currentQuestion();
@@ -830,7 +864,7 @@ class AskUserPanel implements Component, Focusable {
 			this.questions.length > 1 ? th.fg("dim", ` ${doneCount}/${this.questions.length} answered · `) : th.fg("dim", " ");
 		const hint = multi
 			? `${TOGGLE_HINT} collapse · ↑↓ move · Space toggle · Enter confirm · Esc cancel`
-			: `${TOGGLE_HINT} collapse · ↑↓ move · Enter confirm · Esc cancel`;
+			: `${TOGGLE_HINT} collapse · ↑↓ move · Space select · Enter confirm · Esc cancel`;
 		lines.push(row(`${left}${th.fg("dim", hint)}`));
 		lines.push(th.fg("border", `╰${"─".repeat(innerW)}╯`));
 		return lines;
@@ -890,6 +924,8 @@ class AskUserPanel implements Component, Focusable {
 		const bc: import("@earendil-works/pi-coding-agent").ThemeColor = "success";
 		const row = (content: string) => th.fg(bc, "│") + padRight(content, innerW) + th.fg(bc, "│");
 		lines.push(th.fg(bc, `╭${"─".repeat(innerW)}╮`));
+		lines.push(row(this.renderTabBarContent(th)));
+		lines.push(row(""));
 		lines.push(row(` ${th.fg("accent", th.bold("Review your answers"))}`));
 		lines.push(th.fg(bc, `├${"─".repeat(innerW)}┤`));
 		const n = this.questions.length;
@@ -927,7 +963,7 @@ class AskUserPanel implements Component, Focusable {
 					const body = vw <= maxW ? msg : `${truncateToWidth(msg, maxW - 1, "")}…`;
 					lines.push(row(`${bodyIndent}${th.fg("text", body)}`));
 				} else {
-					lines.push(row(`${bodyIndent}${th.fg("dim", "(optional — Tab to add a note)")}`));
+					lines.push(row(`${bodyIndent}${th.fg("dim", "(optional — Space to add a note)")}`));
 				}
 				continue;
 			}
@@ -946,12 +982,12 @@ class AskUserPanel implements Component, Focusable {
 			lines.push(row(th.fg("dim", `${bodyIndent}↑↓/PgUp/PgDn scroll · ${start + 1}-${end}/${total}`)));
 		}
 		lines.push(th.fg(bc, `├${"─".repeat(innerW)}┤`));
-		lines.push(row(th.fg("dim", " ↑↓ navigate · Tab edit · Enter confirm · Esc cancel")));
+		lines.push(row(th.fg("dim", " ↑↓ move · Space edit · Enter confirm · Esc cancel")));
 		lines.push(th.fg(bc, `╰${"─".repeat(innerW)}╯`));
 		return lines;
 	}
 
-	/** Note editor screen: reached from the review's note entry via Tab. Uses
+	/** Note editor screen: reached from the review's note entry via Space. Uses
 	 *  the same success-bordered look as the review screen to signal it's part
 	 *  of the review flow, not a fresh question. */
 	private renderMessageEditor(width: number, innerW: number, th: Theme): string[] {

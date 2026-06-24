@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-ask-user",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "description": "Ask-user tool for pi — collapsible question overlay that releases focus so you can scroll the transcript while deciding",
   "main": "src/index.ts",

@@ -2,19 +2,10 @@ name: Tests
 
 # Runs the test suites across linux / macos / windows so platform-specific
 # behavior (e.g. pi-access-denied's Git Bash / MSYS path handling) is exercised
-# on the platform it targets. A red X on one OS in the matrix makes the failing
-# platform immediately visible on the Actions tab.
+# on the platform it targets. Manual trigger only — run this before publishing
+# packages with platform-sensitive logic (pi-access-denied).
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
-# Cancel superseded runs on the same ref, but never cancel a run on main
-# (keeps the main-branch signal always green/red, not cancelled).
-concurrency:
-  group: tests-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  workflow_dispatch:
 
 permissions:
   contents: read

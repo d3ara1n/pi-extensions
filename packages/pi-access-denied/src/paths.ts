@@ -42,9 +42,9 @@ export function toPosix(p: string): string {
 
 /**
  * POSIX-style prefix check (separator `/`). Pure — usable on any platform to
- * test a posix-normalized target against a posix-normalized root. Used for the
- * safe-path constants (always posix); allowlist boundary checks keep using the
- * platform-aware {@link underRoot} because allowlist entries are real paths.
+ * test a posix-normalized target against a posix-normalized root. Used only for
+ * the safe-path constants (always posix). All other boundary checks go through
+ * the separator-agnostic {@link underRoot}.
  */
 export function posixUnder(posixTarget: string, posixRoot: string): boolean {
 	return posixTarget === posixRoot || posixTarget.startsWith(posixRoot + "/");
@@ -150,9 +150,11 @@ export function isSafeDevice(posixTarget: string): boolean {
 	return SAFE_DEV_PREFIXES.some((p) => posixTarget.startsWith(p));
 }
 
-/** True if `target` is under a given normalized root dir. */
+/** True if `target` is under a given normalized root dir. Separator-agnostic. */
 function underRoot(target: string, root: string): boolean {
-	return target === root || target.startsWith(root + path.sep);
+	const t = toPosix(target);
+	const r = toPosix(root);
+	return t === r || t.startsWith(r + "/");
 }
 
 /** Expand a leading `~` or `$HOME` form to the home directory. Returns null if not a home form. */
@@ -189,7 +191,7 @@ export function buildAllowlist(cwd: string, extraDirs: string[]): string[] {
 
 /** True if `target` (already normalized absolute) is NOT inside any allowlist dir. */
 export function isOutsideAllowlist(target: string, allowlist: string[]): boolean {
-	return !allowlist.some((dir) => target === dir || target.startsWith(dir + path.sep));
+	return !allowlist.some((dir) => underRoot(target, dir));
 }
 
 /**

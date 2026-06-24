@@ -52,6 +52,8 @@ const ICON_CHECK_EMPTY = "□"; // U+25A1
 const ICON_CHECK_FILLED = "▣"; // U+25A3
 const ICON_OTHER = "✎"; // pencil for "Type something."
 const ICON_CURSOR = "▸"; // current cursor position, independent of selection
+const ICON_NOTE = ICON_OTHER; // same ✎ pencil as custom answers — the note is also free-form user input
+const ICON_ANSWER = "›"; // lead glyph on option-pick answers in the result card
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -684,10 +686,10 @@ class AskUserPanel implements Component, Focusable {
 		if (matchesKey(data, Key.enter)) {
 			const opt = opts[st.cursor];
 			if (!opt) return;
-			if (opt.isOther) {
-				// No edit on Enter (use Space). If a custom answer is already
-				// committed, honour it and advance; otherwise stay put.
-				if (multi ? !!st.customText : this.answers.get(q.tab)?.kind === "custom") {
+			if (opt.isOther && !multi) {
+				// Single-select isOther: Enter never edits (Space owns that). Only
+				// advance if a custom answer was already committed; otherwise stay.
+				if (this.answers.get(q.tab)?.kind === "custom") {
 					this.advanceAfterAnswer();
 				}
 				return;
@@ -1247,20 +1249,21 @@ class AskUserResultView implements Component {
 		return this.cachedLines;
 	}
 
-	/** Overall status → icon + border color + optional label. */
-	private getStatus(): { icon: string; borderColor: ThemeColor; label: string } {
-		const th = this.theme;
+	/** Overall status → icon, color, and a short status phrase (plain text,
+	 *  no ANSI — callers wrap it in color). */
+	private getStatus(): { icon: string; color: ThemeColor; phrase: string } {
+		const total = this.questions.length;
 		if (this.result.cancelled) {
 			return {
 				icon: "⊘",
-				borderColor: "warning",
-				label: th.fg("warning", `cancelled · ${this.result.answers.length}/${this.questions.length} answered`),
+				color: "warning",
+				phrase: `Cancelled · ${this.result.answers.length}/${total} answered`,
 			};
 		}
 		const anySkipped = this.result.answers.some((a) => a.kind === "skipped");
 		return anySkipped
-			? { icon: "○", borderColor: "accent", label: "" }
-			: { icon: "✓", borderColor: "success", label: "" };
+			? { icon: "○", color: "accent", phrase: "Answers (some skipped)" }
+			: { icon: "✓", color: "success", phrase: "Answers submitted" };
 	}
 
 	/** Format one answer for the card display. Delegates to describeAnswer. */
@@ -1270,48 +1273,76 @@ class AskUserResultView implements Component {
 
 	private renderCollapsed(width: number): string[] {
 		const th = this.theme;
-		const { icon, borderColor: bc } = this.getStatus();
+		const { icon, color, phrase } = this.getStatus();
+		const head = `${th.fg(color, icon)} ${th.fg(color, phrase)}`;
+		const sep = th.fg("dim", ": ");
 		const pairs = this.questions.map((q) => {
 			const ans = this.result.answers.find((a) => a.tab === q.tab);
 			return `${q.header}=${this.formatAnswer(ans).text}`;
 		});
-		const head = `${th.fg(bc, icon)} ${th.fg("accent", "Ask User")}${th.fg("dim", ": ")}`;
 		const body = pairs.join(th.fg("dim", " · "));
-		return [th.fg("dim", truncForDisplay(head + body, width))];
+		return [th.fg("dim", truncForDisplay(`${head}${sep}${body}`, width))];
 	}
 
 	private renderCard(width: number): string[] {
 		const th = this.theme;
-		const { icon, borderColor: bc, label } = this.getStatus();
-		const innerW = Math.max(20, width - 2);
+		const { icon, color, phrase } = this.getStatus();
 		const lines: string[] = [];
-		const row = (content: string) => th.fg(bc, "│") + padRight(content, innerW) + th.fg(bc, "│");
+		// Status line — icon + phrase in the status color. No border, no redundant
+		// "Ask User" title (the tool-execution cell already renders the tool name
+		// as its header above this component).
+		lines.push(`${th.fg(color, icon)} ${th.fg(color, th.bold(phrase))}`);
+		lines.push(""); // blank line separates status from the Q&A list
 
-		lines.push(th.fg(bc, `╭${"─".repeat(innerW)}╮`));
-		const title = `${icon} ${th.bold("Ask User")}` + (label ? `  ${label}` : "");
-		lines.push(row(` ${title}`));
-		lines.push(th.fg(bc, `├${"─".repeat(innerW)}┤`));
-
-		// Header column aligned to the widest header; answer follows after “→”.
-		const headerW = Math.max(...this.questions.map((q) => visibleWidth(q.header)), 4);
-		const sep = th.fg("dim", " → ");
-		const sepW = visibleWidth(sep);
+		// Each question: header on its own row, then one or more answer rows.
+		// Rows are prefixed by a glyph indicating the answer TYPE, not a uniform
+		// marker: option picks get an arrow (›), custom text gets a pencil (✎).
+		// A multi-select with BOTH options and custom renders as TWO rows. Long
+		// content wraps (wrapTextWithAnsi) so nothing is ever truncated/lost.
+		const indent = "    "; // 4-space lead for answer rows
+		const arrow = th.fg("dim", ICON_ANSWER);
+		const pencil = th.fg("dim", ICON_OTHER);
+		const answerRow = (glyph: string, text: string, textColor: ThemeColor) => {
+			const lead = `${indent}${glyph} `;
+			const w = Math.max(8, width - visibleWidth(lead));
+			const wrapped = wrapTextWithAnsi(th.fg(textColor, text), w);
+			const contIndent = " ".repeat(visibleWidth(lead));
+			const out = [`${lead}${wrapped[0]}`];
+			for (let i = 1; i < wrapped.length; i++) out.push(`${contIndent}${wrapped[i]}`);
+			return out;
+		};
 		for (const q of this.questions) {
 			const ans = this.result.answers.find((a) => a.tab === q.tab);
-			const { text, color } = this.formatAnswer(ans);
-			const headerCell = padRight(th.fg("muted", q.header), headerW);
-			const avail = innerW - 2 - headerW - sepW;
-			const answerCell = th.fg(color, truncForDisplay(text, Math.max(8, avail)));
-			lines.push(row(` ${headerCell}${sep}${answerCell}`));
+			lines.push(th.fg("muted", q.header));
+			if (!ans) {
+				lines.push(`${indent}${th.fg("dim", "(no answer)")}`);
+			} else if (ans.kind === "skipped") {
+				lines.push(`${indent}${th.fg("warning", "(skipped)")}`);
+			} else if (ans.kind === "single") {
+				lines.push(...answerRow(arrow, ans.option, "text"));
+			} else if (ans.kind === "custom") {
+				lines.push(...answerRow(pencil, ans.text, "text"));
+			} else if (ans.kind === "multi") {
+				if (ans.options.length === 0 && !ans.custom) {
+					lines.push(`${indent}${th.fg("dim", "(none)")}`);
+				} else {
+					// Options row (arrow) + optional custom row (pencil) — two rows.
+					if (ans.options.length > 0) lines.push(...answerRow(arrow, ans.options.join(", "), "text"));
+					if (ans.custom) lines.push(...answerRow(pencil, ans.custom, "text"));
+				}
+			}
 		}
 
+		// Note — separated by a blank line, no border, no indent. A speech-bubble
+		// glyph marks it as a free-form message, distinct from the Q&A answers.
 		if (this.result.message) {
-			lines.push(th.fg(bc, `├${"─".repeat(innerW)}┤`));
-			const prefix = `${th.fg("accent", ICON_OTHER)} `;
-			const avail = innerW - 2 - visibleWidth(prefix);
-			lines.push(row(` ${prefix}${th.fg("muted", truncForDisplay(this.result.message, Math.max(8, avail)))}`));
+			lines.push("");
+			const prefix = th.fg("accent", ICON_NOTE);
+			const noteW = Math.max(8, width - visibleWidth(prefix) - 1);
+			const wrapped = wrapTextWithAnsi(this.result.message, noteW);
+			lines.push(`${prefix} ${wrapped[0]}`);
+			for (let i = 1; i < wrapped.length; i++) lines.push(wrapped[i]);
 		}
-		lines.push(th.fg(bc, `╰${"─".repeat(innerW)}╯`));
 		return lines;
 	}
 }

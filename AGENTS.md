@@ -41,6 +41,8 @@ publish.{js,sh}  发布脚本
 - **scope**: 包目录名，如 `pi-context-include`
 - 破坏性变更加 `!` 后缀：`feat(pi-context-include)!: 改了配置格式`
 
+- **未经用户明确同意，禁止自行提交。** 改动完成后展示 diff 或摘要，等用户确认"提交"后再执行 `git commit`。即使改动很小（README 修正等），也先展示再等确认
+
 ### 示例
 
 ```
@@ -128,6 +130,28 @@ const roles: ModelRolesAPI = getModelRolesAPI();  // 完整类型推导
 ```
 
 **命令注册**：pi 支持冒号命令名——`pi.registerCommand("scout:skill-router", { ... })` 注册后用户用 `/scout:skill-router on` 调用。不要用一个命令手动解析 args。
+
+### README 与依赖文档规范
+
+**每个包 README 必须包含 `## Install` 和 `## Dependencies`。** 即使是纯依赖库扩展（不注册 tool/command，只注册 hook），也要有 Install 段告诉用户如何安装。
+
+**Extension vs Library 判定：**
+- **Extension** — `package.json` 中有 `"pi": { "extensions": [...] }`，注册了 hook/tool/command。**必须**出现在用户 `settings.json` 的 `extensions` 数组里
+- **Library** — 无 `pi.extensions` 入口，仅导出类型/函数供其他插件 import（如 `pi-usage-block-core`）
+
+**npm 依赖 ≠ pi 加载。** npm 的 `dependencies` 只保证包安装到 `node_modules/`，不会让 pi 加载其 extension 入口。如果扩展 A 依赖扩展 B（如 `pi-peek-user` 依赖 `pi-peek`），两者**都必须**在 `settings.json` 的 `extensions` 数组里。
+
+**主 README 的依赖标注：** Extensions 表格用统一角标（`<sup>†</sup>` / `<sup>‡</sup>`）标记有依赖的行，表后一行解释所有角标含义。
+
+**各包 README 的 Dependencies 格式：**
+
+```markdown
+## Dependencies
+
+- [`@d3ara1n/pi-xxx`](../pi-xxx) — 用途描述
+```
+
+只列 pi 插件依赖，不列框架级依赖（`pi-ai`、`pi-coding-agent`、`pi-tui` 等随 pi 附带的包）。
 
 ### 改动后的测试与重载
 

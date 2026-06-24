@@ -4,24 +4,20 @@ A collapsible **ask-user** tool for [pi](https://github.com/earendil-works/pi).
 
 ## Why
 
-Other ask-user tools render a panel that covers the transcript, and even when
-they "collapse" they keep keyboard focus locked on the panel — so you **can't
+Most ask-user tools render a panel that covers the transcript, so you **can't
 scroll the conversation** to read the analysis that should inform your choice.
 You end up choosing blind.
 
-This tool fixes that:
+This tool fixes that by **not** using a screen overlay. The panel renders into
+pi's bottom `editorContainer` slot (the same path `ctx.ui.select()` /
+`ctx.ui.input()` take), so the transcript stays visible **above** the panel and
+remains scrollable via the terminal's native scrollback — mouse wheel,
+`Shift+PgUp`, `Cmd+↑`. This works because pi's TUI never enters alt-screen and
+never tracks the mouse, so every rendered chat line lives in the terminal
+buffer and can be scrolled back at any time, no focus gymnastics needed.
 
-- **Collapse actually releases focus.** Press `Ctrl+\` and the panel shrinks to
-  a single status row while `OverlayHandle.unfocus()` hands focus back to the
-  transcript. Your normal scroll mechanisms work again — mouse wheel,
-  `Shift+PgUp`, `Ctrl+Left`/`Ctrl+Right` tree nav, `/tree`.
-- **Re-expand works from anywhere.** A global shortcut (`pi.registerShortcut`)
-  captures `Ctrl+\` from the editor, so pressing it again re-expands and
-  re-focuses the panel — no matter where focus currently is.
-
-> **Note:** Because pi removes the editor from the UI tree while an overlay is
-> active, full transcript scrolling while collapsed depends on pi's overlay
-> behavior. The collapse affordance is kept as best-effort.
+- **Collapse** (`Ctrl+\`) shrinks the panel to a single status row, leaving
+  even more of the transcript on screen while you decide.
 
 ## Tool: `ask_user`
 

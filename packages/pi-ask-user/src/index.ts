@@ -2,10 +2,10 @@
  * pi-ask-user — An ask-user tool for pi.
  *
  * Design notes:
- *   - Collapsible panel (Ctrl+\). Collapsing calls `handle.unfocus()` to release
- *     focus back to the editor. NOTE: because pi removes the editor from the UI
- *     tree while an overlay is active, full transcript scrolling while collapsed
- *     depends on pi behaviour; this is kept as a best-effort affordance.
+ *   - Collapsible panel (Ctrl+\) shrinks the panel to one row so more of the
+ *     transcript stays on screen. Chat scrolling does NOT depend on keyboard
+ *     focus at all — it is the terminal scrollback (see Layout note below), so
+ *     it works whether the panel is expanded, collapsed, or focused.
  *   - Per-question state (cursor position, scroll offset, type-something draft,
  *     multi-select picks) survives tab navigation — switching tabs never loses
  *     what you typed.
@@ -17,7 +17,15 @@
  *     field, the question renders in two equal columns (options | preview);
  *     otherwise it renders single-column full-width.
  *
- * Layout: bottom-anchored full-width overlay. Collapses to a single status row.
+ * Layout: renders into pi's bottom `editorContainer` slot (overlay:false, NOT a
+ *   screen overlay). The chat transcript stays visible ABOVE the panel and is
+ *   scrollable via the terminal's native scrollback (mouse wheel / Shift-PgUp /
+ *   Cmd-↑). This works because pi's TUI never enters alt-screen and never tracks
+ *   the mouse, so every rendered chat line lives in the terminal buffer and can
+ *   be scrolled back at any time — the exact mechanism ctx.ui.select()/input()
+ *   rely on. (overlay:true would route through ui.showOverlay(), compositing the
+ *   panel over the whole screen and visually hiding the transcript — making it
+ *   unscrollable, which was the original bug.) Collapses to one status row.
  */
 
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
@@ -233,7 +241,6 @@ interface TuiLike {
 
 interface PanelCallbacks {
 	onResult: (result: AskUserResult) => void;
-	onCollapseChange: (collapsed: boolean) => void;
 }
 
 class AskUserPanel implements Component, Focusable {
@@ -449,12 +456,7 @@ class AskUserPanel implements Component, Focusable {
 	private setCollapsed(next: boolean): void {
 		if (this.collapsed === next) return;
 		this.collapsed = next;
-		this.cb.onCollapseChange(next);
 		this.invalidate();
-	}
-
-	expandFromShortcut(): void {
-		this.setCollapsed(false);
 	}
 
 		private clampScrollToCursor(): void {
@@ -1135,15 +1137,6 @@ class AskUserPanel implements Component, Focusable {
 // ────────────────────────────────────────────────────────────────────────────
 
 export default function askUserExtension(pi: ExtensionAPI) {
-	let activeExpand: (() => void) | null = null;
-
-	pi.registerShortcut(TOGGLE_KEY, {
-		description: "Expand the ask-user panel (when collapsed)",
-		handler: () => {
-			activeExpand?.();
-		},
-	});
-
 	pi.registerTool({
 		name: "ask_user",
 		label: "Ask User",
@@ -1164,41 +1157,19 @@ export default function askUserExtension(pi: ExtensionAPI) {
 				options: q.options.map((o) => ({ ...o })),
 			}));
 
-			let overlayHandle: { focus: () => void; unfocus: () => void } | null = null;
-			let panel: AskUserPanel | null = null;
-
 			const result = await ctx.ui.custom<AskUserResult>((tui, theme, _kb, done) => {
-				panel = new AskUserPanel(questions, tui, theme, {
+				return new AskUserPanel(questions, tui, theme, {
 					onResult: (r) => done(r),
-					onCollapseChange: (collapsed) => {
-						if (collapsed) {
-							overlayHandle?.unfocus();
-							activeExpand = () => {
-								if (!panel) return;
-								panel.expandFromShortcut();
-								overlayHandle?.focus();
-							};
-						} else {
-							activeExpand = null;
-							overlayHandle?.focus();
-						}
-					},
 				});
-				return panel;
 			}, {
-				overlay: true,
-				overlayOptions: {
-					anchor: "bottom-center",
-					width: "100%",
-					margin: { bottom: 0 },
-				},
-				onHandle: (handle) => {
-					overlayHandle = handle;
-					handle.focus();
-				},
+				// overlay:false renders the panel into pi's bottom editorContainer slot
+				// (the same path ctx.ui.select()/input() take) instead of compositing a
+				// screen overlay over everything. The chat transcript stays visible above
+				// the panel and is scrollable via the terminal's native scrollback. See
+				// "Layout" note at the top of this file for why overlay:true breaks
+				// transcript scrolling.
+				overlay: false,
 			});
-
-			activeExpand = null;
 
 			const summary = result.cancelled
 				? `User cancelled the question(s). ${result.answers.length} question(s) were answered before cancellation.`

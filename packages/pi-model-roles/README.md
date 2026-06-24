@@ -100,6 +100,11 @@ if (resolved.model) {
 
 // Reverse lookup
 roles.findRoleByModel("anthropic/claude-opus-4"); // "heavy"
+
+// "Which role is the currently-active model?" — recognizes the default role
+// even when all roles are model=null (the common case), so callers (e.g.
+// pi-scout's router) have a real baseline instead of "unknown".
+roles.getCurrentRole("anthropic/claude-sonnet-4");
 ```
 
 ## License

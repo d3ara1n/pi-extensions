@@ -69,9 +69,30 @@ export interface ModelRolesAPI {
   /** Get all non-hidden roles (for displaying to users). */
   getVisibleRoles(): Record<string, RoleConfig>;
   /**
-   * Given a model identifier (e.g. "anthropic/claude-sonnet-4"),
-   * find the first role name that uses that model.
-   * Skips roles with model=null.
+   * Given a model identifier (e.g. "anthropic/claude-sonnet-4"), find the first
+   * role name that is explicitly bound to that model. Skips roles with
+   * model=null (they have no declared model to match).
+   *
+   * This is a pure declared-binding lookup — it does NOT infer "the current
+   * role". For that, use {@link getCurrentRole}.
+   *
+   * Returns undefined if no role declares this model.
    */
   findRoleByModel(modelId: string): string | undefined;
+
+  /**
+   * Identify which role the currently-active model belongs to. Resolution order:
+   *   1. Exact match — a role explicitly bound to `modelId`
+   *      ({@link findRoleByModel}).
+   *   2. The configured default role — if it is model=null, the current model
+   *      is transparently "the default role's model", so default is the
+   *      meaningful base. This covers the common config where ALL roles are
+   *      model=null (use current model): without this step, whichever null
+   *      role iterates first would win — often a hidden utility role.
+   *   3. The first model=null role found (it too transparently uses the current
+   *      model); only reached when the default role is explicitly bound to a
+   *      different model.
+   * Returns undefined only if no role matches by any rule.
+   */
+  getCurrentRole(modelId: string): string | undefined;
 }

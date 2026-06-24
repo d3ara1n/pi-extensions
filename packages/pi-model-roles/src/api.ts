@@ -118,6 +118,21 @@ export function initModelRolesAPI(modelRegistry: any, currentModel: any, cwd?: s
 			}
 			return undefined;
 		},
+
+		getCurrentRole(modelId: string): string | undefined {
+			const roles = getConfig().roles;
+			// 1. Exact match wins: a role explicitly bound to this model.
+			const exact = Object.entries(roles).find(([, c]) => c.model === modelId)?.[0];
+			if (exact) return exact;
+			// 2. Default role — when model=null it transparently uses the current
+			//    model, so it is the meaningful base in the all-null config.
+			const defaultName = getConfig().defaultRole ?? "default";
+			const defaultConfig = roles[defaultName];
+			if (defaultConfig && !defaultConfig.model) return defaultName;
+			// 3. First model=null role (reached only when default is bound elsewhere).
+			const nullRole = Object.entries(roles).find(([, c]) => !c.model)?.[0];
+			return nullRole;
+		},
 	};
 
 	// Store on globalThis — survives module identity mismatches

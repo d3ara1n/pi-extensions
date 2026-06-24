@@ -62,10 +62,12 @@ interface HistoryItem {
 
 type Mode = "input" | "asking";
 
-/** Rows occupied by everything EXCEPT the answer region:
- *  top border + title + 3 dividers + 3 (composer/status/hotkeys)
- *  + divider+hotkeys + bottom border = 10. */
-const FIXED_OVERHEAD_ROWS = 10;
+/** Rows occupied by everything EXCEPT the answer region and composer:
+ *  top border(1) + title(1) + 4 dividers(4) + status(1) + hotkeys(1) + bottom border(1) = 9.
+ *  Composer rows are added dynamically when the input wraps. */
+const FIXED_OVERHEAD_NO_COMPOSER = 9;
+/** Composer rows cap so a huge paste doesn't push the answer region off-screen. */
+const MAX_COMPOSER_LINES = 5;
 /** Floor for the answer region so tiny terminals still show something. */
 const MIN_BODY_ROWS = 4;
 
@@ -93,6 +95,8 @@ export class PeekOverlay {
 	private bodyLines: string[] = [];
 	private scrollOffset = 0;
 	private autoFollow = true;
+	// composer: how many rows the composer occupies (≥1); set during render
+	private composerRows = 1;
 
 	// last utility model used (status line before the first answer)
 	private lastUtilityModel: string | null = null;
@@ -226,7 +230,8 @@ export class PeekOverlay {
 	 */
 	private get currentBodyHeight(): number {
 		const overlayMaxRows = Math.floor(this.termRows * 0.8);
-		const cap = Math.max(MIN_BODY_ROWS, overlayMaxRows - FIXED_OVERHEAD_ROWS);
+		const overhead = FIXED_OVERHEAD_NO_COMPOSER + this.composerRows;
+		const cap = Math.max(MIN_BODY_ROWS, overlayMaxRows - overhead);
 		return Math.min(cap, Math.max(MIN_BODY_ROWS, this.bodyLines.length));
 	}
 
@@ -293,6 +298,30 @@ export class PeekOverlay {
 			}
 		}
 
+		// ── composer lines (calculated first — body height depends on it) ─
+		const composerLines: string[] = [];
+		if (this.mode === "asking") {
+			composerLines.push(th.fg("dim", " waiting for reply…"));
+		} else if (this.input.length > 0) {
+			const prefix = ` ${th.fg("accent", "›")} `;
+			const prefixW = visibleWidth(prefix);
+			// -1 for the leading space that row() prepends
+			const wrapW = Math.max(10, innerW - prefixW - 1);
+			const indent = " ".repeat(prefixW);
+			const wrapped = wrapTextWithAnsi(this.input, wrapW);
+			for (let i = 0; i < wrapped.length && composerLines.length < MAX_COMPOSER_LINES; i++) {
+				composerLines.push((i === 0 ? prefix : indent) + wrapped[i]);
+			}
+			if (wrapped.length > MAX_COMPOSER_LINES) {
+				composerLines.push(indent + th.fg("dim", "…"));
+			}
+		} else {
+			composerLines.push(
+				` ${th.fg("accent", "›")} ${th.fg("dim", "ask anything about this session…")}`,
+			);
+		}
+		this.composerRows = composerLines.length;
+
 		// ── scroll clamp + auto-follow ────────────────────────────────────
 		const bodyH = this.currentBodyHeight;
 		const maxOffset = Math.max(0, this.bodyLines.length - bodyH);
@@ -331,19 +360,11 @@ export class PeekOverlay {
 			out.push(row(` ${ln}`));
 		}
 
-		// ── divider + composer ───────────────────────────────────────────
+		// ── divider + composer (wraps long input across multiple rows) ──
 		out.push(divider());
-		let composer: string;
-		if (this.mode === "asking") {
-			composer = th.fg("dim", " waiting for reply…");
-		} else {
-			const showing =
-				this.input.length > 0
-					? this.input
-					: th.fg("dim", "ask anything about this session…");
-			composer = ` ${th.fg("accent", "›")} ${showing}`;
+		for (const ln of composerLines) {
+			out.push(row(ln));
 		}
-		out.push(row(composer));
 
 		// ── divider + status line (utility model + cumulative tokens) ──
 		out.push(divider());
@@ -353,12 +374,8 @@ export class PeekOverlay {
 			0,
 		);
 		const tokensStr = totalTokens > 0 ? formatTokens(totalTokens) : "—";
-		const scroll =
-			maxOffset > 0
-				? `  ${th.fg("dim", `↑${this.scrollOffset} ↓${maxOffset - this.scrollOffset}`)}`
-				: "";
 		const leftInfo = `${th.fg("muted", "model")} ${th.fg("dim", modelId)}`;
-		const rightInfo = `${th.fg("muted", "tokens")} ${th.fg("dim", tokensStr)}${scroll}`;
+		const rightInfo = `${th.fg("muted", "tokens")} ${th.fg("dim", tokensStr)}`;
 		const gap = Math.max(
 			1,
 			innerW - 1 - visibleWidth(leftInfo) - visibleWidth(rightInfo),
@@ -369,7 +386,7 @@ export class PeekOverlay {
 		out.push(divider());
 		const scrollHint =
 			maxOffset > 0
-				? ` ${th.fg("dim", "·")} ${th.fg("dim", "↑↓ scroll")}`
+				? ` ${th.fg("dim", "·")} ${th.fg("dim", `↑${this.scrollOffset} ↓${maxOffset - this.scrollOffset} scroll`)}`
 				: "";
 		const hotkeys =
 			` ${th.fg("dim", "Esc close")}${scrollHint} ${th.fg("dim", "·")} ${th.fg("dim", "Enter send")}`;

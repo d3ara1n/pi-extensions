@@ -128,12 +128,12 @@ function statusStyle(
 ): { prefix: string; color: (c: string, text: string) => string } {
 	switch (status) {
 		case "running":
-			return { prefix: fg("accent", "\u25CF "), color: fg };
+			return { prefix: fg("accent", "\u2192 "), color: fg };
 		case "failed":
 			return { prefix: fg("error", "\u2717 "), color: (_c, text) => fg("error", text) };
 		case "done":
 		default:
-			return { prefix: fg("dim", "\u2192 "), color: (_c, text) => fg("dim", text) };
+			return { prefix: fg("dim", "\u2022 "), color: (_c, text) => fg("dim", text) };
 	}
 }
 

@@ -219,10 +219,12 @@ export default function scoutExtension(pi: ExtensionAPI) {
 			.map((s: any) => `- ${s.name}: ${s.description ?? "(no description)"}`)
 			.join("\n");
 
-		// 2. Determine current role
+		// 2. Determine current role (use getCurrentRole: it recognizes the
+		//    default role even when model=null, so the router has a real
+		//    baseline instead of an opaque "unknown".)
 		const currentModel = ctx.model;
 		const currentRole = currentModel
-			? (rolesApi.findRoleByModel(`${currentModel.provider}/${currentModel.id}`) ?? "unknown")
+			? (rolesApi.getCurrentRole(`${currentModel.provider}/${currentModel.id}`) ?? "unknown")
 			: "unknown";
 
 		// 3. Build roles list

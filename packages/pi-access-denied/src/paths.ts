@@ -284,9 +284,32 @@ function stripQuotes(t: string): string {
 	return t;
 }
 
-/** Strip a single backslash from every `\X` escape: `\ ` -> ` `, `\;` -> `;`, `\\` -> `\`. */
+/**
+ * Strip a single backslash from every `\X` escape: `\ ` -> ` `, `\;` -> `;`, `\\` -> `\`.
+ * Intended for POSIX shell escapes. Callers must first bypass it for Windows-native
+ * paths (see {@link isWindowsNativePath}), whose backslashes are path separators
+ * rather than escapes.
+ */
 function unescapeBackslash(t: string): string {
 	return t.replace(/\\(.)/g, "$1");
+}
+
+const WIN_NATIVE_RE = /^[A-Za-z]:[\\/]/;
+
+/**
+ * True if `token` is a Windows-native absolute path with a drive letter
+ * (`C:\Users\me`, `D:/data`). Such tokens use backslash (or, under Git Bash,
+ * forward slash) as a path *separator*, not a shell escape — so they must reach
+ * {@link resolveTarget} / `path.isAbsolute` with separators intact. Routing them
+ * through {@link unescapeBackslash} first would collapse `C:\Users\me` to
+ * `C:Usersme`, which is neither absolute nor a resolvable path, letting it slip
+ * past the gate entirely.
+ *
+ * Pure and platform-independent: a drive-letter prefix is unambiguously
+ * Windows regardless of host OS, so this is unit-testable on any platform.
+ */
+export function isWindowsNativePath(token: string): boolean {
+	return WIN_NATIVE_RE.test(token);
 }
 
 /** Does this token look like it could escape cwd? */
@@ -333,8 +356,11 @@ function scanLine(
 		const r = raw[0];
 		// Quoted run = data literal, not a path. See method comment.
 		if (r[0] === '"' || r[0] === "'") continue;
-		const token = unescapeBackslash(stripQuotes(r));
-		if (!token) continue;
+		const stripped = stripQuotes(r);
+		if (!stripped) continue;
+		// Windows-native paths (C:\...) keep backslashes as separators; any other
+		// token unescapes shell backslash-escapes (\ , \;, \\, \$HOME).
+		const token = isWindowsNativePath(stripped) ? stripped : unescapeBackslash(stripped);
 		if (token.startsWith("-")) continue; // option flag
 		// Unresolved $VAR (other than $HOME) can't be analyzed statically — skip.
 		if (token.includes("$") && !token.startsWith("$HOME")) continue;

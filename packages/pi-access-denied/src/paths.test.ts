@@ -42,6 +42,7 @@ import {
 	isSafe,
 	isSafeDevice,
 	isWinDeviceName,
+	isWindowsNativePath,
 	msysDrive,
 	posixUnder,
 	rememberAllowed,
@@ -187,6 +188,27 @@ describe("msysDrive: Git Bash drive notation", () => {
 		// /t by itself DOES match, yielding T:\ — correct in real MSYS.
 		assert.equal(msysDrive("/t", "win32"), "T:\\");
 		assert.equal(msysDrive("/x/file", "win32"), path.win32.join("X:\\", "file"));
+	});
+});
+
+describe("isWindowsNativePath: drive-letter detection (cross-platform)", () => {
+	test("backslash drive form is native Windows", () => {
+		assert.equal(isWindowsNativePath("C:\\Users\\me"), true);
+		assert.equal(isWindowsNativePath("d:\\data\\x"), true);
+	});
+	test("forward-slash drive form is also native Windows", () => {
+		// Git Bash accepts C:/Users too; the separator is irrelevant to the
+		// drive-letter discriminator.
+		assert.equal(isWindowsNativePath("C:/Users/me"), true);
+	});
+	test("posix / MSYS / home forms are NOT native Windows", () => {
+		assert.equal(isWindowsNativePath("/etc/passwd"), false);
+		assert.equal(isWindowsNativePath("/c/Users/me"), false); // MSYS form
+		assert.equal(isWindowsNativePath("~/x"), false);
+	});
+	test("relative paths are NOT native Windows", () => {
+		assert.equal(isWindowsNativePath("src/foo.ts"), false);
+		assert.equal(isWindowsNativePath("../x"), false);
 	});
 });
 
@@ -553,6 +575,9 @@ describe(
 		});
 
 		test("Windows native path under cwd is in-bounds", () => {
+			// Genuine boundary check: C:\proj\src\foo.ts sits beneath cwd C:\proj,
+			// so it must NOT be flagged. (Backslashes are preserved as separators,
+			// resolveTarget normalizes correctly, and underRoot accepts the path.)
 			const nativePath = path.win32.join("C:", "proj", "src", "foo.ts");
 			const v = extractBashViolations("cat " + nativePath, CWD, ALLOW, SAFE);
 			assert.deepEqual(v, []);

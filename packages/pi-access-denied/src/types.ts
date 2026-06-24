@@ -5,8 +5,19 @@
 /** Access control mode. */
 export type AccessMode = "prompt" | "deny" | "allow";
 
-/** Per-path session decision chosen from the authorization dialog. */
-export type Decision = "allow-once" | "allow-always" | "deny-once" | "deny-always";
+/** Per-path choice chosen from the authorization panel. */
+export type Choice = "accept" | "always-accept" | "deny" | "always-deny";
+
+/**
+ * Result of the authorization panel. `choices` maps each violation path to
+ * its chosen action; `reason` is the single global deny reason, present only
+ * when at least one deny/always-deny was chosen.
+ */
+export interface AuthResult {
+	cancelled: boolean;
+	choices: Map<string, Choice>;
+	reason?: string;
+}
 
 /**
  * Configuration stored under the `accessDenied` key in pi settings

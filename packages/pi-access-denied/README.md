@@ -16,12 +16,18 @@ By default, pi's `write` / `edit` / `bash` can read and write any file the agent
 | `deny`  | Block every out-of-bounds access without asking |
 | `allow` | Passthrough (effectively disable the gate) |
 
-Authorization dialog options (`prompt` mode only):
+Authorization panel (`prompt` mode only):
 
-- **Accept (this once)** — allow this one call
-- **Always accept (remember path this session)** — remember the path **and everything beneath it**, don't ask again this session
-- **Deny** — block this one call; an optional reason input appears (leave empty for a default reason)
-- **Always deny (remember path this session)** — permanently block that path **and everything beneath it** this session; optional reason
+When a tool reaches outside the allowlist, a bottom-anchored panel lists every out-of-bounds path on its own row, each defaulting to **Accept**. A single horizontal action bar reflects the *focused* path's current choice:
+
+- **Accept** (default) — allow this one call; shows no marker on its row
+- **Always accept** — remember the path **and everything beneath it**, don't ask again this session; marks the row `[always-accept]` (green)
+- **Deny** — block this one call; marks the row `[deny]` (red)
+- **Always deny** — permanently block that path **and everything beneath it** this session; marks the row `[always-deny]` (red)
+
+Each path keeps its own choice, so a multi-path `bash` call can accept some paths while denying others in a single pass. Submitting with any deny present pops a **single global reason** input (leave empty for a default reason); **Esc there returns to the path list** rather than committing a no-reason deny.
+
+Keys: `↑`/`↓` move path focus · `←`/`→` change the focused path's action (no wrap) · `Tab` cycles the action (wraps) · `Enter` submit · `Esc` cancel the whole authorization (or, in the reason input, go back to the path list).
 
 "Always" memory uses **prefix coverage** (not exact paths): authorizing `/a/b` also covers `/a/b/c`, `/a/b/c/d`, … so you never get re-prompted for a path whose ancestor you already decided on. When you remember a **broader** path, any narrower entries it now subsumes are dropped, keeping the list minimal and the status view free of "parent listed next to its own child" oddity. Memory is **session-only** — restarting pi, `/reload`, `/new`, `/resume` all clear it.
 

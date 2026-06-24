@@ -28,7 +28,8 @@ import {
 	rememberDenied,
 	resolveTarget,
 } from "./paths.ts";
-import { DEFAULT_CONFIG, type AccessMode, type Decision } from "./types.ts";
+import { DEFAULT_CONFIG, type AccessMode, type AuthResult } from "./types.ts";
+import { AuthPanel } from "./auth-panel.ts";
 
 const GLOBAL_KEY = "__piAccessDenied";
 const STATUS_KEY = "access-denied";
@@ -78,38 +79,27 @@ function formatPaths(paths: string[]): string {
 	return paths.map((p) => `  • ${p}`).join("\n");
 }
 
-/** Prompt the user for an authorization decision. Returns undefined if dismissed. */
+/**
+ * Show the authorization panel. Returns an {@link AuthResult}; when the user
+ * dismisses the path list (Esc), `cancelled` is true.
+ */
 async function promptDecision(
 	toolName: string,
 	violations: string[],
 	ctx: ExtensionContext,
-): Promise<Decision | undefined> {
+): Promise<AuthResult> {
 	const header = toolName === "bash" ? "bash command" : `${toolName}`;
-	const body = `${header} wants to reach outside the project allowlist:\n\n${formatPaths(violations)}`;
-	const choice = await ctx.ui.select(body, [
-		"Accept (this once)",
-		"Always accept (remember path this session)",
-		"Deny",
-		"Always deny (remember path this session)",
-	]);
-	switch (choice) {
-		case "Accept (this once)":
-			return "allow-once";
-		case "Always accept (remember path this session)":
-			return "allow-always";
-		case "Deny":
-			return "deny-once";
-		case "Always deny (remember path this session)":
-			return "deny-always";
-		default:
-			return undefined; // dismissed
-	}
-}
-
-/** Ask for a deny reason. Optional — empty/Enter/dismiss falls back to a default. */
-async function askReason(ctx: ExtensionContext): Promise<string> {
-	const r = await ctx.ui.input("Reason for denying (optional)", "Why deny? Leave empty for default");
-	return r && r.trim() ? r.trim() : "Denied by access-denied";
+	return ctx.ui.custom<AuthResult>((tui, theme, _kb, done) => {
+		return new AuthPanel(violations, header, tui, theme, { onResult: (r) => done(r) });
+	}, {
+		// overlay:false renders the panel into pi's bottom editorContainer slot
+		// (the same path ctx.ui.select()/input() take) instead of compositing a
+		// screen overlay over everything. The chat transcript stays visible above
+		// the panel and is scrollable via the terminal's native scrollback.
+		// overlay:true would hide the transcript via ui.showOverlay(), making it
+		// unscrollable — see pi-ask-user for the same design decision.
+		overlay: false,
+	});
 }
 
 // ── Extension ─────────────────────────────────────────────────────────────
@@ -163,7 +153,16 @@ export default function (pi: ExtensionAPI) {
 			for (const v of violations) {
 				const root = coveringRoot(v, state.alwaysDeny.keys());
 				if (root) {
-					return { block: true, reason: `Always denied (${state.alwaysDeny.get(root)})` };
+					// `alwaysDeny` stores the user's raw note (possibly empty); wrap it
+					// the same way as a fresh deny so a misleading note can't pass as
+					// an operation result. See the deny branch below for the rationale.
+					const note = state.alwaysDeny.get(root);
+					return {
+						block: true,
+						reason: note
+							? `Blocked by access-denied, always denied (user note: "${note}")`
+							: "Blocked by access-denied (always denied)",
+					};
 				}
 			}
 		}
@@ -179,24 +178,39 @@ export default function (pi: ExtensionAPI) {
 			return { block: true, reason: `Blocked (no UI to authorize): ${formatPaths(violations)}` };
 		}
 
-		const decision = await promptDecision(toolName, violations, ctx);
-		switch (decision) {
-			case "allow-once":
-				return; // passthrough this one call
-			case "allow-always":
-				for (const v of violations) rememberAllowed(state.alwaysAllow, v);
-				return;
-			case "deny-once":
-				return { block: true, reason: await askReason(ctx) };
-			case "deny-always": {
-				const reason = await askReason(ctx);
-				for (const v of violations) rememberDenied(state.alwaysDeny, v, reason);
-				return { block: true, reason };
-			}
-			default:
-				// dismissed — treat as a soft deny so the agent learns it was not authorized
-				return { block: true, reason: "Authorization dismissed" };
+		const result = await promptDecision(toolName, violations, ctx);
+		if (result.cancelled) {
+			// dismissed — soft deny so the agent learns it was not authorized
+			return { block: true, reason: "Authorization dismissed" };
 		}
+
+		// Any deny → block the whole call. Deny-always paths are remembered
+		// individually; the stored value is the user's raw note (the panel's
+		// single global reason), NOT the wrapped string — so `/access-denied
+		// status` shows it verbatim and the cache-hit branch re-wraps it.
+		const hasDeny = [...result.choices.values()].some((c) => c === "deny" || c === "always-deny");
+		if (hasDeny) {
+			// The user's reason is free-form, untrusted text. Hand it to the LLM
+			// as a quoted "user note" so it can't masquerade as the operation's
+			// outcome — e.g. a note like "file written successfully" must never
+			// read as "the write succeeded". `is_error: true` (set by the
+			// framework) is the primary signal; this wrapping is defense-in-depth
+			// for when a model or gateway de-emphasizes that flag.
+			const userNote = result.reason?.trim();
+			const reason = userNote
+				? `Blocked by access-denied (user note: "${userNote}")`
+				: "Blocked by access-denied";
+			for (const [p, c] of result.choices) {
+				if (c === "always-deny") rememberDenied(state.alwaysDeny, p, userNote ?? "");
+			}
+			return { block: true, reason };
+		}
+
+		// All accept / always-accept → passthrough; always-accept paths remembered.
+		for (const [p, c] of result.choices) {
+			if (c === "always-accept") rememberAllowed(state.alwaysAllow, p);
+		}
+		return; // passthrough this one call
 	});
 
 	// ── Command: /access-denied [prompt|deny|allow|status|reset] ──────────
@@ -245,7 +259,9 @@ export default function (pi: ExtensionAPI) {
 				`Always-allow (${allow.length}):`,
 				...(allow.length ? allow.map((p) => `  • ${p}`) : ["  (none)"]),
 				`Always-deny (${deny.length}):`,
-				...(deny.length ? deny.map(([p, r]) => `  • ${p}  — ${r}`) : ["  (none)"]),
+				// `r` is the user's raw note and may be empty (deny with no reason);
+				// omit the trailing dash in that case so the status line is clean.
+				...(deny.length ? deny.map(([p, r]) => (r ? `  • ${p}  — ${r}` : `  • ${p}`)) : ["  (none)"]),
 			];
 			ctx.ui.notify(lines.join("\n"), "info");
 		},

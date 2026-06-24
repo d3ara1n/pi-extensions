@@ -167,3 +167,17 @@ agent 的边界：
 - ✅ 改源码、跑 `npm run typecheck`（`tsc --noEmit`）验证类型——这些在项目内，可自行完成
 - ✅ 改 `settings.json` 把扩展路径加进去（只读改这一个数组）
 - ❌ 不要自行 `pi --reload`、kill/restart pi 进程——重载由用户手动执行
+
+---
+
+## 经验区
+
+### `ctx.ui.custom` 交互面板：底部面板必须用 `overlay: false`
+
+用 `ctx.ui.custom` 实现底部交互面板（授权确认、多问题问答等）时，**必须设置 `overlay: false`**。
+
+**`overlay: true` 的问题**：面板通过 `ui.showOverlay()` 全屏叠加，聊天区被完全遮挡、不可滚动——用户无法边看 agent 的指示边操作面板。pi-ask-user 最早踩过这个坑，pi-access-denied 重构 `AuthPanel` 时又踩了一次。
+
+**正确做法**：`overlay: false` 渲染在底部 `editorContainer` 槽位（与 `ctx.ui.select()` / `input()` 共用），聊天区在上方保持可见、可通过终端原生滚动回溯。键盘焦点自动交给面板，上下箭头导航不受影响。
+
+参考：`pi-ask-user` 的 `AskUserPanel` 和已修复的 `pi-access-denied` 的 `AuthPanel`。

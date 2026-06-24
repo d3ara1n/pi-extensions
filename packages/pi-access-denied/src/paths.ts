@@ -15,16 +15,105 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+// ── Platform-agnostic comparison primitives (pure, exported for testing) ─────
+//
+// Node's `path` module is split: `path.posix` uses `/`, `path.win32` uses `\`,
+// and there is NO built-in function that treats `/dev/null` and `\dev\null` as
+// equivalent. On Windows, commands coming from a Git Bash shell are written
+// in MSYS style (`/dev/null`, `/tmp`, `/c/Users`), but `path.win32.normalize`
+// rewrites them to `\dev\null` etc. — which then fail literal comparisons
+// against Unix-style safe-path constants.
+//
+// We bridge that gap by normalizing the *comparison basis* to POSIX style
+// (forward slashes) before matching against a single set of Unix-style
+// safe-path constants. A Unix `/dev/null` and its Windows `\dev\null` alias
+// both reduce to `/dev/null` and match the same constant. Windows only adds its
+// own native device names (NUL/CON/...), which have no Unix analogue.
+//
+// These primitives are pure functions of their string inputs (no `path` module,
+// no `os` calls), so win32 semantics can be unit-tested on any platform.
+
+/** Normalize separators to POSIX `/` so `\dev\null` ≡ `/dev/null` for comparison. */
+export function toPosix(p: string): string {
+	// split/join avoids regex-escape pitfalls; after path.normalize() backslash
+	// is the only separator Node ever emits (POSIX paths already use `/`).
+	return p.includes("\\") ? p.split("\\").join("/") : p;
+}
+
 /**
- * Built-in always-safe path prefixes. These never trigger a prompt:
+ * POSIX-style prefix check (separator `/`). Pure — usable on any platform to
+ * test a posix-normalized target against a posix-normalized root. Used for the
+ * safe-path constants (always posix); allowlist boundary checks keep using the
+ * platform-aware {@link underRoot} because allowlist entries are real paths.
+ */
+export function posixUnder(posixTarget: string, posixRoot: string): boolean {
+	return posixTarget === posixRoot || posixTarget.startsWith(posixRoot + "/");
+}
+
+/**
+ * Windows reserved device names: NUL, CON, AUX, PRN, COM1-9, LPT1-9.
+ *
+ * These are Win32 device names with no Unix analogue; they are safe to write
+ * (NUL is the null sink, like /dev/null). Matched by basename so `C:\proj\NUL`,
+ * bare `NUL`, and `NUL.txt` are all recognized. Returns false on non-Windows.
+ *
+ * `platform` defaults to `process.platform`; tests inject `"win32"` to exercise
+ * the logic on any host.
+ */
+export function isWinDeviceName(target: string, platform: string = process.platform): boolean {
+	if (platform !== "win32") return false;
+	// basename on a win32-normalized path yields the final segment. Strip any
+	// `.<ext>` so `NUL.txt` matches (Win32 treats the bare name as the device).
+	const base = path.win32.basename(target).replace(/\.[^.]*$/, "").toUpperCase();
+	return WIN_DEV_NAMES.has(base);
+}
+const WIN_DEV_NAMES: ReadonlySet<string> = new Set([
+	"NUL", "CON", "AUX", "PRN",
+	"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+	"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+]);
+
+/**
+ * MSYS (Git Bash) drive notation: `/c/Users/me` → `C:\Users\me`.
+ *
+ * MSYS mounts Windows drives under a single-letter cygdrive prefix (case
+ * insensitive). Node's `path.win32` does NOT understand this convention, so a
+ * command like `ls /c/proj/src` would otherwise be mis-resolved to
+ * `C:\c\proj\src` and wrongly flagged as escaping cwd `C:\proj`. Only
+ * meaningful on Windows; on POSIX this returns null unconditionally.
+ *
+ * `platform` defaults to `process.platform`; tests inject `"win32"` to exercise
+ * the logic on any host.
+ */
+export function msysDrive(token: string, platform: string = process.platform): string | null {
+	if (platform !== "win32") return null;
+	// `/x` followed by `/` or end, single letter a-z (case insensitive per MSYS).
+	const m = /^\/([a-zA-Z])(\/|$)/.exec(token);
+	if (!m) return null;
+	const drive = m[1].toUpperCase();
+	// slice past the FULL matched prefix (e.g. "/c/"), not just "/c" — otherwise
+	// the leading `/` survives into `rest` and doubles up with the `:\` separator.
+	const rest = token.slice(m[0].length);
+	return `${drive}:\\${rest.replace(/\//g, "\\")}`;
+}
+
+/**
+ * Built-in always-safe path prefixes (POSIX-form, single source of truth).
+ *
+ * These constants are compared in posix-normalized form (see {@link isSafe}),
+ * so `/dev/null` matches both the POSIX path and the `\dev\null` alias that
+ * path.win32.normalize produces. Never trigger a prompt:
  *   - `/dev/null`, `/dev/stdin|out|err`, `/dev/zero`, `/dev/u?random`
  *     (process-internal pseudo-devices, safe)
  *   - `/dev/fd/` (current process's own file descriptors, safe)
  *
+ * Windows adds its own native device names (NUL/CON/...) separately via
+ * {@link isWinDeviceName}, since they have no Unix path analogue.
+ *
  * The gate's purpose is to prevent an out-of-control agent from leaving
  * *permanent* footprints outside the project (configs, user data, system
  * files). Task-scoped scratch space that the OS reclaims is explicitly fine:
- *   - `/tmp` (system shared, auto-cleaned)
+ *   - `/tmp` (system shared, auto-cleaned; on Git Bash for Windows mounts to %TEMP%)
  *   - `os.tmpdir()` (per-user temp, auto-cleaned; on Linux it == /tmp)
  *
  * `/dev/tty` is intentionally NOT included — it can capture keyboard input.
@@ -50,10 +139,15 @@ const TMP_REAL = (() => {
 	}
 })();
 
-/** True if `target` (normalized absolute) is an always-safe pseudo-device. */
-function isSafeDevice(target: string): boolean {
-	if (SAFE_DEV_PATHS.includes(target)) return true;
-	return SAFE_DEV_PREFIXES.some((p) => target.startsWith(p));
+/**
+ * True if `posixTarget` (posix-normalized, forward slashes) is an always-safe
+ * pseudo-device. Receives a *normalized* string so the same Unix constants
+ * match both `/dev/null` (POSIX) and the `\dev\null` alias produced by
+ * path.win32.normalize. Call {@link toPosix} on the real target first.
+ */
+export function isSafeDevice(posixTarget: string): boolean {
+	if (SAFE_DEV_PATHS.includes(posixTarget)) return true;
+	return SAFE_DEV_PREFIXES.some((p) => posixTarget.startsWith(p));
 }
 
 /** True if `target` is under a given normalized root dir. */
@@ -74,6 +168,10 @@ function expandHome(token: string): string | null {
 export function resolveTarget(token: string, cwd: string): string {
 	const home = expandHome(token);
 	if (home !== null) return path.normalize(home);
+	// MSYS drive notation (/c/Users → C:\Users) must be tried before the generic
+	// absolute check: path.win32 mis-resolves /c/... to C:\c\.... (no-op on POSIX.)
+	const msys = msysDrive(token);
+	if (msys) return path.normalize(msys);
 	if (path.isAbsolute(token)) return path.normalize(token);
 	return path.resolve(cwd, token);
 }
@@ -144,22 +242,35 @@ export function rememberDenied(map: Map<string, string>, dir: string, reason: st
 /**
  * True if `target` is always-safe (no prompt needed) regardless of allowlist:
  *   - built-in safe pseudo-devices (/dev/null, /dev/fd/, etc.)
+ *   - Windows native device names (NUL/CON/...) on win32
  *   - task-scoped scratch dirs: /tmp and os.tmpdir() (no permanent footprint)
  *   - any user-configured extra safe paths
+ *
+ * Comparison is done in posix-normalized form so Unix-style safe-path
+ * constants match targets produced by either path.posix or path.win32.
  */
 export function isSafe(target: string, opts: { extraSafePaths: string[] }): boolean {
-	if (isSafeDevice(target)) return true;
+	// Windows native device names (no Unix analogue) — matched by basename on
+	// the win32 path form, before posix normalization.
+	if (isWinDeviceName(target)) return true;
+
+	// Normalize to posix so Unix constants match across platforms
+	// (Windows \dev\null → /dev/null hits the same constant as the POSIX form).
+	const p = toPosix(target);
+
+	if (isSafeDevice(p)) return true;
+
 	// /tmp and os.tmpdir(): task-scoped, OS-reclaimed, no permanent footprint.
-	// Match both the literal "/tmp" prefix and its realpath (macOS: /tmp -> /private/tmp)
-	// so LLM-provided paths like "/tmp/foo" are recognized without a realpath round-trip.
-	if (underRoot(target, "/tmp")) return true;
-	if (TMP_REAL !== "/tmp" && underRoot(target, TMP_REAL)) return true;
-	const tmp = path.normalize(os.tmpdir());
-	if (underRoot(target, tmp)) return true;
-	for (const p of opts.extraSafePaths) {
-		const resolved = expandHome(p) ?? p;
+	// posix-style prefix check so /tmp matches regardless of platform separator.
+	// (On Git Bash for Windows, /tmp mounts to %TEMP% by default — see README.)
+	if (posixUnder(p, "/tmp")) return true;
+	if (TMP_REAL !== "/tmp" && posixUnder(p, toPosix(TMP_REAL))) return true;
+	const tmp = toPosix(path.normalize(os.tmpdir()));
+	if (posixUnder(p, tmp)) return true;
+	for (const e of opts.extraSafePaths) {
+		const resolved = expandHome(e) ?? e;
 		const norm = path.isAbsolute(resolved) ? path.normalize(resolved) : path.resolve(process.cwd(), resolved);
-		if (underRoot(target, norm)) return true;
+		if (posixUnder(p, toPosix(norm))) return true;
 	}
 	return false;
 }

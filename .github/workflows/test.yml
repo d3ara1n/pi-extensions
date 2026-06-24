@@ -1,0 +1,47 @@
+name: Tests
+
+# Runs the test suites across linux / macos / windows so platform-specific
+# behavior (e.g. pi-access-denied's Git Bash / MSYS path handling) is exercised
+# on the platform it targets. A red X on one OS in the matrix makes the failing
+# platform immediately visible on the Actions tab.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref, but never cancel a run on main
+# (keeps the main-branch signal always green/red, not cancelled).
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false # let every OS finish so all failures surface at once
+
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    defaults:
+      run:
+        working-directory: packages/pi-access-denied
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24 # matches the version used by publish.yml
+
+      # Tests are zero-dependency (node:test + node built-ins only), so no
+      # `npm install` is needed — this keeps the job fast and side-effect-free.
+      - name: Run tests
+        run: npm test

@@ -61,8 +61,8 @@ Under the `accessDenied` key in `settings.json` (global `~/.pi/agent/settings.js
 
 The gate's purpose is to stop an out-of-control agent from leaving **permanent footprints** outside the project (configs, user data, system files) — not to isolate users or hide other programs' data. So task-scoped scratch space that the OS reclaims is always allowed:
 
-- **Pseudo-devices**: `/dev/null`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr`, `/dev/zero`, `/dev/urandom`, `/dev/random`, `/dev/fd/` (the process's own file descriptors)
-- **Scratch dirs**: `/tmp` (system shared, auto-cleaned) and `os.tmpdir()` (per-user temp; on Linux these are the same place). macOS `/tmp` -> `/private/tmp` symlink is handled.
+- **Pseudo-devices**: `/dev/null`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr`, `/dev/zero`, `/dev/urandom`, `/dev/random`, `/dev/fd/` (the process's own file descriptors). On Windows, the native device names `NUL`/`CON`/`AUX`/`PRN`/`COM1-9`/`LPT1-9` are also recognized (matched by basename, so `C:\proj\NUL`, bare `NUL`, and `NUL.txt` all work).
+- **Scratch dirs**: `/tmp` (system shared, auto-cleaned) and `os.tmpdir()` (per-user temp; on Linux these are the same place). macOS `/tmp` -> `/private/tmp` symlink is handled. On Git Bash for Windows, `/tmp` maps to `%TEMP%` — see [Cross-platform behavior](#cross-platform-behavior).
 
 Deliberately **not** allowed: `/dev/tty` (can capture keyboard input), `/dev/disk*` (block devices), and anything that persists — home dir, `/etc`, `/var`, `/usr`, etc.
 
@@ -96,6 +96,18 @@ A target path is `resolve`d + `normalize`d; if it falls inside any allowed dir (
 **Backslash escapes are honored inside unquoted tokens.** `Agent\ Workspace` is one token (a path containing a literal space), not two — the `\` + next char is kept together and the backslash stripped, so `/a/Agent\ Workspace/b` is treated as `/a/Agent Workspace/b`. This covers `\ ` (space), `\;`, `\(`, `\|`, even `\\` → `\`. It applies only to **unquoted** tokens; inside quotes the backslash is left untouched (quotes already protect the content).
 
 Note: read-only commands that traverse outside `cwd` (like `find /`, `ls /etc`) are also gated — bash access outside the project is blocked regardless of read/write, by design.
+
+## Cross-platform behavior
+
+pi runs commands through **Git Bash** on Windows, so bash command strings arrive in MSYS style (`/dev/null`, `/tmp`, `/c/Users/...`). Node's `path` module does not understand MSYS path conventions — `path.win32.normalize("/dev/null")` yields `\dev\null`, which would otherwise fail to match the Unix-style safe-path constants. The gate handles MSYS paths itself instead of relying on Node:
+
+1. **Safe-path constants work on both platforms.** `/dev/null`, `/dev/std*`, `/dev/fd/`, and `/tmp` are matched after normalizing separators to `/`, so the `\dev\null` produced by Windows path resolution is recognized as the same safe path as the POSIX `/dev/null`.
+
+2. **MSYS drive notation.** `/c/Users/me` is resolved to `C:\Users\me` before allowlist checks (case-insensitive, as MSYS is). So a command writing under cwd in MSYS style (`/c/proj/src/...`) is correctly seen as in-bounds rather than mis-resolved to `C:\c\proj\...`.
+
+3. **`/tmp` on Git Bash for Windows** maps to `%TEMP%` (the OS-reclaimed per-user temp) by default, matching the Unix `/tmp` semantics, and is treated as safe. *(If you reconfigured `/etc/fstab` to mount `/tmp` at a permanent location, that location is still treated as safe — extremely rare configuration, and the blast radius is limited to `/tmp` writes.)*
+
+**Cannot be resolved statically** (treated as out-of-bounds, conservatively): MSYS paths whose real Windows target depends on the install location or mount table — `/usr/...`, `/etc/...`, the MSYS root `/`. If your workflow needs these, add them to `extraAllowedDirs` with their real Windows paths.
 
 ## Limitations (bash heuristic)
 

@@ -79,10 +79,19 @@ interface Question {
 
 interface Answer {
 	tab: string;
-	/** Single-select: the chosen label. Multi-select: empty string. */
+	/** Single-select: the chosen label (empty for multi-select, or for a
+	 *  single-select custom answer — in the latter case the custom text lives
+	 *  in `customText`). */
 	answerLabel: string;
-	/** Multi-select: all chosen labels. Single-select: absent. */
+	/** Multi-select: all chosen OPTION labels. A committed custom text is kept
+	 *  separately in `customText` — it is never mixed in here, so the two stay
+	 *  cleanly separable for LLM serialization. */
 	answerLabels?: string[];
+	/** The committed custom ("Type something.") text, kept independently of the
+	 *  selected option labels. Set for both single-select and multi-select when
+	 *  the user typed a custom answer. */
+	customText?: string;
+	/** True if the user typed a custom answer (for any select mode). */
 	wasCustom: boolean;
 	index?: number;
 	/** True for multi-select answers. */
@@ -341,7 +350,8 @@ class AskUserPanel implements Component, Focusable {
 		}
 		this.answers.set(q.tab, {
 			tab: q.tab,
-			answerLabel: trimmed,
+			answerLabel: "",
+			customText: trimmed,
 			wasCustom: true,
 		});
 		st.selectedSingle = -2; // sentinel: "answered via type-something"
@@ -373,16 +383,21 @@ class AskUserPanel implements Component, Focusable {
 			.map((i) => opts[i])
 			.filter((o): o is RenderOption => !!o && !o.isOther);
 		const labels = picked.map((o) => o.label);
-		const hasCustom = !!st.customText;
-		if (hasCustom && st.customText) labels.push(st.customText);
-		if (labels.length === 0) return false;
-		this.answers.set(q.tab, {
+		const customText = st.customText;
+		// Empty commit = no option picks AND no custom text. (A skippable
+		// multi-select still records an explicit empty answer via the Enter
+		// path — see handleInput — so this function returning false just means
+		// "nothing to record here".)
+		if (labels.length === 0 && !customText) return false;
+		const ans: Answer = {
 			tab: q.tab,
 			answerLabel: "",
 			answerLabels: labels,
-			wasCustom: hasCustom,
+			wasCustom: !!customText,
 			multiSelect: true,
-		});
+		};
+		if (customText) ans.customText = customText;
+		this.answers.set(q.tab, ans);
 		return true;
 	}
 
@@ -583,11 +598,11 @@ class AskUserPanel implements Component, Focusable {
 				// Enter edit mode for a custom answer. Prefill with any committed
 				// custom text so the user edits rather than retypes. Per-tab
 				// editor keeps the text for Esc-discard semantics automatically.
-				//   - Single-select: custom text lives in answers[].answerLabel.
+				//   - Single-select: custom text lives in answers[].customText.
 				//   - Multi-select:  it lives in st.customText (kept alongside checks).
 				st.inputMode = true;
 				const existing = this.answers.get(q.tab);
-				const prefill = multi ? st.customText : existing?.wasCustom ? existing.answerLabel : null;
+				const prefill = multi ? st.customText : existing?.wasCustom ? existing.customText ?? null : null;
 				if (prefill) st.editor.setText(prefill);
 				this.invalidate();
 				return;
@@ -909,17 +924,24 @@ class AskUserPanel implements Component, Focusable {
 	private formatAnswerText(ans: Answer | undefined, maxW: number, th: Theme): string {
 		if (!ans) return th.fg("dim", "(no answer)");
 		if (ans.skipped) return th.fg("warning", "(skipped)");
-		if (ans.multiSelect && (ans.answerLabels ?? []).length === 0) {
-			return th.fg("dim", "(none)");
+		if (ans.multiSelect) {
+			// Empty multi-select commit (skippable, submitted with nothing).
+			if ((ans.answerLabels ?? []).length === 0 && !ans.customText) {
+				return th.fg("dim", "(none)");
+			}
+			// Options + custom: show both, custom marked with ✎ for visual distinction.
+			const parts = [...(ans.answerLabels ?? [])];
+			if (ans.customText) parts.push(`${th.fg("text", "✎ ")}${ans.customText}`);
+			const text = parts.join(", ");
+			const vw = visibleWidth(text);
+			if (vw <= maxW) return th.fg("text", text);
+			return th.fg("text", truncateToWidth(text, maxW - 1, "")) + th.fg("dim", "…");
 		}
-		let text: string;
-		if (ans.multiSelect) text = (ans.answerLabels ?? []).join(", ");
-		else text = ans.answerLabel;
+		// Single-select: custom text is the answer; otherwise the picked label.
+		const text = ans.wasCustom && ans.customText ? ans.customText : ans.answerLabel;
 		const vw = visibleWidth(text);
 		if (vw <= maxW) return th.fg("text", text);
-		// truncate: keep prefix, append “…”
-		const cut = truncateToWidth(text, maxW - 1, "");
-		return th.fg("text", cut) + th.fg("dim", "…");
+		return th.fg("text", truncateToWidth(text, maxW - 1, "")) + th.fg("dim", "…");
 	}
 
 	/** Clamp the review scroll offset so the cursor stays visible. The review
@@ -1160,7 +1182,7 @@ export default function askUserExtension(pi: ExtensionAPI) {
 		name: "ask_user",
 		label: "Ask User",
 		description:
-			"Ask the user one or more questions with options. Supports single-select (◎→◉) and multi-select (□→▣, space toggles). Every question always includes a 'Type something.' row so the user can type a custom answer whenever none of the provided options fit — this is built in and cannot be disabled, so never assume the user is restricted to your listed options. The custom-input draft is preserved across tab switches, and a focused side panel shows extended detail (ASCII layouts, code, reasoning) when an option carries a `preview` field. Each option needs a short `label` + a `description` (shown beneath it); add a `preview` field only when a description can't fully convey the option. The panel is collapsible (Ctrl+\\). Use for clarifying requirements, getting preferences, or confirming decisions. Avoid using this to pick one item from a long list you just enumerated (e.g. \"which of these 8 fixes should I start with?\"): options are capped at a handful for a reason, and if the choice isn't a real either/or, present the list in a normal message and let the user reply freely, or just proceed with the highest-priority item — reserve ask_user for genuine decisions with a few distinct, mutually-exclusive paths. All displayed user-facing text should use the conversation's language. The result may carry an optional `message` — a free-form note the user can attach on the review screen (about overall direction, pacing, or anything beyond the specific questions). It is user-provided and out-of-band: you cannot set it via the parameters, and it may be absent; when present, treat it as high-priority context that can override or reframe the answers above it.",
+			"Ask the user one or more questions with options. Supports single-select (◎→◉) and multi-select (□→▣, space toggles). Every question always includes a 'Type something.' row so the user can type a custom answer whenever none of the provided options fit — this is built in and cannot be disabled, so never assume the user is restricted to your listed options. The custom-input draft is preserved across tab switches, and a focused side panel shows extended detail (ASCII layouts, code, reasoning) when an option carries a `preview` field. Each option needs a short `label` + a `description` (shown beneath it); add a `preview` field only when a description can't fully convey the option. The panel is collapsible (Ctrl+\\). Use for clarifying requirements, getting preferences, or confirming decisions. Avoid using this to pick one item from a long list you just enumerated (e.g. \"which of these 8 fixes should I start with?\"): options are capped at a handful for a reason, and if the choice isn't a real either/or, present the list in a normal message and let the user reply freely, or just proceed with the highest-priority item — reserve ask_user for genuine decisions with a few distinct, mutually-exclusive paths. All displayed user-facing text should use the conversation's language. The result is returned as JSON: `{ \"cancelled\": bool, \"answers\": [{ \"tab\": <the question's tab>, ... }], \"message\"?: string }`. Each answer echoes the question's `tab` so you can correlate by key. Per answer only the relevant fields appear: single-select option pick → `answer`; single-select custom text → `custom`; multi-select option picks → `answers: [...]`; multi-select with custom → `answers` + `custom`; multi-select empty commit (skippable, submitted with nothing) → `answers: []`; Tab-skipped → `skipped: true`. `custom` is a sibling of `answer`/`answers`, never mixed in — it signals the user typed something outside the offered options. The optional top-level `message` is a free-form note the user can attach on the review screen (about overall direction, pacing, or anything beyond the specific questions); it is user-provided and out-of-band: you cannot set it via the parameters, and it may be absent; when present, treat it as high-priority context that can override or reframe the answers above it.",
 		parameters: AskUserParams,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -1190,26 +1212,59 @@ export default function askUserExtension(pi: ExtensionAPI) {
 				overlay: false,
 			});
 
-			const summary = result.cancelled
-				? `User cancelled the question(s). ${result.answers.length} question(s) were answered before cancellation.`
-				: result.answers
-						.map((a) => {
-							if (a.skipped) return `${a.tab}: (skipped)`;
-							if (a.multiSelect) {
-								const labels = a.answerLabels ?? [];
-								return `${a.tab}: ${labels.length > 0 ? labels.join(", ") : "(none)"}`;
-							}
-							return `${a.tab}: ${a.wasCustom ? "(custom) " : ""}${a.answerLabel}`;
-						})
-						.join("\n");
-			// Attach the user's free-form note only when present. When empty, say
-			// nothing — "user left no note" is noise the LLM doesn't need.
-			const withNote = result.message
-				? `${summary}\n\nNote from user:\n${result.message}`
-				: summary;
+			// ── Build the JSON payload returned to the LLM ──
+			//
+			// Structure is intentionally SYMMETRIC with the questions schema the LLM
+			// authored (AskUserParams): each question carries a `tab` as its identity
+			// key, and each answer echoes that same `tab`, so the LLM can correlate
+			// answers back to its own questions by key with zero parsing effort. This
+			// replaces the old `tab: answer` text format, which broke when a custom
+			// answer contained a colon or newline (it could overwrite or collide with
+			// adjacent lines).
+			//
+			// Field shape (only relevant fields are emitted — no noise):
+			//   single-select, option picked : { tab, answer }
+			//   single-select, custom typed  : { tab, custom }   // custom NOT in answer
+			//   multi-select, options picked : { tab, answers: [...] }
+			//   multi-select, options+custom : { tab, answers: [...], custom }
+			//   multi-select, custom only    : { tab, custom }
+			//   multi-select, empty commit   : { tab, answers: [] }   // NOT skipped
+			//   any question, Tab-skipped    : { tab, skipped: true }
+			//
+			// `custom` gets its own key (rather than being mixed into answer/answers)
+			// so the LLM can tell the user stepped outside the offered options — a
+			// useful signal, not an anti-spoofing measure. The empty-message note is
+			// omitted entirely ("user left no note" is noise the LLM doesn't need).
+			const jsonAnswers = result.answers.map((a): Record<string, unknown> => {
+				const out: Record<string, unknown> = { tab: a.tab };
+				if (a.skipped) {
+					out.skipped = true;
+					return out;
+				}
+				if (a.multiSelect) {
+					// Only OPTION labels go in `answers`; a committed custom text is a
+					// sibling under `custom`.
+					out.answers = a.answerLabels ?? [];
+				} else if (a.wasCustom) {
+					// Single-select custom text → `custom` (never `answer`).
+					out.custom = a.customText ?? "";
+				} else {
+					// Single-select option pick → `answer`.
+					out.answer = a.answerLabel;
+				}
+				// A multi-select answer may ALSO carry a custom text (checked options
+				// + typed text). Single-select already handled custom above.
+				if (a.multiSelect && a.wasCustom && a.customText) out.custom = a.customText;
+				return out;
+			});
+			const payload: Record<string, unknown> = {
+				cancelled: result.cancelled,
+				answers: jsonAnswers,
+			};
+			if (result.message) payload.message = result.message;
 
 			return {
-				content: [{ type: "text", text: withNote }],
+				content: [{ type: "text", text: JSON.stringify(payload) }],
 				details: result,
 			};
 		},

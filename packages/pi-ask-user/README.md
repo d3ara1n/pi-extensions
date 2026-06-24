@@ -190,11 +190,40 @@ treat it as high-priority context.
 
 ### Result
 
-The tool returns a summary plus structured `answers`, and optionally a
-`message` (the user's review-screen note, only when non-empty). If the user
-cancelled mid-way, the summary notes how many questions were answered before
-cancellation. When present, the note is appended as a separate `Note from user:`
-block so it's visually distinct from the per-question answers.
+The tool result returned to the model is **JSON**, shaped symmetrically with
+the questions schema so the model can correlate each answer back to its own
+question by the `tab` key:
+
+```json
+{
+  "cancelled": false,
+  "answers": [
+    { "tab": "layout", "answer": "Sidebar" },
+    { "tab": "extras", "answers": ["dark-mode"], "custom": "also add export-to-pdf" },
+    { "tab": "db", "skipped": true }
+  ],
+  "message": "leaning towards the minimal option"
+}
+```
+
+Only the relevant fields appear per answer (no noise):
+
+| Situation | Fields |
+|-----------|--------|
+| single-select, option picked | `answer` |
+| single-select, custom typed | `custom` |
+| multi-select, options picked | `answers: [...]` |
+| multi-select, options + custom | `answers` + `custom` |
+| multi-select, custom only | `custom` |
+| multi-select, empty commit (skippable, submitted with nothing) | `answers: []` |
+| any question, Tab-skipped | `skipped: true` |
+
+`custom` is always a sibling of `answer`/`answers`, never mixed in — it signals
+the user typed something outside the offered options. The top-level `message`
+(the user's review-screen note) appears only when non-empty. `cancelled: true`
+means the user pressed `Esc`; `answers` still lists whatever was answered
+before cancellation. This JSON shape replaces the old `"tab: answer"` text
+format, which could break when a custom answer contained a colon or newline.
 
 ## Keys
 

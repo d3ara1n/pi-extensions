@@ -11,7 +11,15 @@ Core capability library for [pi](https://github.com/earendil-works/pi) — seria
 - **Tracker**: live snapshot of the local main agent's activity (tool name, turn index), hook-driven
 - **Read-after-burn**: nothing is persisted, no session file is touched, the main agent is never disturbed
 
-Depends on [`@d3ara1n/pi-model-roles`](../pi-model-roles) for the `utility` role resolution.
+## Install
+
+```bash
+pi extension add @d3ara1n/pi-peek
+```
+
+## Dependencies
+
+- [`@d3ara1n/pi-model-roles`](../pi-model-roles) — resolves the `utility` model role
 
 ## Configuration
 

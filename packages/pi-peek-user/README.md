@@ -37,7 +37,11 @@ pi extension add @d3ara1n/pi-peek         # install first — provides the consu
 pi extension add @d3ara1n/pi-peek-user
 ```
 
-Both must be in `settings.json` extensions. `pi-peek` registers hooks that track the main agent and initialize the consult backend; `pi-peek-user` only registers the `/peek` command that calls into it.
+Both must be in `settings.json` extensions — `pi-peek` provides the consult backend, `pi-peek-user` only registers the `/peek` command.
+
+## Dependencies
+
+- [`@d3ara1n/pi-peek`](../pi-peek) — consult core (tracker hooks + investigate backend)
 
 ## Usage
 

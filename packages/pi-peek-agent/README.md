@@ -33,7 +33,11 @@ pi extension add @d3ara1n/pi-peek          # install first — provides the cons
 pi extension add @d3ara1n/pi-peek-agent
 ```
 
-Both must be in `settings.json` extensions. `pi-peek` registers hooks that track the main agent and initialize the consult backend; `pi-peek-agent` registers the `peek`/`peek_list` tools that call into it.
+Both must be in `settings.json` extensions — `pi-peek` provides the consult backend, `pi-peek-agent` registers the `peek`/`peek_list` tools.
+
+## Dependencies
+
+- [`@d3ara1n/pi-peek`](../pi-peek) — consult core (tracker hooks + investigate backend)
 
 ## Configuration
 

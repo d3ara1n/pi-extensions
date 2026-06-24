@@ -50,10 +50,9 @@ before_agent_start hook fires
     └─ [model-router] Switches model if a different role is recommended
 ```
 
-## Requirements
+## Dependencies
 
-- **@d3ara1n/pi-model-roles** must be installed and configured
-- A cheap role must be defined in `modelRoles` configuration or use the default (may be much more expensive) instead
+- [`@d3ara1n/pi-model-roles`](../pi-model-roles) — model role resolution
 
 ## Installation
 

@@ -47,11 +47,9 @@ This means:
 - **Collapsed result**: `✓ explorer · Found login, registration, and token logic` + recent tool calls + usage stats
 - **Expanded result** (Ctrl+O): Full task text, all tool calls, final output as rendered Markdown, and usage details
 
-## Requirements
+## Dependencies
 
-- **@d3ara1n/pi-model-roles** must be installed and configured
-- **@earendil-works/pi-tui** — bundled with pi, no separate install needed
-- Role definitions must exist in `modelRoles` settings
+- [`@d3ara1n/pi-model-roles`](../pi-model-roles) — model role resolution
 
 ## Installation
 

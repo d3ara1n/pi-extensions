@@ -47,9 +47,7 @@ Project-level `.pi/settings.json` overrides global settings.
 
 ## Dependencies
 
-- `@earendil-works/pi-ai` — `complete()` for LLM calls
-- `@earendil-works/pi-coding-agent` — Extension API
-- `@d3ara1n/pi-model-roles` — Model role resolution
+- [`@d3ara1n/pi-model-roles`](../pi-model-roles) — model role resolution
 
 ## Install
 

@@ -327,7 +327,15 @@ function isEscapingCandidate(token: string): boolean {
 // A backslash escape (`\X`) is consumed inside a token via the `\\.` branch, so
 // `/a/Agent\ Workspace/b` stays ONE token instead of splitting on the escaped
 // space. The escape is later stripped by {@link unescapeBackslash}.
-const TOKEN_RE = /"[^"]*"|'[^']*'|(?:\\.|[^\s"'`;|&<>(){}=])+/g;
+//
+// `=` is intentionally NOT a separator: splitting there would break the bash
+// regex-match operator `=~` (the `~` half would detach and be mistaken for a
+// home path, expanding to $HOME) and detach assignment values (`X=/etc/passwd`
+// → bare `/etc/passwd`). Escaping detection only inspects a token's PREFIX
+// (`/`, `~`, `$HOME`, `..`), so an `=`-bearing token is inert unless it itself
+// begins with one of those prefixes — keeping it whole can only reduce
+// false positives, never create false negatives.
+const TOKEN_RE = /"[^"]*"|'[^']*'|(?:\\.|[^\s"'`;|&<>(){}])+/g;
 
 // Heredoc opener: `<<DELIM`, `<<-DELIM`, `<<'DELIM'`, `<<"DELIM"`, `<<\DELIM`.
 // Captures the bare delimiter word (quotes/escape stripped) so we can find the

@@ -307,6 +307,33 @@ describe(
 			assert.deepEqual(v, []);
 		});
 
+		// ── extractBashViolations: `=` is NOT a token separator (regression) ─
+		// `=` was previously in the TOKEN_RE separator set, which broke the
+		// bash regex-match operator `=~` (split into `=` + `~`, and the bare
+		// `~` expanded to homedir → false positive) and detached assignment
+		// values (`X=/etc/passwd` → bare `/etc/passwd`). Escaping detection
+		// only inspects a token's PREFIX, so `=`-bearing tokens are inert.
+
+		test("=~ regex-match operator is not split into a bare ~ (regression)", () => {
+			// `[[ "$s" =~ $pattern ]]` — `=~` stays one token starting with `=`,
+			// which is not an escaping candidate. This was the real-world trigger:
+			// a bash script using `[[ ... =~ ... ]]` was flagged for $HOME access.
+			const v = extractBashViolations('[[ "$s" =~ $pattern ]]', CWD, ALLOW, SAFE);
+			assert.deepEqual(v, []);
+		});
+
+		test("assignment value stays attached to its name (regression)", () => {
+			// `X=/etc/passwd` stays one token; README documents assignments as
+			// skipped, and a token starting with `X=` is not an escaping candidate.
+			const v = extractBashViolations("X=/etc/passwd", CWD, ALLOW, SAFE);
+			assert.deepEqual(v, []);
+		});
+
+		test("assignment with home value stays attached (regression)", () => {
+			const v = extractBashViolations("X=~/.ssh/config", CWD, ALLOW, SAFE);
+			assert.deepEqual(v, []);
+		});
+
 		// ── extractBashViolations: parent-climb (..) traversal ────────────
 
 		test("../ traversal above cwd is flagged", () => {

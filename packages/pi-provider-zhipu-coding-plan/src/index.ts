@@ -1,7 +1,7 @@
 /**
  * pi-provider-zhipu-coding-plan
  *
- * Registers "zhipu-coding" provider with dynamic model discovery
+ * Registers "zhipu-coding" provider with static model list
  * and usage quota reporting via the shared UsageRegistry.
  *
  * Auth: API key stored in ~/.pi/agent/auth.json under "zhipu-coding"
@@ -50,9 +50,7 @@ interface QuotaResponse {
   data?: { limits?: QuotaLimitItem[]; level?: string };
 }
 
-interface ApiModel { id: string }
-
-// ── Known model metadata (fallback) ───────────────────────────────────────
+// ── Known model metadata ─────────────────────────────────────────────────
 
 const DEFAULT_META: ModelMeta = {
   contextWindow: 128_000,
@@ -91,15 +89,6 @@ function resolveApiKey(): string | undefined {
   } catch { return undefined; }
 }
 
-async function fetchModelList(apiKey: string): Promise<ApiModel[]> {
-  const res = await fetch(`${CODING_BASE_URL}/models`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!res.ok) throw new Error(`GET /models ${res.status}`);
-  return (await res.json() as { data?: ApiModel[] }).data ?? [];
-}
-
 async function fetchQuota(apiKey: string): Promise<QuotaResponse | null> {
   try {
     const res = await fetch(QUOTA_API_URL, {
@@ -132,7 +121,7 @@ function buildModelConfig(id: string) {
   };
 }
 
-const FALLBACK_MODELS = Object.keys(KNOWN_MODELS).map(buildModelConfig);
+const MODELS = Object.keys(KNOWN_MODELS).map(buildModelConfig);
 
 // ── Usage provider ────────────────────────────────────────────────────────
 
@@ -174,25 +163,13 @@ function createUsageProvider(): UsageProvider {
 // ── Entry point ───────────────────────────────────────────────────────────
 
 export default async function (pi: ExtensionAPI) {
-  const apiKey = resolveApiKey();
-
-  let models = FALLBACK_MODELS;
-  if (apiKey) {
-    try {
-      const apiModels = await fetchModelList(apiKey);
-      if (apiModels.length) models = apiModels.map(m => buildModelConfig(m.id));
-    } catch (e) {
-      console.error("[zhipu-coding] model discovery failed, using fallback:", e);
-    }
-  }
-
   pi.registerProvider(PROVIDER_ID, {
     name: PROVIDER_NAME,
     baseUrl: CODING_BASE_URL,
     apiKey: `$${API_KEY_ENV}`,
     api: "openai-completions",
     authHeader: true,
-    models,
+    models: MODELS,
   });
 
   usageRegistry.register(createUsageProvider());

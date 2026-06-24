@@ -77,28 +77,24 @@ interface Question {
 	allowSkip?: boolean;
 }
 
-interface Answer {
-	tab: string;
-	/** Single-select: the chosen label (empty for multi-select, or for a
-	 *  single-select custom answer — in the latter case the custom text lives
-	 *  in `customText`). */
-	answerLabel: string;
-	/** Multi-select: all chosen OPTION labels. A committed custom text is kept
-	 *  separately in `customText` — it is never mixed in here, so the two stay
-	 *  cleanly separable for LLM serialization. */
-	answerLabels?: string[];
-	/** The committed custom ("Type something.") text, kept independently of the
-	 *  selected option labels. Set for both single-select and multi-select when
-	 *  the user typed a custom answer. */
-	customText?: string;
-	/** True if the user typed a custom answer (for any select mode). */
-	wasCustom: boolean;
-	index?: number;
-	/** True for multi-select answers. */
-	multiSelect?: boolean;
-	/** True if the user skipped this question (only set when allowSkip is true). */
-	skipped?: boolean;
-}
+/** A committed answer. Discriminated by `kind` so every state carries exactly
+ *  the fields it needs — the compiler guarantees completeness, and the three
+ *  display/serialization consumers all derive from `describeAnswer()` (single
+ *  source of truth) so they can never drift apart.
+ *
+ *  - `single`: the user picked one of the offered options.
+ *  - `custom`: single-select, the user typed a custom answer ("Type something.").
+ *  - `multi`:  multi-select — `options` are the picked option labels; an
+ *    optional `custom` carries any typed text alongside them. Pure-custom
+ *    (no options checked) is `options: []` + `custom`; an empty commit
+ *    (skippable, submitted with nothing) is `options: []` with no `custom`.
+ *  - `skipped`: the user navigated past without answering (Tab/arrows).
+ */
+type Answer =
+	| { tab: string; kind: "single"; option: string }
+	| { tab: string; kind: "custom"; text: string }
+	| { tab: string; kind: "multi"; options: string[]; custom?: string }
+	| { tab: string; kind: "skipped" };
 
 interface AskUserResult {
 	questions: Question[];
@@ -251,6 +247,38 @@ function truncForDisplay(text: string, maxW: number): string {
 	return truncateToWidth(text, maxW - 1, "") + "…";
 }
 
+/** Structured interpretation of an Answer for display/serialization.
+ *  Single source of truth — all three consumers (review screen's
+ *  formatAnswerText, result card's formatAnswer, execute's JSON payload)
+ *  derive from this, so they can never drift apart. */
+interface AnswerView {
+	/** Human-readable text WITHOUT ANSI — e.g. "Sidebar" / "甲, 乙" /
+	 *  "✎ 自定义文本" / "(none)" / "(skipped)". Consumers wrap it in color. */
+	text: string;
+	/** Theme color name for the whole text. */
+	color: ThemeColor;
+}
+
+/** Interpret an Answer into display form. `customGlyph` (default "✎") prefixes
+ *  any custom text. Returns `(no answer)` / dim for an absent answer. */
+function describeAnswer(ans: Answer | undefined, customGlyph = ICON_OTHER): AnswerView {
+	if (!ans) return { text: "(no answer)", color: "dim" };
+	switch (ans.kind) {
+		case "skipped":
+			return { text: "(skipped)", color: "warning" };
+		case "multi": {
+			if (ans.options.length === 0 && !ans.custom) return { text: "(none)", color: "dim" };
+			const parts = [...ans.options];
+			if (ans.custom) parts.push(`${customGlyph} ${ans.custom}`);
+			return { text: parts.join(", "), color: "text" };
+		}
+		case "custom":
+			return { text: `${customGlyph} ${ans.text}`, color: "text" };
+		case "single":
+			return { text: ans.option, color: "text" };
+	}
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // The overlay component
 // ────────────────────────────────────────────────────────────────────────────
@@ -361,11 +389,10 @@ class AskUserPanel implements Component, Focusable {
 		}
 		this.answers.set(q.tab, {
 			tab: q.tab,
-			answerLabel: "",
-			customText: trimmed,
-			wasCustom: true,
+			kind: "custom",
+			text: trimmed,
 		});
-		st.selectedSingle = -2; // sentinel: "answered via type-something"
+		st.selectedSingle = -1; // clear any prior option pick — answer is now custom
 		st.inputMode = false;
 		if (tabIndex === this.currentTab) {
 			this.advanceAfterAnswer();
@@ -402,12 +429,10 @@ class AskUserPanel implements Component, Focusable {
 		if (labels.length === 0 && !customText) return false;
 		const ans: Answer = {
 			tab: q.tab,
-			answerLabel: "",
-			answerLabels: labels,
-			wasCustom: !!customText,
-			multiSelect: true,
+			kind: "multi",
+			options: labels,
 		};
-		if (customText) ans.customText = customText;
+		if (customText) ans.custom = customText;
 		this.answers.set(q.tab, ans);
 		return true;
 	}
@@ -479,9 +504,7 @@ class AskUserPanel implements Component, Focusable {
 		if (!canSkip(q)) return false; // required question, nothing chosen: block
 		this.answers.set(q.tab, {
 			tab: q.tab,
-			answerLabel: "",
-			wasCustom: false,
-			skipped: true,
+			kind: "skipped",
 		});
 		return true;
 	}
@@ -627,11 +650,11 @@ class AskUserPanel implements Component, Focusable {
 				// Enter edit mode for a custom answer. Prefill with any committed
 				// custom text so the user edits rather than retypes. Per-tab
 				// editor keeps the text for Esc-discard semantics automatically.
-				//   - Single-select: custom text lives in answers[].customText.
+				//   - Single-select: custom text lives in the `custom` answer.
 				//   - Multi-select:  it lives in st.customText (kept alongside checks).
 				st.inputMode = true;
 				const existing = this.answers.get(q.tab);
-				const prefill = multi ? st.customText : existing?.wasCustom ? existing.customText ?? null : null;
+				const prefill = multi ? st.customText : existing?.kind === "custom" ? existing.text : null;
 				if (prefill) st.editor.setText(prefill);
 				this.invalidate();
 				return;
@@ -646,9 +669,8 @@ class AskUserPanel implements Component, Focusable {
 			st.selectedSingle = st.cursor;
 			this.answers.set(q.tab, {
 				tab: q.tab,
-				answerLabel: opt.label,
-				wasCustom: false,
-				index: st.cursor,
+				kind: "single",
+				option: opt.label,
 			});
 			this.invalidate();
 			return;
@@ -665,7 +687,7 @@ class AskUserPanel implements Component, Focusable {
 			if (opt.isOther) {
 				// No edit on Enter (use Space). If a custom answer is already
 				// committed, honour it and advance; otherwise stay put.
-				if (multi ? !!st.customText : this.answers.get(q.tab)?.wasCustom) {
+				if (multi ? !!st.customText : this.answers.get(q.tab)?.kind === "custom") {
 					this.advanceAfterAnswer();
 				}
 				return;
@@ -682,10 +704,8 @@ class AskUserPanel implements Component, Focusable {
 				} else if (canSkip(q)) {
 					this.answers.set(q.tab, {
 						tab: q.tab,
-						answerLabel: "",
-						answerLabels: [],
-						wasCustom: false,
-						multiSelect: true,
+						kind: "multi",
+						options: [],
 					});
 					this.advanceAfterAnswer();
 				}
@@ -695,9 +715,8 @@ class AskUserPanel implements Component, Focusable {
 			st.selectedSingle = st.cursor;
 			this.answers.set(q.tab, {
 				tab: q.tab,
-				answerLabel: opt.label,
-				wasCustom: false,
-				index: st.cursor,
+				kind: "single",
+				option: opt.label,
 			});
 			this.advanceAfterAnswer();
 			return;
@@ -851,7 +870,7 @@ class AskUserPanel implements Component, Focusable {
 			const ans = this.answers.get(q.tab);
 			let mark = " ";
 			let baseColor: import("@earendil-works/pi-coding-agent").ThemeColor = active ? "accent" : "muted";
-			if (ans?.skipped) { mark = "—"; baseColor = "warning"; }
+			if (ans?.kind === "skipped") { mark = "—"; baseColor = "warning"; }
 			else if (ans) { mark = "✓"; baseColor = "success"; }
 			else if (active) mark = "▸";
 			const color = active ? "accent" : baseColor;
@@ -949,28 +968,12 @@ class AskUserPanel implements Component, Focusable {
 		return filled ? th.fg("success", ICON_RADIO_FILLED) : th.fg("dim", ICON_RADIO_EMPTY);
 	}
 
-	/** Format an answer for the review summary: comma-joined, truncated with “…” if too long. */
+	/** Format an answer for the review summary. Delegates to describeAnswer
+	 *  (single source of truth), then wraps in the theme color + truncates. */
 	private formatAnswerText(ans: Answer | undefined, maxW: number, th: Theme): string {
-		if (!ans) return th.fg("dim", "(no answer)");
-		if (ans.skipped) return th.fg("warning", "(skipped)");
-		if (ans.multiSelect) {
-			// Empty multi-select commit (skippable, submitted with nothing).
-			if ((ans.answerLabels ?? []).length === 0 && !ans.customText) {
-				return th.fg("dim", "(none)");
-			}
-			// Options + custom: show both, custom marked with ✎ for visual distinction.
-			const parts = [...(ans.answerLabels ?? [])];
-			if (ans.customText) parts.push(`${th.fg("text", "✎ ")}${ans.customText}`);
-			const text = parts.join(", ");
-			const vw = visibleWidth(text);
-			if (vw <= maxW) return th.fg("text", text);
-			return th.fg("text", truncateToWidth(text, maxW - 1, "")) + th.fg("dim", "…");
-		}
-		// Single-select: custom text is the answer; otherwise the picked label.
-		const text = ans.wasCustom && ans.customText ? ans.customText : ans.answerLabel;
-		const vw = visibleWidth(text);
-		if (vw <= maxW) return th.fg("text", text);
-		return th.fg("text", truncateToWidth(text, maxW - 1, "")) + th.fg("dim", "…");
+		const view = describeAnswer(ans);
+		const text = truncForDisplay(view.text, maxW);
+		return th.fg(view.color, text);
 	}
 
 	/** Clamp the review scroll offset so the cursor stays visible. The review
@@ -1092,7 +1095,7 @@ class AskUserPanel implements Component, Focusable {
 			const isCursor = i === st.cursor;
 			const prefix = isCursor ? `${th.fg("accent", ICON_CURSOR)} ` : "  ";
 			const ans = this.answers.get(q.tab);
-			const committedCustom = multi ? st.customText : ans?.wasCustom ? ans.answerLabel : null;
+			const committedCustom = multi ? st.customText : ans?.kind === "custom" ? ans.text : null;
 			const customAnswered = !!committedCustom;
 			const glyph = this.optionGlyph(opt, i, st, multi, th, isCursor, customAnswered);
 			// For "Type something.", show the committed text instead of the placeholder.
@@ -1136,7 +1139,7 @@ class AskUserPanel implements Component, Focusable {
 		// ── build left column lines (options) ──
 		const leftLines: string[] = [];
 		const dualAns = this.answers.get(q.tab);
-		const dualCommittedCustom = multi ? st.customText : dualAns?.wasCustom ? dualAns.answerLabel : null;
+		const dualCommittedCustom = multi ? st.customText : dualAns?.kind === "custom" ? dualAns.text : null;
 		const customAnswered = !!dualCommittedCustom;
 		for (let i = start; i < end; i++) {
 			const opt = opts[i]!;
@@ -1254,27 +1257,15 @@ class AskUserResultView implements Component {
 				label: th.fg("warning", `cancelled · ${this.result.answers.length}/${this.questions.length} answered`),
 			};
 		}
-		const anySkipped = this.result.answers.some((a) => a.skipped);
+		const anySkipped = this.result.answers.some((a) => a.kind === "skipped");
 		return anySkipped
 			? { icon: "○", borderColor: "accent", label: "" }
 			: { icon: "✓", borderColor: "success", label: "" };
 	}
 
-	/** Format one answer into a human-readable string + color. Mirrors the JSON
-	 *  shape: option picks vs custom text (✎), with (none)/(skipped) markers. */
+	/** Format one answer for the card display. Delegates to describeAnswer. */
 	private formatAnswer(ans: Answer | undefined): { text: string; color: ThemeColor } {
-		if (!ans) return { text: "(no answer)", color: "dim" };
-		if (ans.skipped) return { text: "(skipped)", color: "warning" };
-		const parts: string[] = [];
-		if (ans.multiSelect) {
-			const labels = ans.answerLabels ?? [];
-			if (labels.length === 0 && !ans.customText) return { text: "(none)", color: "dim" };
-			parts.push(...labels);
-			if (ans.customText) parts.push(`${ICON_OTHER} ${ans.customText}`);
-		} else {
-			parts.push(ans.wasCustom && ans.customText ? `${ICON_OTHER} ${ans.customText}` : ans.answerLabel);
-		}
-		return { text: parts.join(", "), color: "text" };
+		return describeAnswer(ans);
 	}
 
 	private renderCollapsed(width: number): string[] {
@@ -1389,24 +1380,21 @@ export default function askUserExtension(pi: ExtensionAPI) {
 			// omitted entirely ("user left no note" is noise the LLM doesn't need).
 			const jsonAnswers = result.answers.map((a): Record<string, unknown> => {
 				const out: Record<string, unknown> = { tab: a.tab };
-				if (a.skipped) {
-					out.skipped = true;
-					return out;
+				switch (a.kind) {
+					case "skipped":
+						out.skipped = true;
+						break;
+					case "single":
+						out.answer = a.option;
+						break;
+					case "custom":
+						out.custom = a.text;
+						break;
+					case "multi":
+						out.answers = a.options;
+						if (a.custom) out.custom = a.custom;
+						break;
 				}
-				if (a.multiSelect) {
-					// Only OPTION labels go in `answers`; a committed custom text is a
-					// sibling under `custom`.
-					out.answers = a.answerLabels ?? [];
-				} else if (a.wasCustom) {
-					// Single-select custom text → `custom` (never `answer`).
-					out.custom = a.customText ?? "";
-				} else {
-					// Single-select option pick → `answer`.
-					out.answer = a.answerLabel;
-				}
-				// A multi-select answer may ALSO carry a custom text (checked options
-				// + typed text). Single-select already handled custom above.
-				if (a.multiSelect && a.wasCustom && a.customText) out.custom = a.customText;
 				return out;
 			});
 			const payload: Record<string, unknown> = {

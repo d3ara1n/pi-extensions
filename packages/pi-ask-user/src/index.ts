@@ -627,8 +627,24 @@ class AskUserPanel implements Component, Focusable {
 				return;
 			}
 			if (multi) {
-				// Commit the current checks (+ any custom text) and advance.
-				if (this.commitMultiAnswer(q, st)) this.advanceAfterAnswer();
+				// Commit the current checks (+ any custom text) and advance. For a
+				// skippable multi-select, committing an EMPTY selection is still a
+				// commit — Enter means "submit (even if empty) and move on", not
+				// "skip" (Tab/arrows do skipping). So we record an explicit empty
+				// answer and advance; a required question (!canSkip) with an empty
+				// selection stays put, since it must have at least one pick.
+				if (this.commitMultiAnswer(q, st)) {
+					this.advanceAfterAnswer();
+				} else if (canSkip(q)) {
+					this.answers.set(q.tab, {
+						tab: q.tab,
+						answerLabel: "",
+						answerLabels: [],
+						wasCustom: false,
+						multiSelect: true,
+					});
+					this.advanceAfterAnswer();
+				}
 				return;
 			}
 			// single-select: commit cursor position as the selection, then advance
@@ -893,6 +909,9 @@ class AskUserPanel implements Component, Focusable {
 	private formatAnswerText(ans: Answer | undefined, maxW: number, th: Theme): string {
 		if (!ans) return th.fg("dim", "(no answer)");
 		if (ans.skipped) return th.fg("warning", "(skipped)");
+		if (ans.multiSelect && (ans.answerLabels ?? []).length === 0) {
+			return th.fg("dim", "(none)");
+		}
 		let text: string;
 		if (ans.multiSelect) text = (ans.answerLabels ?? []).join(", ");
 		else text = ans.answerLabel;
@@ -1176,7 +1195,10 @@ export default function askUserExtension(pi: ExtensionAPI) {
 				: result.answers
 						.map((a) => {
 							if (a.skipped) return `${a.tab}: (skipped)`;
-							if (a.multiSelect) return `${a.tab}: ${a.answerLabels?.join(", ") ?? ""}`;
+							if (a.multiSelect) {
+								const labels = a.answerLabels ?? [];
+								return `${a.tab}: ${labels.length > 0 ? labels.join(", ") : "(none)"}`;
+							}
 							return `${a.tab}: ${a.wasCustom ? "(custom) " : ""}${a.answerLabel}`;
 						})
 						.join("\n");

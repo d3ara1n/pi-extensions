@@ -291,7 +291,7 @@ function unescapeBackslash(t: string): string {
 
 /** Does this token look like it could escape cwd? */
 function isEscapingCandidate(token: string): boolean {
-	if (token.startsWith("/")) return true; // absolute
+	if (token.startsWith("/") || path.isAbsolute(token)) return true; // absolute (posix + windows native)
 	if (token === "~" || token.startsWith("~/")) return true; // home
 	if (token === "$HOME" || token.startsWith("$HOME/")) return true; // home
 	if (token === ".." || token.startsWith("../")) return true; // parent climb

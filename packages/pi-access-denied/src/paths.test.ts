@@ -180,6 +180,14 @@ describe("msysDrive: Git Bash drive notation", () => {
 	test("defaults to process.platform", () => {
 		assert.equal(msysDrive("/c/Users/me"), process.platform === "win32" ? path.win32.join("C:\\Users", "me") : null);
 	});
+	test("single-letter root /t is treated as drive T: (MSYS heuristics)", () => {
+		// In Git Bash, single-letter roots under / are MSYS drive mounts.
+		// This includes /t (even though /tmp is not a drive — the regex
+		// stops at the first char, so /tmp fails because m != / and m != $).
+		// /t by itself DOES match, yielding T:\ — correct in real MSYS.
+		assert.equal(msysDrive("/t", "win32"), "T:\\");
+		assert.equal(msysDrive("/x/file", "win32"), path.win32.join("X:\\", "file"));
+	});
 });
 
 describe("coveringRoot / isCoveredBy: prefix semantics", () => {
@@ -194,6 +202,10 @@ describe("coveringRoot / isCoveredBy: prefix semantics", () => {
 		assert.equal(isCoveredBy("/a/b", set), true);
 		assert.equal(isCoveredBy("/a/b/c", set), true);
 		assert.equal(isCoveredBy("/a/bc", set), false); // sibling-prefix trap
+	});
+	test("coveringRoot with empty iterable returns undefined", () => {
+		assert.equal(coveringRoot("/x", []), undefined);
+		assert.equal(coveringRoot("/x", new Set()), undefined);
 	});
 });
 
@@ -214,6 +226,22 @@ describe("rememberAllowed / rememberDenied: memory compaction", () => {
 		rememberDenied(map, "/a/b/c", "secret");
 		rememberDenied(map, "/a/b", "broader");
 		assert.deepEqual([...map.entries()], [["/a/b", "broader"]]);
+	});
+	test("rememberAllowed: parent subsumes multiple children", () => {
+		const set = new Set<string>();
+		rememberAllowed(set, "/a/x");
+		rememberAllowed(set, "/a/y");
+		rememberAllowed(set, "/a/z");
+		rememberAllowed(set, "/a");
+		assert.deepEqual([...set].sort(), ["/a"]);
+	});
+	test("rememberDenied: parent subsumes multiple children", () => {
+		const map = new Map<string, string>();
+		rememberDenied(map, "/a/x", "r1");
+		rememberDenied(map, "/a/y", "r2");
+		rememberDenied(map, "/a/z", "r3");
+		rememberDenied(map, "/a", "parent-reason");
+		assert.deepEqual([...map.entries()], [["/a", "parent-reason"]]);
 	});
 });
 
@@ -254,6 +282,52 @@ describe(
 
 		test("backslash-backslash collapses to a single backslash", () => {
 			const v = extractBashViolations("echo a\\\\b", CWD, ALLOW, SAFE);
+			assert.deepEqual(v, []);
+		});
+
+		// ── extractBashViolations: parent-climb (..) traversal ────────────
+
+		test("../ traversal above cwd is flagged", () => {
+			const v = extractBashViolations("cat ../../../etc/passwd", CWD, ALLOW, SAFE);
+			// resolve collapses .. segments: ../../../ from /home/me/proj → /
+			assert.equal(v.length, 1);
+			assert.ok(v[0] === "/etc/passwd" || v[0].endsWith("/etc/passwd"));
+		});
+
+		test("embedded /../ traversal in absolute path is flagged", () => {
+			// path.normalize collapses /home/me/proj/../other/secret → /home/me/other/secret
+			const v = extractBashViolations("cat /home/me/proj/../other/secret", CWD, ALLOW, SAFE);
+			assert.deepEqual(v, [path.normalize("/home/me/other/secret")]);
+		});
+
+		// ── extractBashViolations: documented limitations ─────────────────
+
+		test("${HOME} syntax is split by braces — path fragment after } IS caught", () => {
+			// ${…} braces are token separators, so ${HOME}/.ssh/config splits
+			// into $, HOME, /.ssh/config. The last fragment starts with / so
+			// it IS detected as absolute — but resolved from root, not home.
+			// The HOME substitution is lost; /.ssh/config is caught instead.
+			const v = extractBashViolations("cat ${HOME}/.ssh/config", CWD, ALLOW, SAFE);
+			assert.deepEqual(v, ["/.ssh/config"]);
+		});
+
+		test("bare ${VAR} with no trailing / is not flagged (limitation)", () => {
+			// ${HOME} alone splits into $, HOME — neither triggers the gate.
+			const v = extractBashViolations("echo ${HOME}", CWD, ALLOW, SAFE);
+			assert.deepEqual(v, []);
+		});
+
+		test("~otheruser is NOT detected as home expansion (limitation)", () => {
+			// Only the current user's ~ is expanded; ~root does not start with ~/
+			const v = extractBashViolations("cat ~root/.ssh/authorized_keys", CWD, ALLOW, SAFE);
+			assert.deepEqual(v, []);
+		});
+
+		test("unterminated heredoc swallows everything after <<EOF", () => {
+			// If a heredoc opener has no matching terminator, all remaining
+			// lines are treated as body data — including paths that would
+			// otherwise be flagged. This is inherent to the heuristic.
+			const v = extractBashViolations("cat > out <<EOF\n/etc/passwd\n~/secret\n", CWD, ALLOW, SAFE);
 			assert.deepEqual(v, []);
 		});
 
@@ -303,6 +377,22 @@ describe(
 
 		test("safe pseudo-device does not trigger", () => {
 			const v = extractBashViolations("echo x > /dev/null", CWD, ALLOW, SAFE);
+			assert.deepEqual(v, []);
+		});
+
+		test("\\$HOME is unescaped and flagged as home-dir access", () => {
+			// Backslash-escaped $ becomes literal $ after unescaping, so \$HOME
+			// is treated as the real HOME variable — a false positive for the
+			// user, but a safe-over-blocking stance for the gate.
+			const v = extractBashViolations("cat \\$HOME/.ssh/config", CWD, ALLOW, SAFE);
+			const expected = path.join(os.homedir(), ".ssh/config");
+			assert.deepEqual(v, [expected]);
+		});
+
+		test("/private/tmp path (macOS symlink) is safe", { skip: process.platform !== "darwin" ? true : undefined }, () => {
+			// macOS: /tmp → /private/tmp. TMP_REAL resolves this so the real
+			// path is also recognized as safe.
+			const v = extractBashViolations("cat /private/tmp/build-out.log", CWD, ALLOW, SAFE);
 			assert.deepEqual(v, []);
 		});
 
@@ -449,6 +539,22 @@ describe(
 		test("extraAllowedDirs (Windows roots) expand the boundary", () => {
 			const allow = buildAllowlist(CWD, [path.win32.join("D:", "shared")]);
 			const v = extractBashViolations("cat /d/shared/data.bin", CWD, allow, SAFE);
+			assert.deepEqual(v, []);
+		});
+
+		// ── Windows native paths (backslash separators, drive letter) ─────
+
+		test("Windows native absolute path (C:\\...) is flagged", () => {
+			// Git Bash accepts native Windows paths; isEscapingCandidate must
+			// detect them via path.isAbsolute() since they don't start with /.
+			const nativePath = path.win32.join("C:", "Users", "me", ".ssh", "config");
+			const v = extractBashViolations("cat " + nativePath, CWD, ALLOW, SAFE);
+			assert.deepEqual(v, [nativePath]);
+		});
+
+		test("Windows native path under cwd is in-bounds", () => {
+			const nativePath = path.win32.join("C:", "proj", "src", "foo.ts");
+			const v = extractBashViolations("cat " + nativePath, CWD, ALLOW, SAFE);
 			assert.deepEqual(v, []);
 		});
 

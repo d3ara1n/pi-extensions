@@ -33,10 +33,11 @@ Opens a centered overlay that serializes the current conversation and streams an
 ## Install
 
 ```bash
+pi extension add @d3ara1n/pi-peek         # install first — provides the consult core
 pi extension add @d3ara1n/pi-peek-user
 ```
 
-Requires [`@d3ara1n/pi-peek`](../pi-peek) (peer dependency — provides the consult core).
+Both must be in `settings.json` extensions. `pi-peek` registers hooks that track the main agent and initialize the consult backend; `pi-peek-user` only registers the `/peek` command that calls into it.
 
 ## Usage
 

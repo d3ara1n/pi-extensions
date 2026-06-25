@@ -1,5 +1,5 @@
 /**
- * Tests for path extraction & boundary logic.
+ * Tests for path primitives, bash target extraction, and the PathManager.
  *
  * Zero-dependency: runs on node's built-in test runner.
  *   node --test src/paths.test.ts
@@ -9,23 +9,29 @@
  *
  * ## Test layering
  *
- * The suite is split into three groups so CI matrix (linux/macos/windows)
+ * The suite is split into four groups so CI matrix (linux/macos/windows)
  * actually exercises the right behavior per platform:
  *
  * 1. **Cross-platform pure functions** — run on ALL platforms. These test
- *    platform-agnostic helpers (toPosix, posixUnder, …) and the injected-
- *    platform variants of isWinDeviceName / msysDrive, so Windows logic can be
- *    verified on any host by passing `platform: "win32"`.
+ *    platform-agnostic helpers (toPosix, posixUnder, underRoot, …) and the
+ *    injected-platform variants of isWinDeviceName / msysDrive, so Windows
+ *    logic can be verified on any host by passing `platform: "win32"`.
  *
- * 2. **POSIX behavior** — skipped on win32. Uses a POSIX cwd/allowlist and
- *    asserts POSIX-shaped results. Covers the original heuristic + helpers.
+ * 2. **PathManager** — runs on ALL platforms. The longest-prefix-match
+ *    decision engine operates on posix-normalized strings, so it can be
+ *    exercised cross-platform with literal /aaa/bbb style rule sets. This is
+ *    where the unified allow/deny policy (config + session + builtin) is
+ *    validated, including the user's redirect use case.
  *
- * 3. **Windows behavior** — skipped on non-win32. Exercises the full resolve →
- *    isSafe → isOutsideAllowlist chain under the real `path.win32` module
- *    (Git Bash / MSYS path conventions). This is the only place the MSYS drive
- *    translation and `/dev/null`→`\dev\null` normalization are validated end
- *    to end — they cannot be tested on a POSIX host because the global `path`
- *    module is locked to posix at startup.
+ * 3. **POSIX behavior** — skipped on win32. Tests bash target extraction
+ *    (pure syntax recovery of escaping paths) under a POSIX cwd.
+ *
+ * 4. **Windows behavior** — skipped on non-win32. Exercises the full resolve →
+ *    builtin → decide chain under the real `path.win32` module (Git Bash / MSYS
+ *    path conventions). This is the only place MSYS drive translation and
+ *    `/dev/null`→`\dev\null` normalization are validated end to end — they
+ *    cannot be tested on a POSIX host because the global `path` module is
+ *    locked to posix at startup.
  */
 
 import { test, describe } from "node:test";
@@ -34,22 +40,17 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import {
-	buildAllowlist,
-	coveringRoot,
-	extractBashViolations,
-	isCoveredBy,
-	isOutsideAllowlist,
-	isSafe,
-	isSafeDevice,
+	builtinSafeRoots,
+	extractBashTargets,
 	isWinDeviceName,
 	isWindowsNativePath,
 	msysDrive,
 	posixUnder,
-	rememberAllowed,
-	rememberDenied,
 	resolveTarget,
 	toPosix,
+	underRoot,
 } from "./paths.ts";
+import { PathManager } from "./path-manager.ts";
 
 // Skip helpers: a truthy value becomes the skip reason shown in the report.
 const SKIP_POSIX: true | undefined = process.platform === "win32" ? true : undefined;
@@ -92,26 +93,43 @@ describe("posixUnder: posix-style prefix check", () => {
 	});
 });
 
-describe("isSafeDevice: pseudo-device recognition (posix-normalized input)", () => {
-	test("exact safe devices", () => {
-		assert.equal(isSafeDevice("/dev/null"), true);
-		assert.equal(isSafeDevice("/dev/stdin"), true);
-		assert.equal(isSafeDevice("/dev/stdout"), true);
-		assert.equal(isSafeDevice("/dev/stderr"), true);
-		assert.equal(isSafeDevice("/dev/zero"), true);
-		assert.equal(isSafeDevice("/dev/urandom"), true);
-		assert.equal(isSafeDevice("/dev/random"), true);
+describe("underRoot: separator-agnostic prefix check", () => {
+	test("child is under root, separators normalized", () => {
+		assert.equal(underRoot("/a/b/c", "/a/b"), true);
+		assert.equal(underRoot("\\a\\b\\c", "/a/b"), true); // backslash target
+		assert.equal(underRoot("/a/b", "/a/b"), true); // equal
 	});
-	test("/dev/fd/ prefix (process file descriptors)", () => {
-		assert.equal(isSafeDevice("/dev/fd/0"), true);
-		assert.equal(isSafeDevice("/dev/fd/3"), true);
-		assert.equal(isSafeDevice("/dev/fd/99"), true);
+	test("siblings and outside are not under root", () => {
+		assert.equal(underRoot("/a/bc", "/a/b"), false); // sibling-prefix trap
+		assert.equal(underRoot("/x/y", "/a/b"), false);
 	});
-	test("non-devices are not safe", () => {
-		assert.equal(isSafeDevice("/etc/passwd"), false);
-		assert.equal(isSafeDevice("/tmp/x"), false); // /tmp is handled by isSafe, not isSafeDevice
-		assert.equal(isSafeDevice("/dev/tty"), false); // intentionally excluded
-		assert.equal(isSafeDevice("/dev/sda1"), false); // block device, excluded
+});
+
+describe("builtinSafeRoots: always-safe paths (builtin allow rules)", () => {
+	const roots = builtinSafeRoots();
+	test("includes pseudo-devices", () => {
+		assert.ok(roots.includes("/dev/null"));
+		assert.ok(roots.includes("/dev/stdin"));
+		assert.ok(roots.includes("/dev/stdout"));
+		assert.ok(roots.includes("/dev/stderr"));
+		assert.ok(roots.includes("/dev/zero"));
+		assert.ok(roots.includes("/dev/urandom"));
+		assert.ok(roots.includes("/dev/random"));
+	});
+	test("includes /dev/fd prefix root (trailing slash stripped)", () => {
+		assert.ok(roots.includes("/dev/fd"));
+	});
+	test("includes /tmp and os.tmpdir()", () => {
+		assert.ok(roots.includes("/tmp"));
+		assert.ok(roots.includes(toPosix(path.normalize(os.tmpdir()))));
+	});
+	test("does NOT include dangerous devices", () => {
+		assert.ok(!roots.includes("/dev/tty")); // can capture keyboard input
+		assert.ok(!roots.includes("/dev/sda1")); // block device
+		assert.ok(!roots.includes("/dev/disk0"));
+	});
+	test("macOS /private/tmp symlink is covered", { skip: process.platform !== "darwin" ? true : undefined }, () => {
+		assert.ok(roots.includes("/private/tmp"));
 	});
 });
 
@@ -182,10 +200,6 @@ describe("msysDrive: Git Bash drive notation", () => {
 		assert.equal(msysDrive("/c/Users/me"), process.platform === "win32" ? path.win32.join("C:\\Users", "me") : null);
 	});
 	test("single-letter root /t is treated as drive T: (MSYS heuristics)", () => {
-		// In Git Bash, single-letter roots under / are MSYS drive mounts.
-		// This includes /t (even though /tmp is not a drive — the regex
-		// stops at the first char, so /tmp fails because m != / and m != $).
-		// /t by itself DOES match, yielding T:\ — correct in real MSYS.
 		assert.equal(msysDrive("/t", "win32"), "T:\\");
 		assert.equal(msysDrive("/x/file", "win32"), path.win32.join("X:\\", "file"));
 	});
@@ -197,8 +211,6 @@ describe("isWindowsNativePath: drive-letter detection (cross-platform)", () => {
 		assert.equal(isWindowsNativePath("d:\\data\\x"), true);
 	});
 	test("forward-slash drive form is also native Windows", () => {
-		// Git Bash accepts C:/Users too; the separator is irrelevant to the
-		// drive-letter discriminator.
 		assert.equal(isWindowsNativePath("C:/Users/me"), true);
 	});
 	test("posix / MSYS / home forms are NOT native Windows", () => {
@@ -212,64 +224,175 @@ describe("isWindowsNativePath: drive-letter detection (cross-platform)", () => {
 	});
 });
 
-describe("coveringRoot / isCoveredBy: prefix semantics", () => {
-	test("coveringRoot returns the ancestor that covers the target", () => {
-		const roots = ["/a/b", "/x/y/z"];
-		assert.equal(coveringRoot("/a/b/c/d", roots), "/a/b");
-		assert.equal(coveringRoot("/x/y/z", roots), "/x/y/z");
-		assert.equal(coveringRoot("/nope", roots), undefined);
+// ────────────────────────────────────────────────────────────────────────────
+// 2. PathManager — the single decision engine (longest-prefix-match)
+//    Runs everywhere: rules are posix-normalized strings, so literal /aaa/bbb
+//    rule sets exercise the algorithm without touching the host path module.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("PathManager: longest-prefix-match (the core algorithm)", () => {
+	// The canonical example: a narrower rule always wins, regardless of
+	// decision type or which layer it came from.
+	//   allow /aaa/bbb   deny /aaa/bbb/ccc   deny /aaa
+	test("the user's worked example", () => {
+		const pm = new PathManager("/proj", ["/aaa/bbb"], {
+			"/aaa/bbb/ccc": null,
+			"/aaa": null,
+		});
+		assert.equal(pm.decide("/aaa/bbb/ddd").kind, "allow"); // allow /aaa/bbb (depth 2) beats deny /aaa (depth 1)
+		assert.equal(pm.decide("/aaa/bbb/ccc/ddd").kind, "deny"); // deny /aaa/bbb/ccc (depth 3) is most specific
+		assert.equal(pm.decide("/aaa/ccc").kind, "deny"); // deny /aaa (depth 1), no more specific allow
+		assert.equal(pm.decide("/aaa/bbb").kind, "allow"); // exact allow rule
+		assert.equal(pm.decide("/aaa/bbb/ccc").kind, "deny"); // exact deny rule
 	});
-	test("isCoveredBy prefix semantics across a set", () => {
-		const set = new Set(["/a/b"]);
-		assert.equal(isCoveredBy("/a/b", set), true);
-		assert.equal(isCoveredBy("/a/b/c", set), true);
-		assert.equal(isCoveredBy("/a/bc", set), false); // sibling-prefix trap
-	});
-	test("coveringRoot with empty iterable returns undefined", () => {
-		assert.equal(coveringRoot("/x", []), undefined);
-		assert.equal(coveringRoot("/x", new Set()), undefined);
+
+	test("a sibling-prefix trap does not match", () => {
+		const pm = new PathManager("/proj", ["/aaa/bbb"], {});
+		// /aaa/bbbccd is NOT under /aaa/bbb (must be a path separator boundary)
+		assert.equal(pm.decide("/aaa/bbbccd").kind, "outside");
 	});
 });
 
-describe("rememberAllowed / rememberDenied: memory compaction", () => {
-	test("rememberAllowed: broader entry subsumes narrower ones", () => {
-		const set = new Set<string>();
-		rememberAllowed(set, "/a/b/c");
-		rememberAllowed(set, "/a/b");
-		assert.deepEqual([...set], ["/a/b"]); // /a/b/c dropped
+describe("PathManager: deny reason propagation (redirect use case)", () => {
+	test("config deny surfaces its reason to the agent", () => {
+		const pm = new PathManager("/proj", [], {
+			"~/.config/X/data": "X 数据已迁到 ~/MyData/X，请用新位置",
+		});
+		const home = os.homedir();
+		const d = pm.decide(path.join(home, ".config/X/data/oldfile"));
+		assert.equal(d.kind, "deny");
+		assert.equal(d.reason, "X 数据已迁到 ~/MyData/X，请用新位置");
 	});
-	test("rememberAllowed: adding a child under an existing parent is a no-op", () => {
-		const set = new Set<string>(["/a/b"]);
-		rememberAllowed(set, "/a/b/c");
-		assert.deepEqual([...set], ["/a/b"]);
+
+	test("null reason → deny with no reason field", () => {
+		const pm = new PathManager("/proj", [], { "/old/y": null });
+		const d = pm.decide("/old/y/sub");
+		assert.equal(d.kind, "deny");
+		assert.equal(d.reason, undefined);
 	});
-	test("rememberDenied: mirror behavior with reasons", () => {
-		const map = new Map<string, string>();
-		rememberDenied(map, "/a/b/c", "secret");
-		rememberDenied(map, "/a/b", "broader");
-		assert.deepEqual([...map.entries()], [["/a/b", "broader"]]);
+
+	test("empty-string reason is treated as no reason", () => {
+		const pm = new PathManager("/proj", [], { "/old/z": "   " });
+		const d = pm.decide("/old/z");
+		assert.equal(d.kind, "deny");
+		assert.equal(d.reason, undefined);
 	});
-	test("rememberAllowed: parent subsumes multiple children", () => {
-		const set = new Set<string>();
-		rememberAllowed(set, "/a/x");
-		rememberAllowed(set, "/a/y");
-		rememberAllowed(set, "/a/z");
-		rememberAllowed(set, "/a");
-		assert.deepEqual([...set].sort(), ["/a"]);
+});
+
+describe("PathManager: builtin safe roots", () => {
+	const pm = new PathManager("/proj", [], {});
+	test("pseudo-devices are allowed", () => {
+		assert.equal(pm.decide("/dev/null").kind, "allow");
+		assert.equal(pm.decide("/dev/fd/3").kind, "allow");
+		assert.equal(pm.decide("/dev/zero").kind, "allow");
 	});
-	test("rememberDenied: parent subsumes multiple children", () => {
-		const map = new Map<string, string>();
-		rememberDenied(map, "/a/x", "r1");
-		rememberDenied(map, "/a/y", "r2");
-		rememberDenied(map, "/a/z", "r3");
-		rememberDenied(map, "/a", "parent-reason");
-		assert.deepEqual([...map.entries()], [["/a", "parent-reason"]]);
+	test("/tmp and os.tmpdir() are allowed", () => {
+		assert.equal(pm.decide("/tmp/anything").kind, "allow");
+		assert.equal(pm.decide(path.normalize(os.tmpdir()) + "/sub/file").kind, "allow");
+	});
+	test("dangerous devices are NOT allowed", () => {
+		assert.equal(pm.decide("/dev/tty").kind, "outside");
+		assert.equal(pm.decide("/dev/sda1").kind, "outside");
+	});
+});
+
+describe("PathManager: cwd + allowedPaths", () => {
+	test("cwd and everything beneath it is allowed", () => {
+		const pm = new PathManager("/home/me/proj", [], {});
+		assert.equal(pm.decide("/home/me/proj").kind, "allow");
+		assert.equal(pm.decide("/home/me/proj/src/foo.ts").kind, "allow");
+	});
+	test("sibling of cwd is outside (sibling-prefix trap)", () => {
+		const pm = new PathManager("/home/me/proj", [], {});
+		assert.equal(pm.decide("/home/me/proj2").kind, "outside"); // proj2 ≠ proj/...
+		assert.equal(pm.decide("/home/me/other").kind, "outside");
+	});
+	test("configured allowedPaths expand the boundary", () => {
+		const pm = new PathManager("/proj", ["/opt/data", "~/notes"], {});
+		assert.equal(pm.decide("/opt/data/x").kind, "allow");
+		assert.equal(pm.decide(path.join(os.homedir(), "notes/sub")).kind, "allow");
+	});
+	test("an uncovered path is 'outside' (needs authorization)", () => {
+		const pm = new PathManager("/proj", [], {});
+		assert.equal(pm.decide("/etc/passwd").kind, "outside");
+	});
+});
+
+describe("PathManager: same-depth allow/deny conflict", () => {
+	test("same path allowed AND denied → deny wins (safe default)", () => {
+		// A config error (same path in both lists) resolves to deny.
+		const pm = new PathManager("/proj", ["/a/b"], { "/a/b": "conflict" });
+		const d = pm.decide("/a/b/c");
+		assert.equal(d.kind, "deny");
+		assert.equal(d.reason, "conflict");
+	});
+});
+
+describe("PathManager: session rules override config (most specific wins)", () => {
+	test("a session allow beneath a config deny wins for that subtree", () => {
+		// config deny /a/b  ·  session allow /a/b/c
+		//   /a/b/c/d → allow (session depth 3 > config depth 2)
+		//   /a/b/d   → deny  (config depth 2, no more specific rule)
+		const pm = new PathManager("/proj", [], { "/a/b": "blocked by config" });
+		pm.addSessionAllow("/a/b/c");
+		assert.equal(pm.decide("/a/b/c/d").kind, "allow");
+		const d = pm.decide("/a/b/d");
+		assert.equal(d.kind, "deny");
+		assert.equal(d.reason, "blocked by config");
+	});
+
+	test("session deny with reason is cached and replayed", () => {
+		const pm = new PathManager("/proj", [], {});
+		pm.addSessionDeny("/secret/dir", "user said no");
+		const d = pm.decide("/secret/dir/deep/file");
+		assert.equal(d.kind, "deny");
+		assert.equal(d.reason, "user said no");
+	});
+
+	test("clearSession forgets session rules but keeps config", () => {
+		const pm = new PathManager("/proj", [], { "/cfg/deny": "config reason" });
+		pm.addSessionAllow("/cfg/deny/sub");
+		assert.equal(pm.decide("/cfg/deny/sub/x").kind, "allow"); // session overrides
+		pm.clearSession();
+		const d = pm.decide("/cfg/deny/sub/x");
+		assert.equal(d.kind, "deny"); // back to config deny
+		assert.equal(d.reason, "config reason");
+	});
+});
+
+describe("PathManager: session rule subsumption", () => {
+	test("adding a broader allow drops narrower allows beneath it", () => {
+		const pm = new PathManager("/proj", [], {});
+		pm.addSessionAllow("/a/b/c");
+		pm.addSessionAllow("/a/b");
+		const rules = pm.getRules().session.filter((r) => r.decision === "allow");
+		assert.deepEqual(rules.map((r) => r.path), ["/a/b"]); // /a/b/c dropped
+	});
+	test("adding a child under an existing parent allow is a no-op", () => {
+		const pm = new PathManager("/proj", [], {});
+		pm.addSessionAllow("/a/b");
+		pm.addSessionAllow("/a/b/c");
+		const rules = pm.getRules().session.filter((r) => r.decision === "allow");
+		assert.deepEqual(rules.map((r) => r.path), ["/a/b"]);
+	});
+	test("a deny and an allow at different depths coexist (not subsumed)", () => {
+		// Cross-decision rules are never dropped by subsumption — longest-prefix
+		// match handles their interaction. Adding allow /a/b must NOT erase a
+		// narrower deny /a/b/c.
+		const pm = new PathManager("/proj", [], {});
+		pm.addSessionDeny("/a/b/c", "secret");
+		pm.addSessionAllow("/a/b");
+		assert.equal(pm.decide("/a/b/c/d").kind, "deny"); // narrower deny still wins
+		assert.equal(pm.decide("/a/b/d").kind, "allow"); // broader allow
 	});
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// 2. POSIX behavior (skipped on win32)
-//    Uses a POSIX cwd/allowlist; asserts POSIX-shaped results.
+// 3. POSIX behavior (skipped on win32)
+//    extractBashTargets is PURE EXTRACTION: it returns every escaping-looking
+//    candidate without judging allow/deny — classification is PathManager's
+//    job (tested above). So "safe" paths like /tmp are now returned as
+//    candidates, not filtered out.
 // ────────────────────────────────────────────────────────────────────────────
 
 describe(
@@ -277,191 +400,162 @@ describe(
 	{ skip: SKIP_POSIX },
 	() => {
 		const CWD = "/home/me/proj";
-		const ALLOW = buildAllowlist(CWD, []);
-		const SAFE = { extraSafePaths: [] as string[] };
 
-		// ── extractBashViolations: the escaped-space regression ─────────────
+		// ── extractBashTargets: the escaped-space regression ──────────────
 
-		test("escaped-space path stays one token and is flagged (regression)", () => {
-			const v = extractBashViolations("cat /Users/foo/Agent\\ Workspace/file", CWD, ALLOW, SAFE);
+		test("escaped-space path stays one token and is extracted (regression)", () => {
+			const v = extractBashTargets("cat /Users/foo/Agent\\ Workspace/file", CWD);
 			assert.deepEqual(v, ["/Users/foo/Agent Workspace/file"]);
 		});
 
-		test("escaped-space path under home is resolved and flagged", () => {
-			const v = extractBashViolations("rm ~/My\\ Documents/secret", CWD, ALLOW, SAFE);
+		test("escaped-space path under home is resolved and extracted", () => {
+			const v = extractBashTargets("rm ~/My\\ Documents/secret", CWD);
 			assert.deepEqual(v, [path.join(os.homedir(), "My Documents/secret")]);
 		});
 
 		test("multiple escaped spaces collapse into one token", () => {
-			const v = extractBashViolations("ls /no\\ space\\ here", CWD, ALLOW, SAFE);
+			const v = extractBashTargets("ls /no\\ space\\ here", CWD);
 			assert.deepEqual(v, ["/no space here"]);
 		});
 
 		test("escaped metachar does not split the token", () => {
-			const v = extractBashViolations("echo a\\;b", CWD, ALLOW, SAFE);
+			const v = extractBashTargets("echo a\\;b", CWD);
 			assert.deepEqual(v, []);
 		});
 
 		test("backslash-backslash collapses to a single backslash", () => {
-			const v = extractBashViolations("echo a\\\\b", CWD, ALLOW, SAFE);
+			const v = extractBashTargets("echo a\\\\b", CWD);
 			assert.deepEqual(v, []);
 		});
 
-		// ── extractBashViolations: `=` is NOT a token separator (regression) ─
-		// `=` was previously in the TOKEN_RE separator set, which broke the
-		// bash regex-match operator `=~` (split into `=` + `~`, and the bare
-		// `~` expanded to homedir → false positive) and detached assignment
-		// values (`X=/etc/passwd` → bare `/etc/passwd`). Escaping detection
-		// only inspects a token's PREFIX, so `=`-bearing tokens are inert.
+		// ── extractBashTargets: `=` is NOT a token separator (regression) ─
 
 		test("=~ regex-match operator is not split into a bare ~ (regression)", () => {
-			// `[[ "$s" =~ $pattern ]]` — `=~` stays one token starting with `=`,
-			// which is not an escaping candidate. This was the real-world trigger:
-			// a bash script using `[[ ... =~ ... ]]` was flagged for $HOME access.
-			const v = extractBashViolations('[[ "$s" =~ $pattern ]]', CWD, ALLOW, SAFE);
+			const v = extractBashTargets('[[ "$s" =~ $pattern ]]', CWD);
 			assert.deepEqual(v, []);
 		});
 
 		test("assignment value stays attached to its name (regression)", () => {
-			// `X=/etc/passwd` stays one token; README documents assignments as
-			// skipped, and a token starting with `X=` is not an escaping candidate.
-			const v = extractBashViolations("X=/etc/passwd", CWD, ALLOW, SAFE);
+			const v = extractBashTargets("X=/etc/passwd", CWD);
 			assert.deepEqual(v, []);
 		});
 
 		test("assignment with home value stays attached (regression)", () => {
-			const v = extractBashViolations("X=~/.ssh/config", CWD, ALLOW, SAFE);
+			const v = extractBashTargets("X=~/.ssh/config", CWD);
 			assert.deepEqual(v, []);
 		});
 
-		// ── extractBashViolations: parent-climb (..) traversal ────────────
+		// ── extractBashTargets: parent-climb (..) traversal ──────────────
 
-		test("../ traversal above cwd is flagged", () => {
-			const v = extractBashViolations("cat ../../../etc/passwd", CWD, ALLOW, SAFE);
+		test("../ traversal above cwd is extracted", () => {
+			const v = extractBashTargets("cat ../../../etc/passwd", CWD);
 			// resolve collapses .. segments: ../../../ from /home/me/proj → /
 			assert.equal(v.length, 1);
 			assert.ok(v[0] === "/etc/passwd" || v[0].endsWith("/etc/passwd"));
 		});
 
-		test("embedded /../ traversal in absolute path is flagged", () => {
-			// path.normalize collapses /home/me/proj/../other/secret → /home/me/other/secret
-			const v = extractBashViolations("cat /home/me/proj/../other/secret", CWD, ALLOW, SAFE);
+		test("embedded /../ traversal in absolute path is extracted", () => {
+			const v = extractBashTargets("cat /home/me/proj/../other/secret", CWD);
 			assert.deepEqual(v, [path.normalize("/home/me/other/secret")]);
 		});
 
-		// ── extractBashViolations: documented limitations ─────────────────
+		// ── extractBashTargets: documented limitations ───────────────────
 
 		test("${HOME} syntax is split by braces — path fragment after } IS caught", () => {
-			// ${…} braces are token separators, so ${HOME}/.ssh/config splits
-			// into $, HOME, /.ssh/config. The last fragment starts with / so
-			// it IS detected as absolute — but resolved from root, not home.
-			// The HOME substitution is lost; /.ssh/config is caught instead.
-			const v = extractBashViolations("cat ${HOME}/.ssh/config", CWD, ALLOW, SAFE);
+			const v = extractBashTargets("cat ${HOME}/.ssh/config", CWD);
 			assert.deepEqual(v, ["/.ssh/config"]);
 		});
 
-		test("bare ${VAR} with no trailing / is not flagged (limitation)", () => {
-			// ${HOME} alone splits into $, HOME — neither triggers the gate.
-			const v = extractBashViolations("echo ${HOME}", CWD, ALLOW, SAFE);
+		test("bare ${VAR} with no trailing / is not extracted (limitation)", () => {
+			const v = extractBashTargets("echo ${HOME}", CWD);
 			assert.deepEqual(v, []);
 		});
 
 		test("~otheruser is NOT detected as home expansion (limitation)", () => {
-			// Only the current user's ~ is expanded; ~root does not start with ~/
-			const v = extractBashViolations("cat ~root/.ssh/authorized_keys", CWD, ALLOW, SAFE);
+			const v = extractBashTargets("cat ~root/.ssh/authorized_keys", CWD);
 			assert.deepEqual(v, []);
 		});
 
 		test("unterminated heredoc swallows everything after <<EOF", () => {
-			// If a heredoc opener has no matching terminator, all remaining
-			// lines are treated as body data — including paths that would
-			// otherwise be flagged. This is inherent to the heuristic.
-			const v = extractBashViolations("cat > out <<EOF\n/etc/passwd\n~/secret\n", CWD, ALLOW, SAFE);
+			const v = extractBashTargets("cat > out <<EOF\n/etc/passwd\n~/secret\n", CWD);
 			assert.deepEqual(v, []);
 		});
 
-		// ── extractBashViolations: existing behavior preserved ─────────────
+		// ── extractBashTargets: existing behavior preserved ──────────────
 
-		test("bare absolute path outside allowlist is flagged", () => {
-			const v = extractBashViolations("cat /etc/passwd", CWD, ALLOW, SAFE);
+		test("bare absolute path is extracted", () => {
+			const v = extractBashTargets("cat /etc/passwd", CWD);
 			assert.deepEqual(v, ["/etc/passwd"]);
 		});
 
 		test("relative path under cwd is left alone", () => {
-			const v = extractBashViolations("cat src/foo.ts", CWD, ALLOW, SAFE);
+			const v = extractBashTargets("cat src/foo.ts", CWD);
 			assert.deepEqual(v, []);
 		});
 
 		test("option flags are not treated as paths", () => {
-			const v = extractBashViolations("rm -rf /etc/foo", CWD, ALLOW, SAFE);
+			const v = extractBashTargets("rm -rf /etc/foo", CWD);
 			assert.deepEqual(v, ["/etc/foo"]);
 		});
 
 		test("quoted path is skipped as data (documented limitation)", () => {
-			const v = extractBashViolations("cat '/etc/passwd'", CWD, ALLOW, SAFE);
+			const v = extractBashTargets("cat '/etc/passwd'", CWD);
 			assert.deepEqual(v, []);
 		});
 
-		test("heredoc body is not scanned", () => {
+		test("heredoc body is not scanned (opener redirect target IS extracted)", () => {
+			// The body lines (/etc/passwd, ~/secret) are stdin data and NOT scanned.
+			// The opener's redirect target is an absolute path, so it IS extracted
+			// as a candidate — whether it is in-bounds is the PathManager's call.
 			const cmd = "cat > /home/me/proj/out.sh <<'EOF'\n/etc/passwd\n~/secret\nEOF\n";
-			const v = extractBashViolations(cmd, CWD, ALLOW, SAFE);
-			assert.deepEqual(v, []);
+			const v = extractBashTargets(cmd, CWD);
+			assert.deepEqual(v, ["/home/me/proj/out.sh"]);
 		});
 
 		test("heredoc opener line IS scanned", () => {
 			const cmd = "cat /etc/passwd <<EOF\nbody\nEOF\n";
-			const v = extractBashViolations(cmd, CWD, ALLOW, SAFE);
+			const v = extractBashTargets(cmd, CWD);
 			assert.deepEqual(v, ["/etc/passwd"]);
 		});
 
 		test("unresolved $VAR (not $HOME) is skipped", () => {
-			const v = extractBashViolations("cat $SECRET_FILE", CWD, ALLOW, SAFE);
+			const v = extractBashTargets("cat $SECRET_FILE", CWD);
 			assert.deepEqual(v, []);
 		});
 
-		test("safe /tmp path does not trigger", () => {
-			const v = extractBashViolations("cat /tmp/build-out.log", CWD, ALLOW, SAFE);
-			assert.deepEqual(v, []);
+		// NOTE: extraction no longer filters by safety/allowlist — these next
+		// cases return the candidate; classification (allow vs outside) is the
+		// PathManager's job, tested in section 2.
+
+		test("safe /tmp path IS extracted as a candidate (classification is separate)", () => {
+			const v = extractBashTargets("cat /tmp/build-out.log", CWD);
+			assert.deepEqual(v, ["/tmp/build-out.log"]);
 		});
 
-		test("safe pseudo-device does not trigger", () => {
-			const v = extractBashViolations("echo x > /dev/null", CWD, ALLOW, SAFE);
-			assert.deepEqual(v, []);
+		test("pseudo-device IS extracted as a candidate", () => {
+			const v = extractBashTargets("echo x > /dev/null", CWD);
+			assert.deepEqual(v, ["/dev/null"]);
 		});
 
-		test("\\$HOME is unescaped and flagged as home-dir access", () => {
-			// Backslash-escaped $ becomes literal $ after unescaping, so \$HOME
-			// is treated as the real HOME variable — a false positive for the
-			// user, but a safe-over-blocking stance for the gate.
-			const v = extractBashViolations("cat \\$HOME/.ssh/config", CWD, ALLOW, SAFE);
+		test("\\$HOME is unescaped and extracted as home-dir access", () => {
+			const v = extractBashTargets("cat \\$HOME/.ssh/config", CWD);
 			const expected = path.join(os.homedir(), ".ssh/config");
 			assert.deepEqual(v, [expected]);
 		});
 
-		test("/private/tmp path (macOS symlink) is safe", { skip: process.platform !== "darwin" ? true : undefined }, () => {
-			// macOS: /tmp → /private/tmp. TMP_REAL resolves this so the real
-			// path is also recognized as safe.
-			const v = extractBashViolations("cat /private/tmp/build-out.log", CWD, ALLOW, SAFE);
-			assert.deepEqual(v, []);
+		test("/private/tmp path (macOS symlink) is extracted as a candidate", { skip: process.platform !== "darwin" ? true : undefined }, () => {
+			const v = extractBashTargets("cat /private/tmp/build-out.log", CWD);
+			assert.deepEqual(v, ["/private/tmp/build-out.log"]);
 		});
 
-		test("extraSafePaths suppress a configured prefix", () => {
-			const v = extractBashViolations(
-				"cat /var/log/myapp/x.log",
-				CWD,
-				ALLOW,
-				{ extraSafePaths: ["/var/log/myapp"] },
-			);
-			assert.deepEqual(v, []);
+		test("a path under a configured allowed root IS still extracted (policy is separate)", () => {
+			// Extraction is pure syntax; whether /opt/data is allowed is the
+			// PathManager's decision. Here we only assert the candidate exists.
+			const v = extractBashTargets("cat /opt/data/x", CWD);
+			assert.deepEqual(v, ["/opt/data/x"]);
 		});
 
-		test("extraAllowedDirs expand the boundary", () => {
-			const allow = buildAllowlist(CWD, ["/opt/data"]);
-			const v = extractBashViolations("cat /opt/data/x", CWD, allow, SAFE);
-			assert.deepEqual(v, []);
-		});
-
-		// ── resolveTarget & boundary helpers ───────────────────────────────
+		// ── resolveTarget ─────────────────────────────────────────────────
 
 		test("resolveTarget: absolute passes through normalized", () => {
 			assert.equal(resolveTarget("/a/b/../c", CWD), path.normalize("/a/c"));
@@ -476,27 +570,30 @@ describe(
 			assert.equal(resolveTarget("src/foo.ts", CWD), path.join(CWD, "src/foo.ts"));
 		});
 
-		test("isOutsideAllowlist: ancestor prefix is in-bounds", () => {
-			assert.equal(isOutsideAllowlist("/home/me/proj", ALLOW), false);
-			assert.equal(isOutsideAllowlist("/home/me/proj/src/x", ALLOW), false);
-			assert.equal(isOutsideAllowlist("/home/me/other", ALLOW), true);
-			assert.equal(isOutsideAllowlist("/home/me/proj2", ALLOW), true); // sibling-prefix trap
+		// ── end-to-end: extractBashTargets + PathManager classification ───
+		// This is the integration the old isSafe/isOutsideAllowlist tests
+		// covered: a real PathManager decides each extracted candidate.
+
+		test("end-to-end: a bash command outside cwd is 'outside'", () => {
+			const pm = new PathManager(CWD, [], {});
+			const v = extractBashTargets("cat /etc/passwd", CWD);
+			assert.equal(v.length, 1);
+			assert.equal(pm.decide(v[0]).kind, "outside");
 		});
 
-		test("isSafe: /tmp, /dev/null, os.tmpdir() are safe", () => {
-			assert.equal(isSafe("/tmp/anything", SAFE), true);
-			assert.equal(isSafe("/dev/null", SAFE), true);
-			assert.equal(isSafe(path.normalize(os.tmpdir()) + "/x", SAFE), true);
-			assert.equal(isSafe("/etc/passwd", SAFE), false);
+		test("end-to-end: a bash command touching a denied path is 'deny'", () => {
+			const pm = new PathManager(CWD, [], { "/old/data": "moved to /new/data" });
+			const v = extractBashTargets("cat /old/data/x", CWD);
+			assert.equal(pm.decide(v[0]).kind, "deny");
+			assert.equal(pm.decide(v[0]).reason, "moved to /new/data");
 		});
 	},
 );
 
 // ────────────────────────────────────────────────────────────────────────────
-// 3. Windows behavior (skipped on non-win32)
-//    Exercises the full chain under the real path.win32 module — the only
-//    place MSYS drive translation and backslash normalization are validated
-//    end to end. Expected values are built with path.win32.* to avoid
+// 4. Windows behavior (skipped on non-win32)
+//    Exercises resolveTarget + builtinSafeRoots + decide under the real
+//    path.win32 module. Expected values are built with path.win32.* to avoid
 //    hand-writing backslashes that drift out of sync.
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -505,8 +602,6 @@ describe(
 	{ skip: SKIP_WIN32 },
 	() => {
 		const CWD = path.win32.join("C:", "proj");
-		const ALLOW = buildAllowlist(CWD, []);
-		const SAFE = { extraSafePaths: [] as string[] };
 
 		// ── resolveTarget: MSYS drive translation ──────────────────────────
 
@@ -520,8 +615,6 @@ describe(
 		});
 
 		test("bare /dev/null is not mistaken for a drive (no E: mapping)", () => {
-			// /dev/null → /d is followed by 'e', not '/', so it is not a drive.
-			// It resolves to a win32-normalized absolute path, not "D:\\ev\\null".
 			const resolved = resolveTarget("/dev/null", CWD);
 			assert.ok(
 				!resolved.startsWith(path.win32.join("D:", "ev")),
@@ -529,93 +622,67 @@ describe(
 			);
 		});
 
-		// ── isSafe: backslash normalization + Windows devices ─────────────
+		// ── builtin roots recognized after win32 normalization ───────────
 
-		test("/dev/null is recognized as safe after win32 normalization", () => {
-			// path.win32.normalize("/dev/null") → "\dev\null", which toPosix
-			// reduces back to /dev/null and matches the safe-device constant.
+		test("win32-normalized /dev/null is a builtin allow root", () => {
+			// builtinSafeRoots are posix; targets come backslash-normalized from
+			// resolveTarget. underRoot normalizes both sides, so they match.
 			const resolved = resolveTarget("/dev/null", CWD);
-			assert.equal(isSafe(resolved, SAFE), true);
+			assert.ok(builtinSafeRoots().some((r) => underRoot(resolved, r)));
 		});
 
-		test("/tmp is recognized as safe (Git Bash mounts it to %TEMP%)", () => {
+		test("win32-normalized /tmp is a builtin allow root", () => {
 			const resolved = resolveTarget("/tmp/build.log", CWD);
-			assert.equal(isSafe(resolved, SAFE), true);
+			assert.ok(builtinSafeRoots().some((r) => underRoot(resolved, r)));
 		});
 
-		test("/dev/fd/N is recognized as safe", () => {
+		test("win32-normalized /dev/fd/N is a builtin allow root", () => {
 			const resolved = resolveTarget("/dev/fd/3", CWD);
-			assert.equal(isSafe(resolved, SAFE), true);
+			assert.ok(builtinSafeRoots().some((r) => underRoot(resolved, r)));
 		});
 
-		test("Windows native NUL device is safe", () => {
-			assert.equal(isSafe("NUL", SAFE), true);
-			assert.equal(isSafe(path.win32.join(CWD, "NUL"), SAFE), true); // C:\proj\NUL
-			assert.equal(isSafe("NUL.txt", SAFE), true);
-		});
-
-		test("os.tmpdir() (%TEMP%) is safe", () => {
+		test("os.tmpdir() (%TEMP%) is a builtin allow root", () => {
 			const tmpFile = path.win32.join(os.tmpdir(), "sub", "file");
-			assert.equal(isSafe(tmpFile, SAFE), true);
+			assert.ok(builtinSafeRoots().some((r) => underRoot(tmpFile, r)));
 		});
 
-		test("a real external path is NOT safe", () => {
-			assert.equal(isSafe(path.win32.join("C:", "Windows", "System32", "config.sys"), SAFE), false);
+		// ── PathManager decide under win32 ───────────────────────────────
+
+		test("decide(): win32-normalized /dev/null → allow", () => {
+			const pm = new PathManager(CWD, [], {});
+			const resolved = resolveTarget("/dev/null", CWD);
+			assert.equal(pm.decide(resolved).kind, "allow");
 		});
 
-		// ── extractBashViolations: Git Bash command strings ───────────────
-
-		test("redirect to /dev/null does not flag", () => {
-			const v = extractBashViolations("git clone url 2>/dev/null", CWD, ALLOW, SAFE);
-			assert.deepEqual(v, []);
+		test("decide(): MSYS path under cwd is in-bounds", () => {
+			const pm = new PathManager(CWD, [], {});
+			const resolved = resolveTarget("/c/proj/src/foo.ts", CWD);
+			assert.equal(pm.decide(resolved).kind, "allow");
 		});
 
-		test("write to /tmp does not flag", () => {
-			const v = extractBashViolations("echo x > /tmp/build.log", CWD, ALLOW, SAFE);
-			assert.deepEqual(v, []);
+		test("decide(): MSYS path outside cwd → outside", () => {
+			const pm = new PathManager(CWD, [], {});
+			const resolved = resolveTarget("/c/Users/me/.ssh/config", CWD);
+			assert.equal(pm.decide(resolved).kind, "outside");
 		});
 
-		test("MSYS path under cwd (/c/proj/...) is in-bounds", () => {
-			const v = extractBashViolations("cat /c/proj/src/foo.ts", CWD, ALLOW, SAFE);
-			assert.deepEqual(v, []);
+		test("decide(): Windows native NUL device → allow", () => {
+			const pm = new PathManager(CWD, [], {});
+			assert.equal(pm.decide("NUL").kind, "allow");
+			assert.equal(pm.decide(path.win32.join(CWD, "NUL")).kind, "allow");
 		});
 
-		test("MSYS path outside cwd (/c/Users/...) is flagged with its Windows form", () => {
-			const v = extractBashViolations("cat /c/Users/me/.ssh/config", CWD, ALLOW, SAFE);
+		// ── extractBashTargets: Git Bash command strings ─────────────────
+
+		test("MSYS path outside cwd is extracted in its Windows form", () => {
+			const v = extractBashTargets("cat /c/Users/me/.ssh/config", CWD);
 			assert.deepEqual(v, [path.win32.join("C:", "Users", "me", ".ssh", "config")]);
 		});
 
-		test("extraAllowedDirs (Windows roots) expand the boundary", () => {
-			const allow = buildAllowlist(CWD, [path.win32.join("D:", "shared")]);
-			const v = extractBashViolations("cat /d/shared/data.bin", CWD, allow, SAFE);
-			assert.deepEqual(v, []);
-		});
-
-		// ── Windows native paths (backslash separators, drive letter) ─────
-
-		test("Windows native absolute path (C:\\...) is flagged", () => {
-			// Git Bash accepts native Windows paths; isEscapingCandidate must
-			// detect them via path.isAbsolute() since they don't start with /.
+		test("Windows native absolute path (C:\\...) is extracted", () => {
 			const nativePath = path.win32.join("C:", "Users", "me", ".ssh", "config");
-			const v = extractBashViolations("cat " + nativePath, CWD, ALLOW, SAFE);
+			const v = extractBashTargets("cat " + nativePath, CWD);
 			assert.deepEqual(v, [nativePath]);
-		});
-
-		test("Windows native path under cwd is in-bounds", () => {
-			// Genuine boundary check: C:\proj\src\foo.ts sits beneath cwd C:\proj,
-			// so it must NOT be flagged. (Backslashes are preserved as separators,
-			// resolveTarget normalizes correctly, and underRoot accepts the path.)
-			const nativePath = path.win32.join("C:", "proj", "src", "foo.ts");
-			const v = extractBashViolations("cat " + nativePath, CWD, ALLOW, SAFE);
-			assert.deepEqual(v, []);
-		});
-
-		// ── boundary helpers under win32 ──────────────────────────────────
-
-		test("isOutsideAllowlist: Windows prefix semantics", () => {
-			assert.equal(isOutsideAllowlist(path.win32.join(CWD, "src"), ALLOW), false);
-			assert.equal(isOutsideAllowlist(CWD, ALLOW), false);
-			assert.equal(isOutsideAllowlist(path.win32.join("C:", "other"), ALLOW), true);
 		});
 	},
 );

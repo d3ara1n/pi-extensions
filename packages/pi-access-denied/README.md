@@ -20,12 +20,12 @@ Authorization panel (`prompt` mode only):
 
 When a tool reaches outside the allowlist, a bottom-anchored panel lists every out-of-bounds path on its own row, each defaulting to **Accept**. A single horizontal action bar reflects the *focused* path's current choice:
 
-- **Accept** (default) — allow this one call; shows no marker on its row
-- **Always accept** — remember the path **and everything beneath it**, don't ask again this session; marks the row `[always-accept]` (green)
+- **Allow** (default) — allow this one call; shows no marker on its row
+- **Always allow** — remember the path **and everything beneath it**, don't ask again this session; marks the row `[always-allow]` (green)
 - **Deny** — block this one call; marks the row `[deny]` (red)
 - **Always deny** — permanently block that path **and everything beneath it** this session; marks the row `[always-deny]` (red)
 
-Each path keeps its own choice, so a multi-path `bash` call can accept some paths while denying others in a single pass. Submitting with any deny present pops a **single global reason** input (leave empty for a default reason); **Esc there returns to the path list** rather than committing a no-reason deny.
+Each path keeps its own choice, so a multi-path `bash` call can allow some paths while denying others in a single pass. Submitting with any deny present pops a **single global reason** input (leave empty for a default reason); **Esc there returns to the path list** rather than committing a no-reason deny.
 
 Keys: `↑`/`↓` move path focus · `←`/`→` change the focused path's action (no wrap) · `Tab` cycles the action (wraps) · `Enter` submit · `Esc` cancel the whole authorization (or, in the reason input, go back to the path list).
 
@@ -53,15 +53,48 @@ Under the `accessDenied` key in `settings.json` (global `~/.pi/agent/settings.js
 {
   "accessDenied": {
     "mode": "prompt",                    // prompt | deny | allow, default prompt
-    "extraAllowedDirs": [                // extra full read/write roots (~ and $HOME allowed)
-      "~/Documents/notes",
-      "/tmp/build-out"
+    "allowedPaths": [                    // always in-bounds roots, in addition to cwd
+      "~/Documents/notes",               //   (~ and $HOME are expanded)
+      "/var/log/myapp"
     ],
-    "extraSafePaths": [],                 // finer-grained paths that never prompt
+    "deniedPaths": [                     // groups of paths sharing one reason
+      { "paths": ["~/.config/X/data"], "reason": "X 数据已迁到 ~/MyData/X，请用新位置" },
+      { "paths": ["/old/cache"] }        //   reason omitted = block with default message
+    ],
     "tools": ["write", "edit", "bash"]   // which tools to gate, default these three
   }
 }
 ```
+
+### Rule resolution: longest-prefix-match
+
+All rules — built-in safe paths, `allowedPaths`, `deniedPaths`, and runtime session decisions — are resolved by a **single** algorithm: the most specific (deepest) rule covering a target wins, regardless of which layer it came from.
+
+```
+allow /aaa/bbb     deny /aaa/bbb/ccc     deny /aaa
+```
+
+| Target | Winner | Result |
+|--------|--------|--------|
+| `/aaa/bbb/ddd` | `allow /aaa/bbb` (depth 2) | ✅ allow |
+| `/aaa/bbb/ccc/ddd` | `deny /aaa/bbb/ccc` (depth 3) | ❌ deny |
+| `/aaa/ccc` | `deny /aaa` (depth 1) | ❌ deny |
+
+A same-depth allow/deny conflict (same path in both lists) resolves to **deny** — the safe default. Session decisions are equal peers: a runtime "always-allow `/a/b/c`" overrides a config "deny `/a/b`" for that subtree, exactly as two config rules would.
+
+### `deniedPaths` — deny with a redirect
+
+The primary use case is **redirecting an agent away from a stale path**. An agent often reaches for a data dir it "remembers" from training data; if you moved that dir, the agent fails to find it and starts searching the disk. Listing the old path in `deniedPaths` with the new location as the reason short-circuits that:
+
+```jsonc
+"deniedPaths": [
+  { "paths": ["~/.config/some-app"], "reason": "moved to ~/MyData/some-app — use the new location" }
+]
+```
+
+The agent touches `~/.config/some-app`, gets blocked, and the reason (surfaced as a "user note") tells it exactly where to look instead — no more disk-wide scavenger hunts.
+
+The reason is delivered to the agent wrapped as a "user note" (`Blocked by access-denied (user note: "...")`) and is **identical whether the deny came from config or a runtime panel decision** — the agent only ever sees "the user declined this", never which layer produced it.
 
 ## Built-in safe paths (never prompt)
 
@@ -72,12 +105,12 @@ The gate's purpose is to stop an out-of-control agent from leaving **permanent f
 
 Deliberately **not** allowed: `/dev/tty` (can capture keyboard input), `/dev/disk*` (block devices), and anything that persists — home dir, `/etc`, `/var`, `/usr`, etc.
 
-Use `extraSafePaths` to add your own safe paths (e.g. a log dir you always read).
+Use `allowedPaths` to add your own always-safe roots (e.g. a log dir you always read).
 
 ## Command
 
 ```
-/access-denied              # show status (mode, allowlist, session memory)
+/access-denied              # show status (mode, allow/deny rules, session memory)
 /access-denied prompt       # switch to prompt mode
 /access-denied deny         # switch to deny mode
 /access-denied allow        # switch to allow mode
@@ -86,8 +119,7 @@ Use `extraSafePaths` to add your own safe paths (e.g. a log dir you always read)
 
 ## Path resolution
 
-**Allowlist** = current project `cwd` + configured `extraAllowedDirs`.
-A target path is `resolve`d + `normalize`d; if it falls inside any allowed dir (including the dir itself) it passes, otherwise it triggers authorization.
+**In-bounds** = current project `cwd` + configured `allowedPaths` + built-in safe paths. A target path is `resolve`d + `normalize`d and run through the PathManager (longest-prefix-match across all rule layers — see [Rule resolution](#rule-resolution-longest-prefix-match)). A matching allow rule passes it; a matching deny rule blocks it; an uncovered path triggers authorization.
 
 - **`write` / `edit`**: takes the `path` argument directly — exact.
 - **`bash`**: heuristic token scan of the command string; only **clearly escaping** tokens are judged:
@@ -113,7 +145,7 @@ pi runs commands through **Git Bash** on Windows, so bash command strings arrive
 
 3. **`/tmp` on Git Bash for Windows** maps to `%TEMP%` (the OS-reclaimed per-user temp) by default, matching the Unix `/tmp` semantics, and is treated as safe. *(If you reconfigured `/etc/fstab` to mount `/tmp` at a permanent location, that location is still treated as safe — extremely rare configuration, and the blast radius is limited to `/tmp` writes.)*
 
-**Cannot be resolved statically** (treated as out-of-bounds, conservatively): MSYS paths whose real Windows target depends on the install location or mount table — `/usr/...`, `/etc/...`, the MSYS root `/`. If your workflow needs these, add them to `extraAllowedDirs` with their real Windows paths.
+**Cannot be resolved statically** (treated as out-of-bounds, conservatively): MSYS paths whose real Windows target depends on the install location or mount table — `/usr/...`, `/etc/...`, the MSYS root `/`. If your workflow needs these, add them to `allowedPaths` with their real Windows paths.
 
 ## Limitations (bash heuristic)
 
@@ -134,5 +166,7 @@ In `-p` (print), `--mode json`, `--mode rpc` without a UI, `prompt` mode can't s
 ## Design notes
 
 - **Session state** is stored on `globalThis` (per the monorepo convention, avoiding module-identity issues from pi's absolute-path loading); reset to the configured default on `session_start`.
-- **Authorization memory is never persisted** — by design; restarting forgets, preventing authorization drift into hidden risk.
+- **One decision engine.** All access checks flow through a single `PathManager` (longest-prefix-match) rather than a chain of scattered predicates. Rule layers (builtin / config / session) are equal peers at decision time; layering is only used to group the `/access-denied status` output.
+- **Deny reasons speak with the user's voice.** Whether a deny came from config `deniedPaths` or a runtime panel decision, the agent receives the same `Blocked by access-denied (user note: "...")` form — it never learns which layer blocked it.
+- **Session memory is never persisted** — by design; restarting forgets, preventing authorization drift into hidden risk. Config rules (`allowedPaths` / `deniedPaths`) reload from settings on each session.
 - Interception uses pi's `tool_call` event, returning `{ block: true, reason }`; the deny reason is passed back to the LLM as the block reason.

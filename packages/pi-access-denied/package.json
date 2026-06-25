@@ -2,14 +2,14 @@
   "name": "@d3ara1n/pi-access-denied",
   "version": "0.3.2",
   "type": "module",
-  "description": "Sandbox write/edit/bash to the project dir — prompt / deny / allow modes with per-session allow-deny memory",
+  "description": "Sandbox write/edit/bash to the project dir — prompt / deny / allow modes, configurable deny-with-redirect rules, per-session allow-deny memory",
   "keywords": [
     "pi-package",
     "pi"
   ],
   "main": "src/index.ts",
   "scripts": {
-    "test": "node --test src/paths.test.ts"
+    "test": "node --test src/*.test.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"

@@ -1,14 +1,23 @@
 /**
- * Path extraction and boundary checks for pi-access-denied.
+ * Path primitives + bash target extraction for pi-access-denied.
  *
- * Two sources of "targets" (paths a tool wants to touch):
- *   - write/edit: a single `path` argument — exact.
- *   - bash:       a free-form command string — heuristic tokenization.
+ * This module is PURE: no policy, no decision logic. It owns two concerns:
  *
- * The bash heuristic is deliberately conservative: it only flags tokens that
- * clearly escape the project tree (absolute paths, `~`, `$HOME`, and `..`
- * traversals). Relative paths that stay under cwd (e.g. `src/foo.ts`) are left
- * alone because the shell runs inside cwd. See README "Limitations".
+ *   1. **Path normalization primitives** — separator-agnostic comparison
+ *      (toPosix/underRoot), home expansion, MSYS drive translation, Windows
+ *      device-name detection. These are the building blocks the PathManager
+ *      (path-manager.ts) uses to compare a target against its rule set.
+ *
+ *   2. **bash target extraction** — given a free-form command string, recover
+ *      the absolute paths it appears to touch OUTSIDE the cwd (absolute
+ *      paths, `~`, `$HOME`, and `..` traversals). This is a deliberately
+ *      conservative heuristic (see README "Limitations"); it does NOT decide
+ *      whether those paths are allowed — that is the PathManager's job.
+ *
+ * The old allowlist/safe/remember helpers lived here too, but they encoded
+ * POLICY (what's safe, what's outside, what's remembered). They have been
+ * collapsed into the PathManager's single longest-prefix-match `decide()`,
+ * so there is now exactly one place that decides access.
  */
 
 import * as fs from "node:fs";
@@ -42,12 +51,21 @@ export function toPosix(p: string): string {
 
 /**
  * POSIX-style prefix check (separator `/`). Pure — usable on any platform to
- * test a posix-normalized target against a posix-normalized root. Used only for
- * the safe-path constants (always posix). All other boundary checks go through
- * the separator-agnostic {@link underRoot}.
+ * test a posix-normalized target against a posix-normalized root.
  */
 export function posixUnder(posixTarget: string, posixRoot: string): boolean {
 	return posixTarget === posixRoot || posixTarget.startsWith(posixRoot + "/");
+}
+
+/**
+ * True if `target` equals or sits beneath `root`. Separator-agnostic: both
+ * sides are normalized to POSIX first, so `/a/b` and `C:\proj` style roots
+ * both work. Used by the PathManager for prefix matching.
+ */
+export function underRoot(target: string, root: string): boolean {
+	const t = toPosix(target);
+	const r = toPosix(root);
+	return t === r || t.startsWith(r + "/");
 }
 
 /**
@@ -97,28 +115,24 @@ export function msysDrive(token: string, platform: string = process.platform): s
 	return `${drive}:\\${rest.replace(/\//g, "\\")}`;
 }
 
-/**
- * Built-in always-safe path prefixes (POSIX-form, single source of truth).
- *
- * These constants are compared in posix-normalized form (see {@link isSafe}),
- * so `/dev/null` matches both the POSIX path and the `\dev\null` alias that
- * path.win32.normalize produces. Never trigger a prompt:
- *   - `/dev/null`, `/dev/stdin|out|err`, `/dev/zero`, `/dev/u?random`
- *     (process-internal pseudo-devices, safe)
- *   - `/dev/fd/` (current process's own file descriptors, safe)
- *
- * Windows adds its own native device names (NUL/CON/...) separately via
- * {@link isWinDeviceName}, since they have no Unix path analogue.
- *
- * The gate's purpose is to prevent an out-of-control agent from leaving
- * *permanent* footprints outside the project (configs, user data, system
- * files). Task-scoped scratch space that the OS reclaims is explicitly fine:
- *   - `/tmp` (system shared, auto-cleaned; on Git Bash for Windows mounts to %TEMP%)
- *   - `os.tmpdir()` (per-user temp, auto-cleaned; on Linux it == /tmp)
- *
- * `/dev/tty` is intentionally NOT included — it can capture keyboard input.
- * `/dev/disk*`, `/dev/sda*` etc. are NOT included — block devices are dangerous.
- */
+// ── Built-in always-safe roots ──────────────────────────────────────────────
+//
+// The gate's purpose is to prevent an out-of-control agent from leaving
+// *permanent* footprints outside the project (configs, user data, system
+// files). Task-scoped scratch space that the OS reclaims is explicitly fine:
+//   - `/dev/null`, `/dev/stdin|out|err`, `/dev/zero`, `/dev/u?random`
+//     (process-internal pseudo-devices, safe)
+//   - `/dev/fd/` (current process's own file descriptors, safe)
+//   - `/tmp` (system shared, auto-cleaned; on Git Bash for Windows mounts to %TEMP%)
+//   - `os.tmpdir()` (per-user temp, auto-cleaned; on Linux it == /tmp)
+//
+// `/dev/tty` is intentionally NOT included — it can capture keyboard input.
+// `/dev/disk*`, `/dev/sda*` etc. are NOT included — block devices are dangerous.
+//
+// These become the PathManager's "builtin" allow rules. Windows native device
+// names (NUL/CON/...) are handled separately by {@link isWinDeviceName} since
+// they are matched by basename, not by prefix.
+
 const SAFE_DEV_PATHS: readonly string[] = [
 	"/dev/null",
 	"/dev/stdin",
@@ -140,22 +154,26 @@ const TMP_REAL = (() => {
 })();
 
 /**
- * True if `posixTarget` (posix-normalized, forward slashes) is an always-safe
- * pseudo-device. Receives a *normalized* string so the same Unix constants
- * match both `/dev/null` (POSIX) and the `\dev\null` alias produced by
- * path.win32.normalize. Call {@link toPosix} on the real target first.
+ * The always-safe root paths (POSIX-normalized) that never trigger an
+ * authorization prompt, regardless of the allowlist: pseudo-devices, process
+ * file descriptors, and OS-reclaimed scratch dirs. The PathManager turns
+ * these into its "builtin" allow rules. Pure of policy beyond this fixed set.
  */
-export function isSafeDevice(posixTarget: string): boolean {
-	if (SAFE_DEV_PATHS.includes(posixTarget)) return true;
-	return SAFE_DEV_PREFIXES.some((p) => posixTarget.startsWith(p));
+export function builtinSafeRoots(): string[] {
+	const roots: string[] = [
+		...SAFE_DEV_PATHS,
+		...SAFE_DEV_PREFIXES.map((p) => p.replace(/\/$/, "")), // "/dev/fd/" → "/dev/fd"
+		"/tmp",
+	];
+	// macOS /tmp → /private/tmp symlink: the real path must also be safe.
+	if (TMP_REAL !== "/tmp") roots.push(TMP_REAL);
+	roots.push(path.normalize(os.tmpdir()));
+	// Normalize every entry to POSIX so cross-platform prefix matching works
+	// (e.g. win32 os.tmpdir() → "C:\...\Temp" → "C:/.../Temp").
+	return [...new Set(roots.map(toPosix))];
 }
 
-/** True if `target` is under a given normalized root dir. Separator-agnostic. */
-function underRoot(target: string, root: string): boolean {
-	const t = toPosix(target);
-	const r = toPosix(root);
-	return t === r || t.startsWith(r + "/");
-}
+// ── Path resolution ─────────────────────────────────────────────────────────
 
 /** Expand a leading `~` or `$HOME` form to the home directory. Returns null if not a home form. */
 function expandHome(token: string): string | null {
@@ -178,104 +196,17 @@ export function resolveTarget(token: string, cwd: string): string {
 	return path.resolve(cwd, token);
 }
 
-/** Build the normalized, de-duplicated allowlist from cwd + configured extra dirs. */
-export function buildAllowlist(cwd: string, extraDirs: string[]): string[] {
-	const list = [path.resolve(cwd)];
-	for (const d of extraDirs) {
-		const home = expandHome(d) ?? d;
-		const resolved = path.isAbsolute(home) ? path.normalize(home) : path.resolve(cwd, home);
-		list.push(resolved);
-	}
-	return [...new Set(list)];
-}
-
-/** True if `target` (already normalized absolute) is NOT inside any allowlist dir. */
-export function isOutsideAllowlist(target: string, allowlist: string[]): boolean {
-	return !allowlist.some((dir) => underRoot(target, dir));
-}
-
-/**
- * Return the entry in `roots` that covers `target` (equals it or is one of its
- * ancestors), or undefined if none. Lets a caller both *test* coverage and
- * recover the covering root — e.g. to look up the reason attached to a deny
- * root. Mirrors `underRoot` but across a set.
- */
-export function coveringRoot(target: string, roots: Iterable<string>): string | undefined {
-	for (const r of roots) {
-		if (underRoot(target, r)) return r;
-	}
-	return undefined;
-}
-
-/** True if `target` equals or sits beneath any entry in `roots` (prefix match). */
-export function isCoveredBy(target: string, roots: Iterable<string>): boolean {
-	return coveringRoot(target, roots) !== undefined;
-}
-
-/**
- * Remember `dir` as an always-allow root with prefix semantics:
- *   - if some remembered root already covers `dir`, do nothing (redundant);
- *   - otherwise drop any remembered roots that sit *beneath* `dir` (they are
- *     now subsumed by the broader entry) and add `dir`.
- *
- * This keeps the set minimal and the status view free of odd “parent listed
- * next to its own child” duplication.
- */
-export function rememberAllowed(set: Set<string>, dir: string): void {
-	if (isCoveredBy(dir, set)) return; // a parent already covers dir
-	for (const existing of [...set]) {
-		if (existing !== dir && underRoot(existing, dir)) set.delete(existing);
-	}
-	set.add(dir);
-}
-
-/**
- * Mirror of {@link rememberAllowed} for the deny map (path → reason): keeps the
- * widest deny, drops narrower denies subsumed by the new `dir`.
- */
-export function rememberDenied(map: Map<string, string>, dir: string, reason: string): void {
-	if (isCoveredBy(dir, map.keys())) return; // a parent already denies dir
-	for (const existing of [...map.keys()]) {
-		if (existing !== dir && underRoot(existing, dir)) map.delete(existing);
-	}
-	map.set(dir, reason);
-}
-
-/**
- * True if `target` is always-safe (no prompt needed) regardless of allowlist:
- *   - built-in safe pseudo-devices (/dev/null, /dev/fd/, etc.)
- *   - Windows native device names (NUL/CON/...) on win32
- *   - task-scoped scratch dirs: /tmp and os.tmpdir() (no permanent footprint)
- *   - any user-configured extra safe paths
- *
- * Comparison is done in posix-normalized form so Unix-style safe-path
- * constants match targets produced by either path.posix or path.win32.
- */
-export function isSafe(target: string, opts: { extraSafePaths: string[] }): boolean {
-	// Windows native device names (no Unix analogue) — matched by basename on
-	// the win32 path form, before posix normalization.
-	if (isWinDeviceName(target)) return true;
-
-	// Normalize to posix so Unix constants match across platforms
-	// (Windows \dev\null → /dev/null hits the same constant as the POSIX form).
-	const p = toPosix(target);
-
-	if (isSafeDevice(p)) return true;
-
-	// /tmp and os.tmpdir(): task-scoped, OS-reclaimed, no permanent footprint.
-	// posix-style prefix check so /tmp matches regardless of platform separator.
-	// (On Git Bash for Windows, /tmp mounts to %TEMP% by default — see README.)
-	if (posixUnder(p, "/tmp")) return true;
-	if (TMP_REAL !== "/tmp" && posixUnder(p, toPosix(TMP_REAL))) return true;
-	const tmp = toPosix(path.normalize(os.tmpdir()));
-	if (posixUnder(p, tmp)) return true;
-	for (const e of opts.extraSafePaths) {
-		const resolved = expandHome(e) ?? e;
-		const norm = path.isAbsolute(resolved) ? path.normalize(resolved) : path.resolve(process.cwd(), resolved);
-		if (posixUnder(p, toPosix(norm))) return true;
-	}
-	return false;
-}
+// ── bash target extraction (pure syntax; NO policy) ─────────────────────────
+//
+// A bash command is an arbitrary shell string, so perfect static path analysis
+// is impossible. The extractor flags tokens that CLEARLY escape the project
+// tree (absolute paths, `~`, `$HOME`, and `..` traversals). Relative paths
+// that stay under cwd (e.g. `src/foo.ts`) are left alone because the shell
+// runs inside cwd. See README "Limitations" for known blind spots.
+//
+// The extractor does NOT decide whether a flagged path is allowed/denied —
+// it merely returns the resolved candidate paths. Classification is the
+// PathManager's job, so policy lives in exactly one place.
 
 function stripQuotes(t: string): string {
 	if (t.length >= 2 && ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'")))) {
@@ -344,8 +275,9 @@ const TOKEN_RE = /"[^"]*"|'[^']*'|(?:\\.|[^\s"'`;|&<>(){}])+/g;
 const HEREDOC_RE = /<<-?\s*(?:\\|["']?)([A-Za-z_][\w-]*)["']?/;
 
 /**
- * Scan a single command line's tokens for out-of-allowlist paths. Mutates
- * `violations`. Shared by the per-line loop in {@link extractBashViolations}.
+ * Scan a single command line's tokens for escaping-path candidates and add
+ * their resolved absolute form to `targets`. Shared by the per-line loop in
+ * {@link extractBashTargets}.
  *
  * Quoted tokens are **skipped**: a quoted run is a data literal passed to a
  * program (e.g. `echo '...'`, `sed 's|a|b|g'`, `printf '%s' ...`), not a path
@@ -353,13 +285,7 @@ const HEREDOC_RE = /<<-?\s*(?:\\|["']?)([A-Za-z_][\w-]*)["']?/;
  * code-content false positives — e.g. a JS block comment at the start of a
  * quoted string was mistaken for absolute path `/`.
  */
-function scanLine(
-	line: string,
-	cwd: string,
-	allowlist: string[],
-	safeOpts: { extraSafePaths: string[] },
-	violations: Set<string>,
-): void {
+function scanLine(line: string, cwd: string, targets: Set<string>): void {
 	for (const raw of line.matchAll(TOKEN_RE)) {
 		const r = raw[0];
 		// Quoted run = data literal, not a path. See method comment.
@@ -373,9 +299,7 @@ function scanLine(
 		// Unresolved $VAR (other than $HOME) can't be analyzed statically — skip.
 		if (token.includes("$") && !token.startsWith("$HOME")) continue;
 		if (!isEscapingCandidate(token)) continue;
-		const target = resolveTarget(token, cwd);
-		if (isSafe(target, safeOpts)) continue; // always-safe, not a violation
-		if (isOutsideAllowlist(target, allowlist)) violations.add(target);
+		targets.add(resolveTarget(token, cwd));
 	}
 }
 
@@ -386,8 +310,14 @@ function heredocDelim(line: string): string | null {
 }
 
 /**
- * Extract the set of normalized absolute paths a bash command appears to touch
- * OUTSIDE the allowlist. Heuristic — see README for known blind spots.
+ * Extract the de-duplicated set of normalized absolute paths a bash command
+ * APPEARS to reach OUTSIDE cwd. Heuristic — see README for known blind spots.
+ *
+ * This is PURE EXTRACTION: it returns every escaping-looking candidate without
+ * judging whether it is allowed or denied. The caller (index.ts) runs each
+ * result through `PathManager.decide()` to classify it. Keeping extraction and
+ * policy separate means the tokenizing heuristic and the access rules can each
+ * evolve without entangling the other.
  *
  * Processes the command **line by line** so it can skip heredoc bodies: a line
  * that opens `<<DELIM` flips on body-skipping until the matching `DELIM`
@@ -395,13 +325,8 @@ function heredocDelim(line: string): string | null {
  * what stops a `cat > f <<'EOF' ... code ... EOF` from flagging every
  * `/...` token in the embedded code.
  */
-export function extractBashViolations(
-	command: string,
-	cwd: string,
-	allowlist: string[],
-	safeOpts: { extraSafePaths: string[] },
-): string[] {
-	const violations = new Set<string>();
+export function extractBashTargets(command: string, cwd: string): string[] {
+	const targets = new Set<string>();
 	let pendingDelim: string | null = null;
 	for (const line of command.split("\n")) {
 		if (pendingDelim !== null) {
@@ -412,7 +337,7 @@ export function extractBashViolations(
 		}
 		const delim = heredocDelim(line);
 		if (delim) pendingDelim = delim;
-		scanLine(line, cwd, allowlist, safeOpts, violations);
+		scanLine(line, cwd, targets);
 	}
-	return [...violations];
+	return [...targets];
 }

@@ -5,11 +5,11 @@
  * `AskUserPanel`):
  *
  *   - "list"   — vertical list of out-of-bounds paths, each defaulting to
- *                `accept`. A SINGLE horizontal choice bar reflects the FOCUSED
+ *                `allow`. A SINGLE horizontal choice bar reflects the FOCUSED
  *                path's current choice; ←/→ change it (no wrap), Tab wraps.
  *                Non-default choices render a right-aligned status tag on
- *                their own path row (`[always-deny]`, etc.) — accept shows
- *                nothing, because accept is the no-op default and the whole
+ *                their own path row (`[always-deny]`, etc.) — allow shows
+ *                nothing, because allow is the no-op default and the whole
  *                UX revolves around finding the paths you want to change.
  *
  *   - "reason" — entered only when the submitted result contains a deny or
@@ -20,7 +20,7 @@
  * Keyboard:
  *   ↑/↓       move path focus
  *   ←/→       change focused path's action (no wrap — stops at edges)
- *   Tab       change action (wraps: Always deny → Accept); Shift+Tab wraps back
+ *   Tab       change action (wraps: Always deny → Allow); Shift+Tab wraps back
  *   Enter     submit (→ reason phase if any deny, else passthrough)
  *   Esc       list: cancel whole authorization · reason: back to list
  */
@@ -47,23 +47,23 @@ export interface AuthPanelCallbacks {
 }
 
 /** The four actions, in left-to-right bar order. */
-const CHOICES: readonly Choice[] = ["accept", "always-accept", "deny", "always-deny"];
+const CHOICES: readonly Choice[] = ["allow", "always-allow", "deny", "always-deny"];
 
 /** Human-readable labels for the horizontal bar (Title Case). */
 const CHOICE_LABELS: Record<Choice, string> = {
-	accept: "Accept",
-	"always-accept": "Always accept",
+	allow: "Allow",
+	"always-allow": "Always allow",
 	deny: "Deny",
 	"always-deny": "Always deny",
 };
 
 /**
  * Right-aligned status tag on a path row (lowercase + hyphen). Empty for the
- * default (`accept`), since accept is the no-op baseline.
+ * default (`allow`), since allow is the no-op baseline.
  */
 const CHOICE_TAGS: Record<Choice, string> = {
-	accept: "",
-	"always-accept": "[always-accept]",
+	allow: "",
+	"always-allow": "[always-allow]",
 	deny: "[deny]",
 	"always-deny": "[always-deny]",
 };
@@ -106,7 +106,7 @@ export class AuthPanel implements Component, Focusable {
 		this.tui = tui;
 		this.theme = theme;
 		this.cb = cb;
-		this.choices = new Map(paths.map((p) => [p, "accept" as Choice]));
+		this.choices = new Map(paths.map((p) => [p, "allow" as Choice]));
 
 		const editorTheme: EditorTheme = {
 			borderColor: (s) => theme.fg("accent", s),
@@ -129,7 +129,7 @@ export class AuthPanel implements Component, Focusable {
 	// ── accessors ──
 
 	private get currentChoice(): Choice {
-		return this.choices.get(this.paths[this.cursor]!) ?? "accept";
+		return this.choices.get(this.paths[this.cursor]!) ?? "allow";
 	}
 
 	private setChoice(c: Choice): void {
@@ -224,7 +224,7 @@ export class AuthPanel implements Component, Focusable {
 			if (idx < CHOICES.length - 1) this.setChoice(CHOICES[idx + 1]!);
 			return;
 		}
-		// Tab — wraps forward (Always deny → Accept); Shift+Tab wraps backward.
+		// Tab — wraps forward (Always deny → Allow); Shift+Tab wraps backward.
 		if (matchesKey(data, Key.tab)) {
 			this.setChoice(CHOICES[(idx + 1) % CHOICES.length]!);
 			return;
@@ -297,12 +297,12 @@ export class AuthPanel implements Component, Focusable {
 
 	/**
 	 * One path row: leading cursor indicator + path (truncated) + right-aligned
-	 * status tag. The tag is empty for the default (`accept`); a deny-class tag
-	 * is red, an always-accept tag is green.
+	 * status tag. The tag is empty for the default (`allow`); a deny-class tag
+	 * is red, an always-allow tag is green.
 	 */
 	private renderPathRow(i: number, innerW: number, th: Theme): string {
 		const p = this.paths[i]!;
-		const choice = this.choices.get(p) ?? "accept";
+		const choice = this.choices.get(p) ?? "allow";
 		const isCursor = i === this.cursor;
 		const row = (content: string) => th.fg("border", "│") + padRight(content, innerW) + th.fg("border", "│");
 
@@ -323,9 +323,9 @@ export class AuthPanel implements Component, Focusable {
 		return row(` ${prefix}${pathStr}${tagPart}`);
 	}
 
-	/** The horizontal choice bar: ←  Accept  Always accept  Deny  Always deny  →.
+	/** The horizontal choice bar: ←  Allow  Always allow  Deny  Always deny  →.
 	 *  The focused path's current choice is highlighted; deny-class highlights
-	 *  in red, accept-class in accent. */
+	 *  in red, allow-class in green. */
 	private renderChoiceBar(innerW: number, th: Theme): string {
 		const row = (content: string) => th.fg("border", "│") + padRight(content, innerW) + th.fg("border", "│");
 		const current = this.currentChoice;

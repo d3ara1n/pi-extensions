@@ -181,3 +181,19 @@ agent 的边界：
 **正确做法**：`overlay: false` 渲染在底部 `editorContainer` 槽位（与 `ctx.ui.select()` / `input()` 共用），聊天区在上方保持可见、可通过终端原生滚动回溯。键盘焦点自动交给面板，上下箭头导航不受影响。
 
 参考：`pi-ask-user` 的 `AskUserPanel` 和已修复的 `pi-access-denied` 的 `AuthPanel`。
+
+### 测 pi-access-denied 时别用 `/tmp` 当测试根
+
+pi-access-denied 的 PathManager 把 `/tmp`、`os.tmpdir()`、`/dev/null` 等作为 **builtin allow root**（任务级临时空间，OS 自动回收，不产生持久足迹，故默认放行）。这些 builtin 规则和 config 的 `allowedPaths`/`deniedPaths` 是**平等的规则**，一起进最长前缀匹配。
+
+**坑**：用 `/tmp/ad-test/...` 当测试根去验证一条 config **allow** 规则时，builtin `/tmp` 会先命中并放行——你以为是你配的 allow rule 起作用了，其实是 builtin 短路了。此时 `deny` 规则仍然能穿透（deny 优先级高于 builtin allow），但 allow 的测试完全无效。
+
+**正确做法**：测试 config 规则时用 home 下的非 builtin 路径（如 `~/ad-test/...`），这样 allow 放行才真正来自你配的规则。要确认 builtin safe roots 的完整列表，看 `paths.ts` 的 `builtinSafeRoots()`，或跑 `/access-denied status` 的 Allow rules 区块。
+
+### bash gate 是 per-call 的：一条命令多个越界路径，命中第一个 block 就中断整条
+
+pi-access-denied 拦截的是整个 `tool_call`。一条 bash 命令里若 token 扫描出多个越界路径，gate **一旦判定其中任一需 block，整个 `bash` 调用直接返回 block**，命令字符串里的其余部分根本不会执行。
+
+**对测试的影响**：想逐个验证多条路径的判定结果（哪条 allow、哪条 deny），**不能**把它们塞进一条 `bash`（如 `cat a; cat b; cat c`）——只有第一个 block 之前的命令会跑，后面的全被吞。必须拆成多次独立的 `bash` 调用，每次一个路径，才能拿到各自的判定。
+
+**设计原因**：gate 不知道命令内部各操作是否有依赖（`A && B` 中 B 可能依赖 A 的副作用），保守起见整个 call 级别拦截最安全。这也意味着真实场景下，agent 一条复合命令里只要有一个越界路径，整条都跑不了——这也是鼓励 agent 拆分操作、显式暴露每个路径的副作用。

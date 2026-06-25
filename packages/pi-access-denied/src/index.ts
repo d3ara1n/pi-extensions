@@ -2,32 +2,31 @@
  * pi-access-denied — sandbox write/edit/bash to the project directory.
  *
  * Gates built-in `write`, `edit`, and `bash` tools so they cannot reach paths
- * outside an allowlist (cwd + configured extra dirs) without authorization.
+ * outside an allowlist (cwd + configured allowedPaths) without authorization,
+ * and hard-blocks any path listed in `deniedPaths` (optionally with a reason
+ * that is surfaced back to the agent as a redirect).
  *
  * Three modes (switchable at runtime via `/access-denied`):
- *   - prompt: ask the user; choices are accept / always-accept / deny / always-deny
+ *   - prompt: ask the user; choices are allow / always-allow / deny / always-deny
  *   - deny:   block any out-of-bounds access outright
  *   - allow:  passthrough (effectively disable the gate)
  *
- * "Always" decisions are remembered per normalized target path for the current
- * session only — restarting pi (or `/reload`, `/new`, `/resume`) forgets them.
+ * All access decisions flow through a single PathManager (path-manager.ts)
+ * using longest-prefix-match across three rule layers (builtin / config /
+ * session). "Always" decisions from the panel and config `deniedPaths` are
+ * remembered per session — restarting pi (or `/reload`, `/new`, `/resume`)
+ * forgets the SESSION ones; config rules reload from settings.
+ *
+ * The agent never learns WHICH layer denied it: both config and session deny
+ * reasons surface uniformly as a "user note", so the agent only ever sees
+ * "the user declined this" — the software speaks with the user's voice.
  */
 
 import { isToolCallEventType, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import * as os from "node:os";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { loadConfig } from "./config.ts";
-import {
-	buildAllowlist,
-	coveringRoot,
-	extractBashViolations,
-	isCoveredBy,
-	isOutsideAllowlist,
-	isSafe,
-	rememberAllowed,
-	rememberDenied,
-	resolveTarget,
-} from "./paths.ts";
+import { PathManager } from "./path-manager.ts";
+import { extractBashTargets, resolveTarget, toPosix } from "./paths.ts";
 import { DEFAULT_CONFIG, type AccessMode, type AuthResult } from "./types.ts";
 import { AuthPanel } from "./auth-panel.ts";
 
@@ -37,8 +36,8 @@ const STATUS_KEY = "access-denied";
 interface SessionState {
 	mode: AccessMode;
 	config: typeof DEFAULT_CONFIG;
-	alwaysAllow: Set<string>;
-	alwaysDeny: Map<string, string>; // path -> reason
+	/** The single path-access authority. Rebuilt on session_start from config. */
+	pm: PathManager;
 	alive: boolean;
 }
 
@@ -48,8 +47,7 @@ function getState(): SessionState {
 		g[GLOBAL_KEY] = {
 			mode: DEFAULT_CONFIG.mode,
 			config: DEFAULT_CONFIG,
-			alwaysAllow: new Set<string>(),
-			alwaysDeny: new Map<string, string>(),
+			pm: new PathManager(process.cwd(), DEFAULT_CONFIG.allowedPaths, DEFAULT_CONFIG.deniedPaths),
 			alive: false,
 		} satisfies SessionState;
 	}
@@ -77,6 +75,16 @@ function updateStatus(ctx: ExtensionContext) {
 
 function formatPaths(paths: string[]): string {
 	return paths.map((p) => `  • ${p}`).join("\n");
+}
+
+/**
+ * Uniform deny reason for any deny (config or session). The agent receives a
+ * "user note" and cannot tell which layer produced it — the software speaks as
+ * the user. An empty note yields the plain default message.
+ */
+function denyReason(note?: string): string {
+	const trimmed = note?.trim();
+	return trimmed ? `Blocked by access-denied (user note: "${trimmed}")` : "Blocked by access-denied";
 }
 
 /**
@@ -109,8 +117,7 @@ export default function (pi: ExtensionAPI) {
 		const state = getState();
 		state.config = loadConfig(ctx.cwd);
 		state.mode = state.config.mode; // reset to configured mode each session
-		state.alwaysAllow = new Set();
-		state.alwaysDeny = new Map();
+		state.pm = new PathManager(ctx.cwd, state.config.allowedPaths, state.config.deniedPaths);
 		state.alive = true;
 		updateStatus(ctx);
 	});
@@ -127,88 +134,79 @@ export default function (pi: ExtensionAPI) {
 		const toolName = event.toolName;
 		if (!state.config.tools.includes(toolName)) return;
 
-		// Extract the out-of-bounds targets this call wants to reach.
+		const pm = state.pm;
 		const cwd = ctx.cwd;
-		const allowlist = buildAllowlist(cwd, state.config.extraAllowedDirs);
-		let violations: string[];
 
+		// 1. Extract the targets this call wants to reach.
+		//    write/edit: the single `path` argument — exact.
+		//    bash:       heuristic scan of the command string (escaping candidates only).
+		let targets: string[];
 		if (isToolCallEventType("write", event) || isToolCallEventType("edit", event)) {
-			const target = resolveTarget(event.input.path, cwd);
-			if (isSafe(target, { extraSafePaths: state.config.extraSafePaths })) return; // always-safe
-			violations = isOutsideAllowlist(target, allowlist) ? [target] : [];
+			targets = [resolveTarget(event.input.path, cwd)];
 		} else if (isToolCallEventType("bash", event)) {
-			violations = extractBashViolations(event.input.command, cwd, allowlist, {
-				extraSafePaths: state.config.extraSafePaths,
-			});
+			targets = extractBashTargets(event.input.command, cwd);
 		} else {
 			return; // tool not understood here — nothing to gate
 		}
 
-		if (violations.length === 0) return; // in-bounds, passthrough
+		// 2. Classify every target through the single PathManager decision engine.
+		//    decide() returns allow | deny | outside. A deny is an explicit rule
+		//    (config deniedPaths or a remembered always-deny); outside means no
+		//    allow rule covers it and it needs authorization.
+		const denyNotes: string[] = [];
+		const outside: string[] = [];
+		for (const target of targets) {
+			const d = pm.decide(target);
+			if (d.kind === "deny") denyNotes.push(d.reason ?? "");
+			else if (d.kind === "outside") outside.push(target);
+		}
+
+		// 3. Any explicit deny blocks immediately — deny is authoritative and
+		//    needs no user interaction. The most informative note wins; the agent
+		//    can't distinguish config-deny from session-deny (both = "user note").
+		if (denyNotes.length) {
+			const note = denyNotes.find((r) => r.trim()) ?? "";
+			return { block: true, reason: denyReason(note) };
+		}
+
+		// 4. Nothing outside the rules → fully in-bounds, passthrough.
+		if (outside.length === 0) return;
+
+		// 5. mode logic applies only to uncovered ("outside") targets.
 		if (state.mode === "allow") return; // gate disabled
 
-		// Cached session decisions short-circuit the prompt. Both memories use
-		// prefix coverage: remembering a parent covers its whole subtree.
-		if (state.alwaysDeny.size) {
-			for (const v of violations) {
-				const root = coveringRoot(v, state.alwaysDeny.keys());
-				if (root) {
-					// `alwaysDeny` stores the user's raw note (possibly empty); wrap it
-					// the same way as a fresh deny so a misleading note can't pass as
-					// an operation result. See the deny branch below for the rationale.
-					const note = state.alwaysDeny.get(root);
-					return {
-						block: true,
-						reason: note
-							? `Blocked by access-denied, always denied (user note: "${note}")`
-							: "Blocked by access-denied (always denied)",
-					};
-				}
-			}
-		}
-		if (violations.every((v) => isCoveredBy(v, state.alwaysAllow))) return; // all whitelisted
-
-		// deny mode blocks without asking.
 		if (state.mode === "deny") {
-			return { block: true, reason: `Blocked by access-denied (deny mode): ${formatPaths(violations)}` };
+			return { block: true, reason: `Blocked by access-denied (deny mode): ${formatPaths(outside)}` };
 		}
 
 		// prompt mode — but no UI available (print/json mode): fail safe.
 		if (!ctx.hasUI) {
-			return { block: true, reason: `Blocked (no UI to authorize): ${formatPaths(violations)}` };
+			return { block: true, reason: `Blocked (no UI to authorize): ${formatPaths(outside)}` };
 		}
 
-		const result = await promptDecision(toolName, violations, ctx);
+		// 6. Prompt for the outside paths.
+		const result = await promptDecision(toolName, outside, ctx);
 		if (result.cancelled) {
 			// dismissed — soft deny so the agent learns it was not authorized
 			return { block: true, reason: "Authorization dismissed" };
 		}
 
-		// Any deny → block the whole call. Deny-always paths are remembered
-		// individually; the stored value is the user's raw note (the panel's
-		// single global reason), NOT the wrapped string — so `/access-denied
-		// status` shows it verbatim and the cache-hit branch re-wraps it.
+		// Any deny → block the whole call. Deny-always paths are remembered with
+		// the panel's single global reason. The stored reason is the user's RAW
+		// note, re-wrapped on each cache hit so a misleading note can't pass as
+		// an operation result (defense-in-depth alongside is_error: true).
 		const hasDeny = [...result.choices.values()].some((c) => c === "deny" || c === "always-deny");
 		if (hasDeny) {
-			// The user's reason is free-form, untrusted text. Hand it to the LLM
-			// as a quoted "user note" so it can't masquerade as the operation's
-			// outcome — e.g. a note like "file written successfully" must never
-			// read as "the write succeeded". `is_error: true` (set by the
-			// framework) is the primary signal; this wrapping is defense-in-depth
-			// for when a model or gateway de-emphasizes that flag.
-			const userNote = result.reason?.trim();
-			const reason = userNote
-				? `Blocked by access-denied (user note: "${userNote}")`
-				: "Blocked by access-denied";
+			const userNote = result.reason?.trim() ?? "";
 			for (const [p, c] of result.choices) {
-				if (c === "always-deny") rememberDenied(state.alwaysDeny, p, userNote ?? "");
+				if (c === "always-deny") pm.addSessionDeny(p, userNote);
 			}
-			return { block: true, reason };
+			return { block: true, reason: denyReason(userNote) };
 		}
 
-		// All accept / always-accept → passthrough; always-accept paths remembered.
+		// All allow / always-allow → passthrough; always-allow paths remembered.
 		for (const [p, c] of result.choices) {
-			if (c === "always-accept") rememberAllowed(state.alwaysAllow, p);
+			if (c === "always-allow") pm.addSessionAllow(p);
 		}
 		return; // passthrough this one call
 	});
@@ -235,34 +233,46 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			if (arg === "reset") {
-				state.alwaysAllow.clear();
-				state.alwaysDeny.clear();
+				state.pm.clearSession();
 				ctx.ui.notify("Cleared session allow/deny memory", "info");
 				return;
 			}
 
-			// status (default)
-			const allow = [...state.alwaysAllow].sort();
-			const deny = [...state.alwaysDeny.entries()].sort();
-			const allowlist = buildAllowlist(ctx.cwd, state.config.extraAllowedDirs);
-			const safeLines: string[] = [
-				"/dev/null, /dev/std{in,out,err}, /dev/zero, /dev/{u,}random, /dev/fd/",
-				"/tmp, " + os.tmpdir(),
+			// status (default) — render the unified rule set from the PathManager.
+			const rules = state.pm.getRules();
+			const cwdNorm = toPosix(resolveTarget(ctx.cwd, ctx.cwd));
+			const allowConfig = rules.config.filter((r) => r.decision === "allow");
+			const allowSession = rules.session.filter((r) => r.decision === "allow");
+			const denyRules = [
+				...rules.config.filter((r) => r.decision === "deny"),
+				...rules.session.filter((r) => r.decision === "deny"),
 			];
-			for (const p of state.config.extraSafePaths) safeLines.push(p);
-			const lines = [
-				`Mode: ${state.mode}   Tools: ${state.config.tools.join(", ")}`,
-				`Allowlist (full read/write roots):`,
-				...allowlist.map((d) => `  • ${d}`),
-				`Always-safe (no prompt):`,
-				...safeLines.map((d) => `  • ${d}`),
-				`Always-allow (${allow.length}):`,
-				...(allow.length ? allow.map((p) => `  • ${p}`) : ["  (none)"]),
-				`Always-deny (${deny.length}):`,
-				// `r` is the user's raw note and may be empty (deny with no reason);
-				// omit the trailing dash in that case so the status line is clean.
-				...(deny.length ? deny.map(([p, r]) => (r ? `  • ${p}  — ${r}` : `  • ${p}`)) : ["  (none)"]),
-			];
+
+			const lines: string[] = [];
+			lines.push(`Mode: ${state.mode}   Tools: ${state.config.tools.join(", ")}`);
+			lines.push("");
+			lines.push("Allow rules (matched → passthrough):");
+			if (rules.builtin.length) {
+				lines.push(`  • ${rules.builtin.map((r) => r.path).join(", ")}   (builtin)`);
+			}
+			for (const r of allowConfig) {
+				const tag = r.path === cwdNorm ? "(cwd)" : "(config)";
+				lines.push(`  • ${r.path}   ${tag}`);
+			}
+			for (const r of allowSession) {
+				lines.push(`  • ${r.path}   (session)`);
+			}
+			lines.push("");
+			lines.push("Deny rules (matched → blocked):");
+			if (denyRules.length === 0) {
+				lines.push("  (none)");
+			} else {
+				for (const r of denyRules) {
+					const src = r.source === "config" ? "(config)" : "(session)";
+					const reason = r.reason ? `  — ${r.reason}` : "";
+					lines.push(`  • ${r.path}   ${src}${reason}`);
+				}
+			}
 			ctx.ui.notify(lines.join("\n"), "info");
 		},
 	});

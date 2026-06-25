@@ -46,6 +46,44 @@ function asStringArray(value: unknown): string[] | undefined {
 }
 
 /**
+ * Parse the user-facing `deniedPaths` format into the flat map the PathManager
+ * consumes. The authoring format groups paths by their reason, so several
+ * paths sharing one reason (or no reason) are written together:
+ *
+ *   [
+ *     { "paths": ["/old/a", "/old/b"], "reason": "moved to /new" },
+ *     { "paths": ["/cache"] }            // reason omitted → default message
+ *   ]
+ *
+ * Flattens to { "/old/a": "moved to /new", "/old/b": "moved to /new", "/cache": null }.
+ *
+ * `reason` accepts: omitted / null → null (default message); a string → that
+ * reason. A non-string, non-null reason drops the WHOLE group (likely a typo).
+ * Malformed entries (non-object, missing/empty `paths`) are skipped. A path
+ * appearing in several groups keeps the LAST group's reason (predictable).
+ * This lenient parsing means a typo in settings can never crash the gate.
+ */
+function asDeniedPaths(value: unknown): Record<string, string | null> {
+	if (!Array.isArray(value)) return {};
+	const out: Record<string, string | null> = {};
+	for (const group of value) {
+		if (!group || typeof group !== "object" || Array.isArray(group)) continue;
+		const g = group as Record<string, unknown>;
+		const paths = g.paths;
+		if (!Array.isArray(paths)) continue; // missing or non-array paths → skip group
+		// reason: omitted / null → null; string → that string; else skip group.
+		let reason: string | null;
+		if (g.reason === undefined || g.reason === null) reason = null;
+		else if (typeof g.reason === "string") reason = g.reason;
+		else continue;
+		for (const p of paths) {
+			if (typeof p === "string" && p.trim()) out[p] = reason;
+		}
+	}
+	return out;
+}
+
+/**
  * Load accessDenied config, merged from global + project settings over defaults.
  * @param cwd - Project working directory (for .pi/settings.json lookup)
  */
@@ -60,8 +98,8 @@ export function loadConfig(cwd?: string): AccessDeniedConfig {
 
 	return {
 		mode: asMode(raw.mode) ?? DEFAULT_CONFIG.mode,
-		extraAllowedDirs: asStringArray(raw.extraAllowedDirs) ?? DEFAULT_CONFIG.extraAllowedDirs,
-		extraSafePaths: asStringArray(raw.extraSafePaths) ?? DEFAULT_CONFIG.extraSafePaths,
+		allowedPaths: asStringArray(raw.allowedPaths) ?? DEFAULT_CONFIG.allowedPaths,
+		deniedPaths: asDeniedPaths(raw.deniedPaths),
 		tools: asStringArray(raw.tools) ?? DEFAULT_CONFIG.tools,
 	};
 }

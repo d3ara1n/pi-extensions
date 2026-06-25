@@ -211,12 +211,13 @@ export default function (pi: ExtensionAPI) {
 		return; // passthrough this one call
 	});
 
-	// ── Command: /access-denied [prompt|deny|allow|status|reset] ──────────
+	// ── Commands ───────────────────────────────────────────────────────────
 
+	// /access-denied prompt | deny | allow
 	pi.registerCommand("access-denied", {
-		description: "View or change access-denied mode: prompt | deny | allow | status | reset",
+		description: "Set access-denied mode: prompt | deny | allow",
 		getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
-			const opts = ["prompt", "deny", "allow", "status", "reset"];
+			const opts = ["prompt", "deny", "allow"];
 			const items = opts.map((o) => ({ value: o, label: o }));
 			const filtered = items.filter((i) => i.value.startsWith(prefix));
 			return filtered.length > 0 ? filtered : null;
@@ -232,13 +233,19 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			if (arg === "reset") {
-				state.pm.clearSession();
-				ctx.ui.notify("Cleared session allow/deny memory", "info");
-				return;
-			}
+			ctx.ui.notify(
+				"Usage: /access-denied prompt | deny | allow\n" +
+				"Use /access-denied:status to view current rules.",
+				"error",
+			);
+		},
+	});
 
-			// status (default) — render the unified rule set from the PathManager.
+	// /access-denied:status
+	pi.registerCommand("access-denied:status", {
+		description: "Show current access-denied status and rules",
+		handler: async (_args, ctx) => {
+			const state = getState();
 			const rules = state.pm.getRules();
 			const cwdNorm = toPosix(resolveTarget(ctx.cwd, ctx.cwd));
 			const allowConfig = rules.config.filter((r) => r.decision === "allow");
@@ -274,6 +281,16 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 			ctx.ui.notify(lines.join("\n"), "info");
+		},
+	});
+
+	// /access-denied:reset
+	pi.registerCommand("access-denied:reset", {
+		description: "Clear session allow/deny memory",
+		handler: async (_args, ctx) => {
+			const state = getState();
+			state.pm.clearSession();
+			ctx.ui.notify("Cleared session allow/deny memory", "info");
 		},
 	});
 }

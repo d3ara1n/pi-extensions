@@ -107,14 +107,14 @@ Deliberately **not** allowed: `/dev/tty` (can capture keyboard input), `/dev/dis
 
 Use `allowedPaths` to add your own always-safe roots (e.g. a log dir you always read).
 
-## Command
+## Commands
 
 ```
-/access-denied              # show status (mode, allow/deny rules, session memory)
-/access-denied prompt       # switch to prompt mode
-/access-denied deny         # switch to deny mode
-/access-denied allow        # switch to allow mode
-/access-denied reset        # clear session always-allow / always-deny memory
+/access-denied prompt        # switch to prompt mode
+/access-denied deny          # switch to deny mode
+/access-denied allow         # switch to allow mode
+/access-denied:status        # show status (mode, allow/deny rules, session memory)
+/access-denied:reset         # clear session always-allow / always-deny memory
 ```
 
 ## Path resolution

@@ -21,8 +21,7 @@ function readSettingsFile(filePath: string): any {
 	try {
 		if (!fs.existsSync(filePath)) return {};
 		const content = fs.readFileSync(filePath, "utf-8");
-		const stripped = content.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
-		return JSON.parse(stripped);
+		return JSON.parse(content);
 	} catch {
 		return {};
 	}

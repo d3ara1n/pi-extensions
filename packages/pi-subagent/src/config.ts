@@ -21,8 +21,7 @@ function readSettingsFile(filePath: string): any {
 	try {
 		if (!fs.existsSync(filePath)) return {};
 		const content = fs.readFileSync(filePath, "utf-8");
-		const stripped = content.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
-		return JSON.parse(stripped);
+		return JSON.parse(content);
 	} catch {
 		return {};
 	}
@@ -53,8 +52,16 @@ export function loadSubagentConfig(cwd?: string): SubagentConfig {
 	if (!raw) return DEFAULT_CONFIG;
 
 	const rawSummary = raw?.summary;
+	const rawHistory = raw?.history;
 	return {
 		timeoutMs: raw.timeoutMs ?? DEFAULT_CONFIG.timeoutMs,
+		maxConcurrency: raw.maxConcurrency ?? DEFAULT_CONFIG.maxConcurrency,
+		maxDepth: raw.maxDepth ?? DEFAULT_CONFIG.maxDepth,
+		maxTurns: raw.maxTurns ?? DEFAULT_CONFIG.maxTurns,
+		maxCost: raw.maxCost ?? DEFAULT_CONFIG.maxCost,
+		history: {
+			enabled: rawHistory?.enabled ?? DEFAULT_CONFIG.history.enabled,
+		},
 		summary: {
 			role: rawSummary?.role ?? DEFAULT_CONFIG.summary.role,
 			enabled: rawSummary?.enabled ?? DEFAULT_CONFIG.summary.enabled,

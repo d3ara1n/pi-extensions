@@ -5,8 +5,9 @@
  * References must appear at the start of a line (after trimming).
  * Lines inside fenced code blocks (```) are ignored.
  *
- * On session start, scans all loaded AGENTS.md files for `@path` patterns,
- * reads the referenced files, and injects their content into the system prompt.
+ * On each agent turn, scans the loaded AGENTS.md files (provided via
+ * systemPromptOptions.contextFiles) for `@path` patterns, reads the referenced
+ * files, and injects their content into the system prompt.
  *
  * Supports:
  * - Relative paths (resolved relative to the AGENTS.md file that contains the reference)
@@ -14,7 +15,7 @@
  * - Home directory: `@~/.agents/file.md`
  * - Multiple `@` references per file
  * - Recursive includes (an included file can itself contain `@` references)
- * - Cycle detection to prevent infinite recursion
+ * - Cycle detection + symlink-aware dedup (via realpath)
  * - Configurable depth and size limits via settings.contextInclude
  *
  * Syntax: A line starting with `@` followed by a path to a supported file type.
@@ -23,7 +24,7 @@
  * ```
  */
 
-import * as fs from "node:fs";
+import { readFile, realpath } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -64,7 +65,8 @@ interface IncludedDiag {
 }
 
 interface SkippedDiag {
-	ref: string; // the @-reference as written
+	/** The @-reference as written (or, for depth-overflow, a display path). */
+	ref: string;
 	resolvedPath: string;
 	reason: string;
 }
@@ -75,31 +77,31 @@ let _maxDepth = DEFAULT_MAX_DEPTH;
 let _maxBytes = DEFAULT_MAX_BYTES;
 let _lastScan: ScanDiagnostic | null = null;
 
-function loadConfig(cwd?: string): void {
-	const settings = readSettings(cwd);
+async function loadConfig(cwd?: string): Promise<void> {
+	const settings = await readSettings(cwd);
 	const config = settings?.contextInclude as ContextIncludeConfig | undefined;
 	_maxDepth = config?.maxDepth ?? DEFAULT_MAX_DEPTH;
 	_maxBytes = config?.maxBytes ?? DEFAULT_MAX_BYTES;
 }
 
 /** Read merged settings (project overrides global). */
-function readSettings(cwd?: string): Record<string, unknown> {
-	const globalSettings = readSettingsFile(path.join(os.homedir(), ".pi", "agent", "settings.json"));
+async function readSettings(cwd?: string): Promise<Record<string, unknown>> {
+	const globalSettings = await readSettingsFile(path.join(os.homedir(), ".pi", "agent", "settings.json"));
 	let projectSettings: Record<string, unknown> = {};
 	if (cwd) {
-		projectSettings = readSettingsFile(path.join(cwd, ".pi", "settings.json"));
+		projectSettings = await readSettingsFile(path.join(cwd, ".pi", "settings.json"));
 	}
 	return { ...globalSettings, ...projectSettings };
 }
 
-function readSettingsFile(filePath: string): Record<string, unknown> {
+/**
+ * Read and parse a settings file. Files must be valid JSON; any parse or read
+ * error yields an empty object (the caller falls back to defaults).
+ */
+async function readSettingsFile(filePath: string): Promise<Record<string, unknown>> {
 	try {
-		if (!fs.existsSync(filePath)) return {};
-		const content = fs.readFileSync(filePath, "utf-8");
-		const stripped = content
-			.replace(/\/\/.*$/gm, "")
-			.replace(/\/\*[\s\S]*?\*\//g, "");
-		return JSON.parse(stripped);
+		const content = await readFile(filePath, "utf-8");
+		return JSON.parse(content);
 	} catch {
 		return {};
 	}
@@ -118,7 +120,7 @@ export function extractReferences(content: string): string[] {
 	const lines = content.split("\n");
 
 	// @ at start of line, path ending with supported extension, nothing else on line
-	const refPattern = /^@([~.]?[\w./\\-]+\.(?:md|txt|yaml|yml|json|toml))$/;
+	const refPattern = /^@([~.]?[\w./-]+\.(?:md|txt|yaml|yml|json|toml))$/;
 
 	let inFencedBlock = false;
 
@@ -145,23 +147,49 @@ export function extractReferences(content: string): string[] {
 	return refs;
 }
 
+interface ResolveState {
+	/** Canonical (realpath) keys for dedup + cycle detection. */
+	visited: Set<string>;
+	results: IncludedFile[];
+	diag: ScanDiagnostic;
+	maxDepth: number;
+	maxBytes: number;
+	/** Running byte count of included content, enforced during resolution. */
+	accumulatedBytes: number;
+}
+
+/** Canonical path via realpath, falling back to a resolved path on failure. */
+async function canonicalize(filePath: string): Promise<string> {
+	try {
+		return await realpath(filePath);
+	} catch {
+		return path.resolve(filePath);
+	}
+}
+
 /**
- * Recursively resolve @path references from a file.
+ * Recursively resolve @path references from a file's content.
+ * Dedup & cycle detection use canonical (realpath) paths so symlinks to the
+ * same file are only included once.
  */
-function resolveIncludes(
+async function resolveIncludes(
 	filePath: string,
 	content: string,
-	visited: Set<string>,
+	state: ResolveState,
 	depth: number,
-	maxDepth: number,
-	results: IncludedFile[],
-	diag: ScanDiagnostic,
-): void {
-	if (depth > maxDepth) return;
+): Promise<void> {
+	if (depth > state.maxDepth) {
+		state.diag.skipped.push({
+			ref: path.relative(process.cwd(), filePath) || filePath,
+			resolvedPath: filePath,
+			reason: `max depth (${state.maxDepth}) exceeded`,
+		});
+		return;
+	}
 
-	const canonical = path.resolve(filePath);
-	if (visited.has(canonical)) return; // cycle detection
-	visited.add(canonical);
+	const canonical = await canonicalize(filePath);
+	if (state.visited.has(canonical)) return; // cycle / already processed
+	state.visited.add(canonical);
 
 	const refs = extractReferences(content);
 	const baseDir = path.dirname(canonical);
@@ -173,35 +201,54 @@ function resolveIncludes(
 		}
 
 		const resolved = path.isAbsolute(expandedRef) ? expandedRef : path.resolve(baseDir, expandedRef);
+		const real = await canonicalize(resolved);
 
-		if (visited.has(resolved)) continue; // already included or cycle
-		if (!fs.existsSync(resolved)) {
-			diag.skipped.push({ ref, resolvedPath: resolved, reason: "file not found" });
-			console.warn(`[pi-context-include] Referenced file not found: ${ref} (resolved to ${resolved})`);
+		if (state.visited.has(real)) {
+			state.diag.skipped.push({ ref, resolvedPath: resolved, reason: "already included" });
 			continue;
 		}
 
+		let includedContent: string;
 		try {
-			const includedContent = fs.readFileSync(resolved, "utf-8");
-			if (!includedContent) {
-				diag.skipped.push({ ref, resolvedPath: resolved, reason: "file is empty" });
-				continue;
-			}
-
-			results.push({ path: resolved, content: includedContent });
-
-			// Recurse into included file for nested @references
-			resolveIncludes(resolved, includedContent, visited, depth + 1, maxDepth, results, diag);
+			includedContent = await readFile(real, "utf-8");
 		} catch (err) {
-			diag.skipped.push({ ref, resolvedPath: resolved, reason: `read error: ${String(err)}` });
-			console.warn(`[pi-context-include] Failed to read ${resolved}:`, err);
+			const code = (err as NodeJS.ErrnoException)?.code;
+			state.diag.skipped.push({
+				ref,
+				resolvedPath: resolved,
+				reason: code === "ENOENT" ? "file not found" : `read error: ${String(err)}`,
+			});
+			continue;
 		}
+
+		if (!includedContent) {
+			state.diag.skipped.push({ ref, resolvedPath: resolved, reason: "file is empty" });
+			continue;
+		}
+
+		const size = includedContent.length;
+		if (state.accumulatedBytes + size > state.maxBytes) {
+			state.diag.skipped.push({
+				ref,
+				resolvedPath: resolved,
+				reason: `size limit exceeded (would reach ${state.accumulatedBytes + size} bytes)`,
+			});
+			continue;
+		}
+
+		state.visited.add(real);
+		state.results.push({ path: resolved, content: includedContent });
+		state.accumulatedBytes += size;
+		state.diag.included.push({ path: resolved, bytes: size });
+
+		// Recurse into included file for nested @references
+		await resolveIncludes(real, includedContent, state, depth + 1);
 	}
 }
 
 export default function contextIncludeExtension(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
-		loadConfig(ctx.cwd);
+		await loadConfig(ctx.cwd);
 		_lastScan = null; // reset on new session
 	});
 
@@ -273,72 +320,53 @@ export default function contextIncludeExtension(pi: ExtensionAPI) {
 			maxDepth: _maxDepth,
 		};
 
-		const allIncluded: IncludedFile[] = [];
-		const visited = new Set<string>();
+		const state: ResolveState = {
+			visited: new Set(),
+			results: [],
+			diag,
+			maxDepth: _maxDepth,
+			maxBytes: _maxBytes,
+			accumulatedBytes: 0,
+		};
 
 		for (const ctxFile of contextFiles) {
-			const rawPath = typeof ctxFile === "string" ? ctxFile : ctxFile.path;
-			if (!rawPath) {
+			if (!ctxFile.path) {
 				diag.contextFiles.push({ path: "<empty>", exists: false, error: "empty path" });
-				console.warn("[pi-context-include] Skipping context file entry with empty path");
 				continue;
 			}
-			const filePath = path.resolve(rawPath);
-			const exists = fs.existsSync(filePath);
-			if (!exists) {
+			const filePath = path.resolve(ctxFile.path);
+
+			// Context file content is already loaded by pi (systemPromptOptions);
+			// we only verify reachability here.
+			try {
+				await realpath(filePath);
+			} catch {
 				diag.contextFiles.push({ path: filePath, exists: false });
-				console.warn(`[pi-context-include] Context file not found: ${filePath}`);
 				continue;
 			}
 			diag.contextFiles.push({ path: filePath, exists: true });
 
-			try {
-				const content = fs.readFileSync(filePath, "utf-8");
-				resolveIncludes(filePath, content, visited, 0, _maxDepth, allIncluded, diag);
-			} catch (err) {
-				diag.contextFiles.push({ path: filePath, exists: true, error: `read error: ${String(err)}` });
-				console.warn(`[pi-context-include] Failed to read context file ${filePath}:`, err);
-			}
+			await resolveIncludes(filePath, ctxFile.content, state, 0);
 		}
 
-		if (allIncluded.length === 0) {
+		if (state.results.length === 0) {
 			_lastScan = diag;
 			return;
 		}
 
-		// Build the injected content with size limit
-		let totalBytes = 0;
-		const sections: string[] = [];
-
-		for (const inc of allIncluded) {
-			if (totalBytes + inc.content.length > _maxBytes) {
-				diag.skipped.push({
-					ref: path.relative(process.cwd(), inc.path) || inc.path,
-					resolvedPath: inc.path,
-					reason: `size limit exceeded (would reach ${totalBytes + inc.content.length} bytes)`,
-				});
-				console.warn(
-					`[pi-context-include] Skipping ${inc.path}: total included size would exceed ${_maxBytes} bytes`,
-				);
-				continue;
-			}
-
+		// Size limits were already enforced during resolution; here we just render.
+		const sections = state.results.map((inc) => {
 			const relativePath = path.relative(process.cwd(), inc.path) || inc.path;
-			sections.push(`--- Begin included: ${relativePath} ---\n${inc.content}\n--- End included: ${relativePath} ---`);
-			totalBytes += inc.content.length;
+			return `--- Begin included: ${relativePath} ---\n${inc.content}\n--- End included: ${relativePath} ---`;
+		});
 
-			diag.included.push({ path: inc.path, bytes: inc.content.length });
-		}
-
-		diag.totalBytes = totalBytes;
+		diag.totalBytes = state.accumulatedBytes;
 		_lastScan = diag;
-
-		if (sections.length === 0) return;
 
 		const injected = `\n\n## Included Files (via @-syntax)\n\n${sections.join("\n\n")}\n`;
 
 		return {
-			systemPrompt: systemPrompt + injected,
+			systemPrompt: (systemPrompt ?? "") + injected,
 		};
 	});
 }

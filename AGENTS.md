@@ -197,3 +197,39 @@ pi-access-denied 拦截的是整个 `tool_call`。一条 bash 命令里若 token
 **对测试的影响**：想逐个验证多条路径的判定结果（哪条 allow、哪条 deny），**不能**把它们塞进一条 `bash`（如 `cat a; cat b; cat c`）——只有第一个 block 之前的命令会跑，后面的全被吞。必须拆成多次独立的 `bash` 调用，每次一个路径，才能拿到各自的判定。
 
 **设计原因**：gate 不知道命令内部各操作是否有依赖（`A && B` 中 B 可能依赖 A 的副作用），保守起见整个 call 级别拦截最安全。这也意味着真实场景下，agent 一条复合命令里只要有一个越界路径，整条都跑不了——这也是鼓励 agent 拆分操作、显式暴露每个路径的副作用。
+
+### TypeScript 类型检查与测试命令（pi-extensions 项目结构）
+
+本项目的工具链结构决定了正确命令；本机工具链事实（node 版本、bun 未装、先探测别全盘 find）见全局 `~/.agents/node-development.md`。
+
+**项目结构：**
+- monorepo，`tsconfig.json` 只在**仓库根**，子包无独立 tsconfig（`include: ["packages/*/src/**/*.ts"]`）
+- 测试用 `node:test` + `node:assert`（Node 内置），无 bun/tsx/vitest
+
+**正确命令：**
+
+| 用途 | 命令 | 说明 |
+|------|------|------|
+| 类型检查（整个 monorepo） | `npx tsc --noEmit` | 仓库根或任意子目录均可（tsc 向上找根 tsconfig） |
+| 跑单个测试 | `node --test packages/xxx/src/__tests__/foo.test.ts` | Node 原生跑 `.ts`，零依赖 |
+
+**反模式：**
+- ❌ 子包目录 `npm run typecheck` —— 子包 `package.json` 无此 script，npm workspace 报 `Missing script`（这正是常见的“目录错误”）
+- ❌ `cd 子包 && tsc src/index.ts --noEmit` —— 绕过 tsconfig，丢类型解析和路径映射
+
+**原理：** monorepo 共享根 tsconfig，类型检查是 monorepo 级别、一次覆盖所有包。
+
+### 不要给 JSON 配置文件剥注释
+
+场景：读 pi 的 `settings.json`、npm 的 `package.json` 等**标准 JSON** 文件时，agent 常写正则剥离注释（`content.replace(/\/\/.*$/gm, "")`）想"兼容 JSONC"。这是**无用且破坏性**的。
+
+**为什么剥离是错的：**
+- 标准文件禁止注释——有注释就是语法错误，`JSON.parse` 会抛，这才是正确信号，不需要预处理
+- 正则剥离会把**字符串字面量里的 `//`** 当注释删（如 URL `"https://example.com"` 被截成 `"https:`），留下未闭合字符串 → `JSON.parse` 抛错 → `catch` 静默吞掉 → 配置失效且**完全无感**
+- 正则剥永远不安全（处理不了字符串内、转义、嵌套等）；真要 JSONC 必须用专门库（`jsonc-parser` / `strip-json-comments`）
+
+**正确做法：**
+- 读标准 JSON → **直接 `JSON.parse`**，出错让错误抛（`catch` 里降级返回默认即可），**不要预处理**
+- 只有**明确声明支持注释的格式**才需要 JSONC 解析：`tsconfig.json`、`.vscode/*.json`、显式 `.jsonc`——这些有规范支持，且必须用专门库而非正则
+
+**触发案例**：pi-context-include 早期读 `settings.json` 时写了注释剥离，会静默删掉用户配置里的 URL 值导致配置失效。已移除——直接 `JSON.parse`，非法文件自然报错。

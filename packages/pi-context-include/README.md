@@ -44,7 +44,8 @@ On each turn, the extension reads the referenced files and injects their content
 
 ## Configuration
 
-Optional, in `~/.pi/agent/settings.json` under `contextInclude`:
+Optional. Read from `~/.pi/agent/settings.json` (global), merged with
+`{project}/.pi/settings.json` (project overrides global), under `contextInclude`:
 
 ```jsonc
 {
@@ -55,6 +56,11 @@ Optional, in `~/.pi/agent/settings.json` under `contextInclude`:
 }
 ```
 
+Settings files must be valid JSON (no comments). Settings are loaded on
+session start — run `/reload` or restart pi after editing.
+
 ## Command
 
-`/context-include:status` — shows current configuration and limits.
+`/context-include:status` — shows current configuration, resolved includes, and
+any files that were skipped (missing, empty, over size/depth limits, duplicates,
+or unreadable). Run this to diagnose why a referenced file wasn't included.

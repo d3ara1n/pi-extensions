@@ -6,7 +6,7 @@
  * Fires onProgress on each event for streaming updates.
  */
 
-import { spawn } from "node:child_process";
+	import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -16,8 +16,6 @@ import type { SubagentMessage, SubagentResult } from "./types.ts";
 /** Maximum task length before writing to a temp file (avoids CLI arg limits). */
 const TASK_CHAR_LIMIT = 8000;
 
-/** Maximum output characters returned to the main model. Larger outputs are truncated. */
-const MAX_OUTPUT_CHARS = 50_000;
 
 const PI_CODING_AGENT_PACKAGE = "@earendil-works/pi-coding-agent";
 
@@ -128,6 +126,9 @@ export async function spawnSubagent(
 		systemPrompt?: string;
 		subagentRoles?: string[];
 		timeoutMs?: number;
+		depth?: number;
+		maxTurns?: number;
+		maxCost?: number;
 		signal?: AbortSignal;
 		onProgress?: (update: Partial<SubagentResult>) => void;
 	},
@@ -175,6 +176,7 @@ export async function spawnSubagent(
 		// Spawn process
 		const invocation = getPiInvocation(args);
 		let wasAborted = false;
+		let budgetExceeded = false;
 		let buffer = "";
 
 		const emitProgress = () => {
@@ -189,6 +191,21 @@ export async function spawnSubagent(
 		};
 
 		let thinkingCounter = 0;
+		// O(1) lookup from toolCallId → activityLog index (was linear find → O(n²) on busy runs)
+		const toolCallIndex = new Map<string, number>();
+
+		// Kill the child when the configured turn/cost budget is exceeded.
+		// Called after each assistant message_end (usage already accumulated).
+		const checkBudget = () => {
+			const mt = options.maxTurns ?? 0;
+			const mc = options.maxCost ?? 0;
+			if (budgetExceeded) return;
+			if ((mt > 0 && result.usage.turns >= mt) || (mc > 0 && result.usage.cost >= mc)) {
+				budgetExceeded = true;
+				result.stopReason = "budget_exceeded";
+				try { proc?.kill("SIGTERM"); } catch { /* ignore */ }
+			}
+		};
 
 		const processLine = (line: string) => {
 			if (!line.trim()) return;
@@ -212,7 +229,8 @@ export async function spawnSubagent(
 						result.usage.cacheRead += usage.cacheRead || 0;
 						result.usage.cacheWrite += usage.cacheWrite || 0;
 						result.usage.cost += usage.cost?.total || 0;
-						result.usage.contextTokens = usage.totalTokens || 0;
+						// Peak context size, not last-turn size (accumulating is meaningless; max tells how close to the limit)
+						result.usage.contextTokens = Math.max(result.usage.contextTokens, usage.totalTokens || 0);
 					}
 					if (!result.model && msg.model) result.model = msg.model;
 					if (msg.stopReason) result.stopReason = msg.stopReason;
@@ -224,6 +242,8 @@ export async function spawnSubagent(
 							result.output = part.text;
 						}
 					}
+
+					checkBudget();
 				}
 
 				emitProgress();
@@ -232,6 +252,7 @@ export async function spawnSubagent(
 			// Activity log: track thinking blocks and tool calls in arrival order.
 			// Both update in place so the TUI reflects real-time state.
 			if (event.type === "tool_execution_start" && event.toolCallId) {
+				toolCallIndex.set(event.toolCallId, result.activityLog.length);
 				result.activityLog.push({
 					kind: "toolCall",
 					id: event.toolCallId,
@@ -241,8 +262,8 @@ export async function spawnSubagent(
 				});
 				emitProgress();
 			} else if (event.type === "tool_execution_end" && event.toolCallId) {
-				const entry = result.activityLog.find((a) => a.id === event.toolCallId);
-				if (entry) entry.status = event.isError ? "failed" : "done";
+				const idx = toolCallIndex.get(event.toolCallId);
+				if (idx !== undefined) result.activityLog[idx].status = event.isError ? "failed" : "done";
 				emitProgress();
 			}
 
@@ -279,73 +300,73 @@ export async function spawnSubagent(
 		}
 		// Expose tmpdir as env var so subagent bash commands (e.g. git clone) can use it
 		childEnv.PI_SUBAGENT_TMPDIR = tmpDir;
+		// Propagate nesting depth so child delegate calls can bound recursion
+		childEnv.PI_SUBAGENT_DEPTH = String(options.depth ?? 0);
 
 		let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+		let proc: ChildProcess | undefined;
+
+		// Shared kill helper used by abort, budget, and timeout paths.
+		const killProc = (reason: "abort" | "budget" | "timeout") => {
+			if (reason === "abort") wasAborted = true;
+			try { proc?.kill("SIGTERM"); } catch { /* ignore */ }
+			setTimeout(() => {
+				try { if (proc && !proc.killed) proc.kill("SIGKILL"); } catch { /* ignore */ }
+			}, 5000);
+		};
 
 		const exitCode = await new Promise<number>((resolve) => {
-			const proc = spawn(invocation.command, invocation.args, {
+			// Register abort BEFORE spawning to close the (tiny) registration window
+			let onAbort: (() => void) | undefined;
+			if (options.signal) {
+				if (options.signal.aborted) { wasAborted = true; resolve(0); return; }
+				onAbort = () => killProc("abort");
+				options.signal.addEventListener("abort", onAbort, { once: true });
+			}
+
+			const p = spawn(invocation.command, invocation.args, {
 				cwd: options.cwd,
 				env: childEnv,
 				shell: false,
 				stdio: ["ignore", "pipe", "pipe"],
 			});
+			proc = p;
 
-			proc.stdout.on("data", (data: Buffer) => {
+			p.stdout.on("data", (data: Buffer) => {
 				buffer += data.toString();
 				const lines = buffer.split("\n");
 				buffer = lines.pop() || "";
 				for (const line of lines) processLine(line);
 			});
 
-			proc.stderr.on("data", (data: Buffer) => {
+			p.stderr.on("data", (data: Buffer) => {
 				result.stderr += data.toString();
 			});
 
-			proc.on("close", (code) => {
+			p.on("close", (code) => {
 				if (timeoutHandle) clearTimeout(timeoutHandle);
+				if (onAbort && options.signal) options.signal.removeEventListener("abort", onAbort);
 				if (buffer.trim()) processLine(buffer);
-				resolve(code ?? 0);
+				// Budget stops are intentional, not failures — surface as success with stopReason set
+				resolve(budgetExceeded ? 0 : (code ?? 0));
 			});
 
-			proc.on("error", () => {
+			p.on("error", () => {
+				if (timeoutHandle) clearTimeout(timeoutHandle);
+				if (onAbort && options.signal) options.signal.removeEventListener("abort", onAbort);
 				resolve(1);
 			});
 
-			// Handle abort signal
-			if (options.signal) {
-				const killProc = () => {
-					wasAborted = true;
-					proc.kill("SIGTERM");
-					setTimeout(() => {
-						if (!proc.killed) proc.kill("SIGKILL");
-					}, 5000);
-				};
-				if (options.signal.aborted) killProc();
-				else options.signal.addEventListener("abort", killProc, { once: true });
-			}
-
 			// Handle timeout
 			if (options.timeoutMs && options.timeoutMs > 0) {
-				timeoutHandle = setTimeout(() => {
-					if (!proc.killed) {
-						proc.kill("SIGTERM");
-						setTimeout(() => {
-							if (!proc.killed) proc.kill("SIGKILL");
-						}, 5000);
-					}
-				}, options.timeoutMs);
+				timeoutHandle = setTimeout(() => killProc("timeout"), options.timeoutMs);
 			}
 		});
 
 		result.exitCode = exitCode;
 		if (wasAborted) throw new Error("Subagent was aborted");
-
-		// Truncate large outputs: keep head (findings) + tail (summary), drop middle
-		if (result.output.length > MAX_OUTPUT_CHARS) {
-			const head = result.output.slice(0, 30_000);
-			const tail = result.output.slice(-(MAX_OUTPUT_CHARS - 30_050));
-			result.output = `[Output truncated — ${result.output.length} chars total]\n\n${head}\n\n... [truncated] ...\n\n${tail}`;
-		}
+		// NOTE: large outputs are kept raw here — compression/truncation happens in
+		// the extension layer (index.ts) so the summary model can compress first.
 	} finally {
 		// Cleanup temp directory and all contents
 		if (tmpDir) try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }

@@ -67,8 +67,27 @@ Edit `~/.pi/agent/settings.json`:
     // Default timeout per subagent (5 minutes)
     "timeoutMs": 300000,
 
+    // Max subagents running at once; extras queue with a "queued" TUI hint
+    "maxConcurrency": 4,
+
+    // Max subagent nesting depth (the main session is depth 0).
+    // Default 3 covers worker → researcher → explorer chains.
+    "maxDepth": 3,
+
+    // Turn / cost budgets (0 = unlimited). A run is killed once either is hit;
+    // partial output is returned with stopReason "budget_exceeded".
+    "maxTurns": 0,
+    "maxCost": 0,
+
+    // Audit log: one JSON per delegate run under
+    // ~/.pi/subagent/history/{sessionId}/{toolCallId}.json
+    "history": {
+      "enabled": true
+    },
+
     // Summary generation — uses a lightweight model to create
-    // a one-line summary for the TUI display
+    // a one-line summary for the TUI display.
+    // Outputs ≤ 150 chars skip the API call and reuse the text directly.
     "summary": {
       "role": "utility",    // pi-model-roles role for summarization
       "enabled": true        // set false to disable
@@ -77,7 +96,7 @@ Edit `~/.pi/agent/settings.json`:
 }
 ```
 
-All fields are optional. Defaults: `timeoutMs: 300000`, `summary.role: "utility"`, `summary.enabled: true`.
+All fields are optional. Defaults: `timeoutMs: 300000`, `maxConcurrency: 4`, `maxDepth: 3`, `maxTurns: 0` (unlimited), `maxCost: 0` (unlimited), `history.enabled: true`, `summary.role: "utility"`, `summary.enabled: true`.
 
 ### Agent Overrides
 
@@ -89,7 +108,10 @@ Override, disable, or add subagent roles via `agentOverrides`. Built-in and cust
     "agentOverrides": {
       // ── Override a built-in role (only specify changed fields) ──
       "worker": {
-        "role": "heavy"               // use a stronger model
+        "role": "heavy",              // use a stronger model
+        "timeoutMs": 600000,          // per-role timeout (overrides global)
+        "maxTurns": 50,               // per-role turn budget (0 = unlimited)
+        "maxCost": 1.0                // per-role cost ceiling in USD (0 = unlimited)
       },
 
       // ── Disable a built-in role ──
@@ -116,7 +138,7 @@ Override, disable, or add subagent roles via `agentOverrides`. Built-in and cust
 
 **Required fields for custom roles:** `role`, `description`, `examples`, `decisionTrigger`, `tools`, `systemPrompt`.
 
-**Optional fields:** `subagentRoles` (roles this role can spawn via delegate), `fallbackRole` (backup pi-model-roles role on provider errors).
+**Optional fields:** `subagentRoles` (roles this role can spawn via delegate), `timeoutMs` (per-role timeout override), `maxTurns` / `maxCost` (per-role budget overrides; 0 = unlimited), `fallbackRole` (backup pi-model-roles role on provider errors).
 
 Invalid custom roles (missing required fields) are silently skipped with an error notification at session start.
 
@@ -148,6 +170,32 @@ Delegate tasks that would generate many tool calls or verbose output to keep you
   { "role": "researcher", "task": "Find latest docs on the library used here" }
 ]
 ```
+
+### Passing extra context
+
+The optional `context` field lets you hand a subagent precise context — selected code, a prior delegate's result, a file list, a git diff — without inflating the `task` string. It's prepended before the task:
+
+```json
+{
+  "role": "worker",
+  "task": "Add input validation to the login function",
+  "context": "Current implementation (src/auth.ts:42-70):\n```ts\nasync function login(email, pw) { ... }\n```\nValidation must reject empty/invalid emails and enforce a min 8-char password."
+}
+```
+
+The stored/displayed task stays as the original `task`; the `context` is merged into the prompt the subagent receives.
+
+### Budget enforcement
+
+`maxTurns` / `maxCost` cap a run. When exceeded, the child is killed and the last completed output is returned with `stopReason: "budget_exceeded"` (shown in the expanded TUI). Defaults are unlimited (0); set global defaults in config or per-role via `agentOverrides`.
+
+### Oversized outputs
+
+When a run's output exceeds the size limit (50,000 chars), pi-subagent first tries to **compress** it with the summary model (same role configured under `summary.role`) into a compact form that preserves conclusions, code, file paths, and errors. If compression fails or doesn't shrink enough, it falls back to mechanical head+tail truncation. The prepared text is what the main model receives and what the expanded TUI renders; a hint line notes which method was used. The **full raw output is always kept in the history file** for auditing.
+
+### Run history
+
+Every completed delegate run is written (best-effort) to `~/.pi/subagent/history/{sessionId}/{toolCallId}.json`, recording role, task, usage, activity log, and the **full raw output** (even when the main model saw a compressed/truncated version). Useful for auditing what subagents did and how much they cost. Disable with `history.enabled: false`.
 
 ## License
 

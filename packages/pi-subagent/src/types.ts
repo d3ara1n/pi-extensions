@@ -5,6 +5,16 @@
 /** Configuration for the subagent extension. */
 export interface SubagentConfig {
   timeoutMs: number;
+  /** Max number of subagents allowed to run concurrently. Extras queue with a TUI hint. */
+  maxConcurrency: number;
+  /** Max subagent nesting depth (the top-level session is depth 0). */
+  maxDepth: number;
+  /** Default turn budget (0 = unlimited). Per-role maxTurns overrides this. */
+  maxTurns: number;
+  /** Default cost budget in USD (0 = unlimited). Per-role maxCost overrides this. */
+  maxCost: number;
+  /** Persist each delegate run to .pi/subagent/history/{sessionId}/{id}.json for auditing. */
+  history: SubagentHistoryConfig;
   summary: SubagentSummaryConfig;
   /**
    * Per-role overrides from settings.json. Keyed by role name.
@@ -14,6 +24,10 @@ export interface SubagentConfig {
   agentOverrides: Record<string, Partial<SubagentRole> & { disabled?: boolean }>;
 }
 
+export interface SubagentHistoryConfig {
+  enabled: boolean;
+}
+
 export interface SubagentSummaryConfig {
   role: string;
   enabled: boolean;
@@ -21,6 +35,11 @@ export interface SubagentSummaryConfig {
 
 export const DEFAULT_CONFIG: SubagentConfig = {
   timeoutMs: 300_000,
+  maxConcurrency: 4,
+  maxDepth: 3,
+  maxTurns: 0,
+  maxCost: 0,
+  history: { enabled: true },
   summary: { role: "utility", enabled: true },
   agentOverrides: {},
 };
@@ -41,6 +60,12 @@ export interface SubagentRole {
   tools: string[];
   /** If this role has `delegate`, restrict which roles it may spawn. undefined = no restriction. */
   subagentRoles?: string[];
+  /** Per-role timeout override (ms). Falls back to config.timeoutMs when unset. */
+  timeoutMs?: number;
+  /** Max assistant turns before the run is killed (0 = use config default; unset = unlimited). */
+  maxTurns?: number;
+  /** Max cumulative cost (USD) before the run is killed (0 = use config default; unset = unlimited). */
+  maxCost?: number;
   /** Fallback pi-model-roles role name when this role's model is unavailable (provider error). Defaults to "default". */
   fallbackRole?: string;
 }
@@ -102,6 +127,10 @@ export interface SubagentResult {
   task: string;
   /** Process exit code (-1 = still running for streaming) */
   exitCode: number;
+  /** True while waiting for a concurrency slot (TUI hint only). */
+  queued?: boolean;
+  /** How `output` was prepared for display: raw, compressed by summary model, or mechanically truncated. */
+  outputMethod?: "raw" | "compressed" | "truncated";
   /** All messages from the event stream (assistant + tool results) */
   messages: SubagentMessage[];
   /** Last assistant text output */

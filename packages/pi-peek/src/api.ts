@@ -41,7 +41,7 @@ export function initPeekAPI(deps: PeekDeps): PeekAPI {
 
 		async investigate(question, opts: InvestigateOptions = {}): Promise<InvestigateResult> {
 			const ref = opts.referenceText ?? api.serializeMainConversation();
-			return investigateWithReference(ref, question, opts);
+			return investigateWithReference(ref, question, { ...opts, role: opts.role ?? cfg.role });
 		},
 
 		getMainAgentStatus(): MainAgentStatus {

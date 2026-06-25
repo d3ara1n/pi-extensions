@@ -30,7 +30,8 @@ Optional tuning in `~/.pi/agent/settings.json` under `peek`:
   "peek": {
     "recentTurns": 10,        // keep the most recent N user-initiated turns
     "maxChars": 50000,        // hard cap on total serialized characters
-    "toolResultLimit": 500    // truncate a single tool result longer than this
+    "toolResultLimit": 500,   // truncate a single tool result longer than this
+    "role": "utility"         // model role for consult (e.g. "default" for higher quality)
   }
 }
 ```

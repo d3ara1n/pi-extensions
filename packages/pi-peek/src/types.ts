@@ -21,14 +21,17 @@ export interface PeekConfig {
 	maxChars?: number;
 	/** Serialize: truncate a single tool result longer than this. */
 	toolResultLimit?: number;
+	/** Model role to use for consult (resolved via pi-model-roles). Default: "utility". */
+	role?: string;
 }
 
 export const DEFAULT_PEEK_CONFIG: Required<
-	Pick<PeekConfig, "recentTurns" | "maxChars" | "toolResultLimit">
+	Pick<PeekConfig, "recentTurns" | "maxChars" | "toolResultLimit" | "role">
 > = {
 	recentTurns: 10,
 	maxChars: 50_000,
 	toolResultLimit: 500,
+	role: "utility",
 };
 
 // ---------------------------------------------------------------------------
@@ -61,6 +64,8 @@ export interface InvestigateOptions {
 	onStage?: (stage: string) => void;
 	/** Abort the investigation. */
 	signal?: AbortSignal;
+	/** Model role to use for consult (resolved via pi-model-roles). Overrides config default. */
+	role?: string;
 }
 
 export interface InvestigateResult {

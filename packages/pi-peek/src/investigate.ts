@@ -37,7 +37,8 @@ export async function investigateWithReference(
 	opts: InvestigateOptions = {},
 ): Promise<InvestigateResult> {
 	const rolesApi = getModelRolesAPI();
-	const resolved = await rolesApi.resolveRoleAsync("utility");
+	const roleName = opts.role ?? "utility";
+	const resolved = await rolesApi.resolveRoleAsync(roleName);
 	if (!resolved.model) {
 		throw new Error(
 			"peek: utility model unavailable. Configure the `utility` role in pi-model-roles.",

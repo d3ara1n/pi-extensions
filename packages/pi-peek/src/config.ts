@@ -57,5 +57,6 @@ export function loadPeekConfig(cwd?: string): PeekConfig {
 		recentTurns: raw.recentTurns ?? DEFAULT_PEEK_CONFIG.recentTurns,
 		maxChars: raw.maxChars ?? DEFAULT_PEEK_CONFIG.maxChars,
 		toolResultLimit: raw.toolResultLimit ?? DEFAULT_PEEK_CONFIG.toolResultLimit,
+		role: raw.role ?? DEFAULT_PEEK_CONFIG.role,
 	};
 }

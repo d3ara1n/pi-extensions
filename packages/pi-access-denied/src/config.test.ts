@@ -7,7 +7,7 @@
  * loadConfig reads real files (global ~/.pi/agent/settings.json + project
  * .pi/settings.json), but exposes a PI_AGENT_DIR override for the global dir.
  * So we spin up temp dirs, write settings files, and assert end-to-end — this
- * covers the full chain including JSONC comment stripping, file-not-found
+ * covers the full chain including strict-JSON rejection of comments, file-not-found
  * fallback, parse-failure fallback, and global/project shallow merge, not just
  * the field coercers.
  *
@@ -48,7 +48,7 @@ function teardown(): void {
 	}
 }
 
-/** Write the GLOBAL settings.json (object → JSON, or a raw string for malformed/JSONC). */
+/** Write the GLOBAL settings.json (object → JSON, or a raw string for malformed/commented JSON). */
 function writeGlobal(objOrRaw: unknown): void {
 	const content = typeof objOrRaw === "string" ? objOrRaw : JSON.stringify(objOrRaw);
 	fs.writeFileSync(path.join(tmpGlobal, "settings.json"), content);
@@ -329,11 +329,16 @@ describe("tools", () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// File IO: JSONC, missing files, parse failures
+// File IO: strict JSON, missing files, parse failures
 // ────────────────────────────────────────────────────────────────────────────
 
-describe("JSONC: line + block comments are stripped before parse", () => {
-	test("single-line comments", () => {
+describe("settings.json is strict JSON (comments are NOT stripped)", () => {
+	// settings.json is standard JSON and does not allow comments. We must NOT
+	// pre-strip them — a regex strip would corrupt string literals containing
+	// "//" (e.g. URLs like "https://…") into un-closable strings and silently
+	// drop the whole config. Malformed JSON instead falls through to the
+	// parse-failure fallback (all defaults).
+	test("single-line comments → parse fails → all defaults", () => {
 		writeGlobal(`{
 			"accessDenied": {
 				"mode": "deny", // inline comment
@@ -341,19 +346,19 @@ describe("JSONC: line + block comments are stripped before parse", () => {
 			}
 		}`);
 		const cfg = loadConfig(tmpProject);
-		assert.equal(cfg.mode, "deny");
-		assert.deepEqual(cfg.allowedPaths, ["~/notes"]);
+		assert.equal(cfg.mode, DEFAULT_CONFIG.mode);
+		assert.deepEqual(cfg.allowedPaths, DEFAULT_CONFIG.allowedPaths);
 	});
 
-	test("block comments", () => {
+	test("block comments → parse fails → all defaults", () => {
 		writeGlobal(`{
 			/* global access config */
 			"accessDenied": {
-				"mode": /* weird placement */ "allow"
+				"mode": "allow"
 			}
 		}`);
 		const cfg = loadConfig(tmpProject);
-		assert.equal(cfg.mode, "allow");
+		assert.equal(cfg.mode, DEFAULT_CONFIG.mode);
 	});
 });
 

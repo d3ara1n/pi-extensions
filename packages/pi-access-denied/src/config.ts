@@ -17,16 +17,12 @@ function getAgentDir(): string {
 	return path.join(os.homedir(), ".pi", "agent");
 }
 
-/** Read and parse a settings.json file (JSONC-aware). Returns parsed object or {}. */
+/** Read and parse a settings.json file. Returns parsed object or {}. */
 function readSettingsFile(filePath: string): any {
 	try {
 		if (!fs.existsSync(filePath)) return {};
 		const content = fs.readFileSync(filePath, "utf-8");
-		// Strip JSONC comments
-		const stripped = content
-			.replace(/\/\/.*$/gm, "")
-			.replace(/\/\*[\s\S]*?\*\//g, "");
-		return JSON.parse(stripped);
+		return JSON.parse(content);
 	} catch {
 		return {};
 	}

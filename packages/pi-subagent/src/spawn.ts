@@ -13,8 +13,8 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SubagentMessage, SubagentResult } from "./types.ts";
 
-/** Maximum task length before writing to a temp file (avoids CLI arg limits). */
-const TASK_CHAR_LIMIT = 8000;
+/** Max chars for an inline channel block (context or task) before it spills to a temp @file. */
+const INLINE_LIMIT = 8000;
 
 
 const PI_CODING_AGENT_PACKAGE = "@earendil-works/pi-coding-agent";
@@ -124,6 +124,10 @@ export async function spawnSubagent(
 		cwd?: string;
 		tools?: string[];
 		systemPrompt?: string;
+		/** Extra context delivered as a separate channel from the task. */
+		context?: string;
+		/** Reference file paths injected as independent @file args (child reads them directly). */
+		contextFiles?: string[];
 		subagentRoles?: string[];
 		timeoutMs?: number;
 		depth?: number;
@@ -145,7 +149,6 @@ export async function spawnSubagent(
 	};
 
 	let tmpDir: string | null = null;
-	let tmpFile: string | null = null;
 
 	try {
 		// Build CLI args
@@ -155,23 +158,71 @@ export async function spawnSubagent(
 			args.push("--tools", options.tools.join(","));
 		}
 
-		// Always create temp dir — used for prompt file, long task file, and as PI_SUBAGENT_TMPDIR for subagent work (e.g. git clone)
+		// Temp dir for: large-context/task spill files, and as PI_SUBAGENT_TMPDIR
+		// for subagent bash work (e.g. git clone). The system prompt no longer uses it.
 		tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-subagent-"));
 
-		const promptContent = options.systemPrompt?.trim()
-			? options.systemPrompt + `\n\nPI_SUBAGENT_TMPDIR=${tmpDir}`
-			: `PI_SUBAGENT_TMPDIR=${tmpDir}`;
-		tmpFile = path.join(tmpDir, "prompt.md");
-		await fs.promises.writeFile(tmpFile, promptContent, { encoding: "utf-8", mode: 0o600 });
-		args.push("--append-system-prompt", tmpFile);
+		// ── System prompt channel: inline text via --append-system-prompt ──
+		// pi's resolvePromptInput treats an existing path as a file to read and any
+		// non-path string as literal text, so we pass structured blocks directly —
+		// no temp file, zero disk I/O. Multiple flags are joined with "\n\n".
+		if (options.systemPrompt?.trim()) {
+			args.push(
+				"--append-system-prompt",
+				`<subagent_role>\n${options.systemPrompt.trim()}\n</subagent_role>`,
+			);
+		}
+		args.push(
+			"--append-system-prompt",
+			`<subagent_env>\nPI_SUBAGENT_TMPDIR=${tmpDir}\nAvailable as $PI_SUBAGENT_TMPDIR in bash. Use for git clone and scratch files.\n</subagent_env>`,
+		);
 
-		if (task.length > TASK_CHAR_LIMIT) {
+		// ── Context channel: independent size gate ──
+		// Large context spills to @ctx.md (pi auto-wraps in <file>); small context
+		// inlines as a structured <context> tag. Decoupled from the task gate so a
+		// large context never drags a short task into a spill file.
+		let contextInline = false;
+		if (options.context && options.context.trim()) {
+			if (options.context.length > INLINE_LIMIT) {
+				const ctxPath = path.join(tmpDir, "context.md");
+				await fs.promises.writeFile(ctxPath, options.context, { encoding: "utf-8", mode: 0o600 });
+				args.push(`@${ctxPath}`);
+			} else {
+				contextInline = true;
+			}
+		}
+
+		// ── Reference files channel: each as an independent @ argument ──
+		// pi reads each and wraps in <file name="...">. Content never enters the
+		// parent model's context — the child reads it directly.
+		if (options.contextFiles) {
+			for (const f of options.contextFiles) {
+				args.push(`@${f}`);
+			}
+		}
+
+		// ── Task channel: always inline, always the final block ──
+		// The task is an instruction, not reference material — it stays inline so the
+		// child sees it as the primary directive. A pathologically long task spills.
+		let taskInline = true;
+		if (task.length > INLINE_LIMIT) {
 			const taskPath = path.join(tmpDir, "task.md");
 			await fs.promises.writeFile(taskPath, task, { encoding: "utf-8", mode: 0o600 });
 			args.push(`@${taskPath}`);
-		} else {
-			args.push(`Task: ${task}`);
+			taskInline = false;
 		}
+
+		// ── Compose the message body (inline context + task) ──
+		// @file args are injected by pi BEFORE this message (buildInitialMessage),
+		// so the final shape the child sees is:
+		//   [<file>...spilled context / reference files...</file>]
+		//   [<context>...inline context...</context>]
+		//   [<task>...task...</task>]
+		const messageParts: string[] = [];
+		if (contextInline) messageParts.push(`<context>\n${options.context}\n</context>`);
+		if (taskInline) messageParts.push(`<task>\n${task}\n</task>`);
+		const message = messageParts.join("\n\n");
+		if (message) args.push(message);
 
 		// Spawn process
 		const invocation = getPiInvocation(args);

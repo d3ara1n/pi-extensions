@@ -269,6 +269,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			"",
 			"For multiple independent substantial tasks, emit multiple delegate calls in one turn — they run in parallel.",
 			"Include ALL necessary context — subagents have no access to this conversation.",
+			"Pass reference files via the `files` parameter (e.g. files: [\"src/auth.ts\"]) instead of pasting their contents into `context` — the subagent reads them directly without consuming your context window.",
 		);
 	}
 
@@ -331,7 +332,8 @@ export default function subagentExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({
 			role: Type.String({ description: "Subagent role to use" }),
 			task: Type.String({ description: "Specific task for the subagent" }),
-			context: Type.Optional(Type.String({ description: "Extra context to give the subagent (selected code, prior results, file list, etc.). Prepended before the task. Omit if the task alone is enough." })),
+			context: Type.Optional(Type.String({ description: "Extra context to give the subagent (selected code, prior results, file list, etc.). Delivered as a separate channel from the task. Omit if the task alone is enough." })),
+			files: Type.Optional(Type.Array(Type.String(), { description: "Reference file paths for the subagent to read directly (e.g. [\"src/auth.ts\", \"docs/api.md\"]). Injected as @file attachments — content stays out of your context window. Prefer this over pasting file contents into context." })),
 			cwd: Type.Optional(Type.String({ description: "Working directory (defaults to current)" })),
 		}),
 
@@ -363,12 +365,6 @@ export default function subagentExtension(pi: ExtensionAPI) {
 					isError: true,
 				};
 			}
-
-			// #12: prepend optional extra context so the subagent gets precise info
-			// without cramming everything into the task string.
-			const effectiveTask = params.context
-				? `## Context\n\n${params.context}\n\n---\n\n## Task\n\n${params.task}`
-				: params.task;
 
 			// Throttle state hoisted to the execute scope so the finally block can clear it.
 			// (try-body `let` is invisible to catch/finally — JS gives each its own block scope.)
@@ -505,10 +501,12 @@ export default function subagentExtension(pi: ExtensionAPI) {
 					});
 				}
 
-				let result = await spawnSubagent(modelRef, effectiveTask, {
+				let result = await spawnSubagent(modelRef, params.task, {
 					cwd: params.cwd ?? ctx.cwd,
 					tools: roleDef.tools,
 					systemPrompt: roleDef.systemPrompt,
+					context: params.context,
+					contextFiles: params.files,
 					subagentRoles: roleDef.subagentRoles,
 					timeoutMs: effectiveTimeoutMs(roleDef, config.timeoutMs),
 					maxTurns: roleDef.maxTurns ?? config.maxTurns,
@@ -525,10 +523,12 @@ export default function subagentExtension(pi: ExtensionAPI) {
 					const fallback = await rolesApi.resolveRoleAsync(roleDef.fallbackRole);
 					if (fallback.model) {
 						const fbRef = `${fallback.model.provider}/${fallback.model.id}`;
-						result = await spawnSubagent(fbRef, effectiveTask, {
+						result = await spawnSubagent(fbRef, params.task, {
 							cwd: params.cwd ?? ctx.cwd,
 							tools: roleDef.tools,
 							systemPrompt: roleDef.systemPrompt,
+							context: params.context,
+							contextFiles: params.files,
 							subagentRoles: roleDef.subagentRoles,
 							timeoutMs: effectiveTimeoutMs(roleDef, config.timeoutMs),
 							maxTurns: roleDef.maxTurns ?? config.maxTurns,

@@ -311,7 +311,14 @@ export async function spawnSubagent(
 		const escalationTimers: ReturnType<typeof setTimeout>[] = [];
 		const killProc = (reason: "abort" | "budget" | "timeout") => {
 			if (reason === "abort") wasAborted = true;
-			else if (reason === "budget") result.stopReason = "budget_exceeded";
+			else if (reason === "budget") {
+				result.stopReason = "budget_exceeded";
+				// Human-readable so the caller/TUI never falls back to raw stderr noise.
+				const mt = options.maxTurns ?? 0;
+				const mc = options.maxCost ?? 0;
+				const why = mt > 0 && result.usage.turns >= mt ? `${result.usage.turns} turns` : `$${result.usage.cost.toFixed(4)}`;
+				result.errorMessage = `Budget exceeded (${why}; partial output returned)`;
+			}
 			else if (reason === "timeout") {
 				result.stopReason = "timeout";
 				wasTimeout = true;

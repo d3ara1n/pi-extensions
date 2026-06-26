@@ -364,6 +364,23 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			let pendingPartial: Partial<SubagentResult> | undefined;
 			let throttleHandle: ReturnType<typeof setTimeout> | undefined;
 
+			// Flush a terminal onUpdate so the TUI's final render reflects the
+			// real outcome (✓/✗/⏱/⏲), not a stale "running" ⏳ partial. Without it,
+			// the last onUpdate the framework saw was an exitCode:-1 progress frame,
+			// so the finished delegate block can keep showing the hourglass (residue).
+			// Hoisted to execute scope (not try-body) so catch can flush on abort too.
+			const emitFinal = (results: SubagentResult[], text: string) => {
+				if (!onUpdate) return;
+				if (throttleHandle !== undefined) {
+					clearTimeout(throttleHandle);
+					throttleHandle = undefined;
+				}
+				pendingPartial = undefined;
+				onUpdate({
+					content: [{ type: "text", text }],
+					details: { mode: "single", results },
+				});
+			};
 			// Emit a "queued" placeholder before acquiring (no model info needed yet)
 			if (onUpdate) {
 				const queued: SubagentResult = {
@@ -538,13 +555,10 @@ export default function subagentExtension(pi: ExtensionAPI) {
 				}
 
 				if (result.exitCode !== 0 || result.errorMessage) {
+					const failedText = `Subagent (${params.role}) failed: ${result.errorMessage || result.stderr || "unknown error"}\n\nPartial output:\n${result.output}`;
+					emitFinal([result], failedText);
 					return {
-						content: [
-							{
-								type: "text",
-								text: `Subagent (${params.role}) failed: ${result.errorMessage || result.stderr || "unknown error"}\n\nPartial output:\n${result.output}`,
-							},
-						],
+						content: [{ type: "text", text: failedText }],
 						details: { mode: "single", results: [result] },
 						isError: true,
 					};
@@ -559,13 +573,17 @@ export default function subagentExtension(pi: ExtensionAPI) {
 				if (result.model) usageParts.push(result.model);
 				const usageLine = usageParts.length > 0 ? `\n\n--- ${usageParts.join(" ")} ---` : "";
 
+				const finalText = result.output + usageLine;
+				emitFinal([result], finalText);
 				return {
-					content: [{ type: "text", text: result.output + usageLine }],
+					content: [{ type: "text", text: finalText }],
 					details: { mode: "single", results: [result] },
 				};
 			} catch (err: any) {
+				const errorText = `Subagent (${params.role}) error: ${err.message || err}`;
+				emitFinal([], errorText);
 				return {
-					content: [{ type: "text", text: `Subagent (${params.role}) error: ${err.message || err}` }],
+					content: [{ type: "text", text: errorText }],
 					details: { mode: "single", results: [] },
 					isError: true,
 				};
@@ -608,13 +626,16 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			const isRunning = r.exitCode === -1;
 			const isError = !isRunning && isFailedResult(r);
 			const isTimeout = !isRunning && r.stopReason === "timeout";
+			const isBudget = !isRunning && r.stopReason === "budget_exceeded";
 			let icon: string;
 			if (isRunning) {
-				icon = theme.fg("warning", "\u23F3"); // hourglass
+				icon = theme.fg("warning", "\u23F3"); // ⏳ hourglass — time flowing
 			} else if (isTimeout) {
-				icon = theme.fg("warning", "\u231B"); // stopwatch
+				icon = theme.fg("warning", "\u23F1"); // ⏱ stopwatch — time ran out
+			} else if (isBudget) {
+				icon = theme.fg("warning", "\u23F2"); // ⏲ timer — budget exhausted
 			} else if (isError) {
-				icon = theme.fg("error", "\u2717");
+				icon = theme.fg("error", "\u2717"); // ✗
 			} else {
 				icon = theme.fg("success", "\u2713");
 			}
@@ -629,7 +650,9 @@ export default function subagentExtension(pi: ExtensionAPI) {
 				if (isError && r.stopReason) header += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
 				container.addChild(new Text(header, 0, 0));
 				if (isTimeout && r.errorMessage)
-					container.addChild(new Text(theme.fg("warning", `\u231B ${r.errorMessage}`), 0, 0));
+					container.addChild(new Text(theme.fg("warning", `\u23F1 ${r.errorMessage}`), 0, 0));
+				else if (isBudget && r.errorMessage)
+					container.addChild(new Text(theme.fg("warning", `\u23F2 ${r.errorMessage}`), 0, 0));
 				else if (isError && r.errorMessage)
 					container.addChild(new Text(theme.fg("error", `Error: ${r.errorMessage}`), 0, 0));
 
@@ -705,7 +728,10 @@ export default function subagentExtension(pi: ExtensionAPI) {
 				}
 				if (isTimeout) {
 					const msg = r.errorMessage || "Timed out";
-					text += `\n${theme.fg("warning", `\u231B ${msg}`)}`;
+					text += `\n${theme.fg("warning", `\u23F1 ${msg}`)}`;
+				} else if (isBudget) {
+					const msg = r.errorMessage || "Budget exceeded";
+					text += `\n${theme.fg("warning", `\u23F2 ${msg}`)}`;
 				} else if (isError) {
 					const errMsg = r.errorMessage || (r.stderr ? r.stderr.trim().split("\n")[0].slice(0, 80) : r.stopReason);
 					if (errMsg) text += `\n${theme.fg("error", `Error: ${errMsg}`)}`;

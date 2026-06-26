@@ -23,6 +23,7 @@ import {
 	SelectList,
 	Text,
 } from "@earendil-works/pi-tui";
+import { resolveShortcutKey } from "./config.ts";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -389,7 +390,7 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionContext): Prom
 // ── Extension entry point ──────────────────────────────────────────
 
 export default function commandPaletteExtension(pi: ExtensionAPI) {
-	pi.registerShortcut("ctrl+shift+p", {
+	pi.registerShortcut(resolveShortcutKey(), {
 		description: "Open command palette",
 		handler: async (ctx) => {
 			await showCommandPalette(pi, ctx);

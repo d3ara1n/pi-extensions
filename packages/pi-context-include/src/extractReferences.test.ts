@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import * as assert from "node:assert";
-import { extractReferences } from "../index.ts";
+import { extractReferences } from "./index.ts";
 
 describe("extractReferences", () => {
 	// ── basic resolution ──

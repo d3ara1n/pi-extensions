@@ -13,7 +13,7 @@
 - **Cycle detection**: prevents infinite include loops
 - **Size guard**: 500KB total limit, 10 levels deep (configurable)
 
-## Install
+## Installation
 
 ```bash
 pi install npm:@d3ara1n/pi-context-include
@@ -21,7 +21,7 @@ pi install npm:@d3ara1n/pi-context-include
 
 ## Dependencies
 
-- [`@earendil-works/pi-coding-agent`](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) — peer dependency, provided by the pi runtime
+None.
 
 ## Usage
 

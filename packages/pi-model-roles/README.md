@@ -11,6 +11,10 @@ Defines named model roles (e.g. "heavy", "fast", "utility") and resolves them to
 - Exposes a `ModelRolesAPI` singleton for other extensions to consume via direct import
 - **Pure library**: no tools, no commands, no event hooks
 
+## Dependencies
+
+None.
+
 ## Installation
 
 ```bash

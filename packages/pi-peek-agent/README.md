@@ -26,7 +26,7 @@ Ask another instance a question without disturbing its main conversation.
 | `at` | no | Target instance name (e.g. `"Fox"`). Omit to auto-pick the other same-project instance. |
 | `sessionId` | no | Pin a specific instance by sessionId (use when names collide). |
 
-## Install
+## Installation
 
 ```bash
 pi extension add @d3ara1n/pi-peek          # install first — provides the consult core

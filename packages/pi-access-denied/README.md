@@ -31,7 +31,11 @@ Keys: `↑`/`↓` move path focus · `←`/`→` change the focused path's actio
 
 "Always" memory uses **prefix coverage** (not exact paths): authorizing `/a/b` also covers `/a/b/c`, `/a/b/c/d`, … so you never get re-prompted for a path whose ancestor you already decided on. When you remember a **broader** path, any narrower entries it now subsumes are dropped, keeping the list minimal and the status view free of "parent listed next to its own child" oddity. Memory is **session-only** — restarting pi, `/reload`, `/new`, `/resume` all clear it.
 
-## Install
+## Dependencies
+
+None.
+
+## Installation
 
 Add the package path to the `extensions` array in `~/.pi/agent/settings.json`:
 

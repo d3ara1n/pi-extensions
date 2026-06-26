@@ -4,7 +4,11 @@ Shared types and registry for usage quota reporting in [Pi Coding Agent](https:/
 
 Provider-agnostic — any provider plugin can register itself, and any UI plugin can consume the data.
 
-## Install
+## Dependencies
+
+None.
+
+## Installation
 
 ```bash
 pi install npm:@d3ara1n/pi-usage-block-core

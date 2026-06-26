@@ -4,7 +4,11 @@ Usage quota status bar block for [Pi Coding Agent](https://pi.dev) — displays 
 
 Only shows usage when the active model's provider has a matching usage provider registered. Switching models automatically updates the display.
 
-## Install
+## Dependencies
+
+None.
+
+## Installation
 
 ```bash
 pi install npm:@d3ara1n/pi-usage-block

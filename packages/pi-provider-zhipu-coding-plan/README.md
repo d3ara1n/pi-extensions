@@ -9,7 +9,11 @@ Zhipu AI Coding Plan provider for [Pi Coding Agent](https://pi.dev) — auto-dis
 - **Usage quota reporting** — displays token usage percentage and reset countdown in the status bar
 - **No manual config** — reads API key from `~/.pi/agent/auth.json` (set via `/login`)
 
-## Install
+## Dependencies
+
+None.
+
+## Installation
 
 ```bash
 pi install npm:@d3ara1n/pi-provider-zhipu-coding-plan

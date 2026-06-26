@@ -237,7 +237,11 @@ format, which could break when a custom answer contained a colon or newline.
 | `Esc` | Cancel (or exit custom-input editor without saving) |
 | `Ctrl+\` | Collapse / expand the panel |
 
-## Install
+## Dependencies
+
+None.
+
+## Installation
 
 Add to `~/.pi/agent/settings.json`:
 

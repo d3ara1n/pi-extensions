@@ -6,7 +6,11 @@ Global command palette for [Pi Coding Agent](https://pi.dev) — press **Ctrl+Sh
 
 Pi's slash commands (`/model`, `/compact`, extension commands, etc.) only work when the editor is empty. If you've typed something and want to switch models or run a command, you're stuck. This extension opens a floating command palette via keyboard shortcut, regardless of editor state.
 
-## Install
+## Dependencies
+
+None.
+
+## Installation
 
 ```bash
 pi install npm:@d3ara1n/pi-command-palette

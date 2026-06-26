@@ -30,7 +30,7 @@ Opens a centered overlay that serializes the current conversation and streams an
 - **Live status** — header shows what the main agent is doing right now; status line shows the utility model + cumulative tokens
 - **Read-after-burn** — closing the overlay discards everything; the main session is never touched
 
-## Install
+## Installation
 
 ```bash
 pi extension add @d3ara1n/pi-peek         # install first — provides the consult core

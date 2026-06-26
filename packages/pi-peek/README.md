@@ -11,7 +11,7 @@ Core capability library for [pi](https://github.com/earendil-works/pi) — seria
 - **Tracker**: live snapshot of the local main agent's activity (tool name, turn index), hook-driven
 - **Read-after-burn**: nothing is persisted, no session file is touched, the main agent is never disturbed
 
-## Install
+## Installation
 
 ```bash
 pi extension add @d3ara1n/pi-peek

@@ -49,7 +49,7 @@ Project-level `.pi/settings.json` overrides global settings.
 
 - [`@d3ara1n/pi-model-roles`](../pi-model-roles) — model role resolution
 
-## Install
+## Installation
 
 Add to `~/.pi/agent/settings.json`:
 

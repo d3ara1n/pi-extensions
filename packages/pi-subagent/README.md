@@ -17,7 +17,7 @@ This means:
 - **Multiple subagents can run in parallel** — emit multiple `delegate` calls in one turn; pi executes them concurrently
 - **Subagents can nest subagents** — a `worker` can delegate exploration to `explorer` without returning to the main model
 
-> This design intentionally excludes chain pipelines and context-forking — those patterns are better suited when subagents act as advisors (planner, oracle), not executors.
+> This design currently focuses on single-task delegation rather than chain pipelines or context-forking — those patterns fit better when subagents act as advisors (planner, oracle) rather than executors.
 
 ## How it works
 
@@ -150,9 +150,13 @@ Delegate tasks that would generate many tool calls or verbose output to keep you
 ]
 ```
 
-### Passing extra context
+### Passing context and reference files
 
-The optional `context` field lets you hand a subagent precise context — selected code, a prior delegate's result, a file list, a git diff — without inflating the `task` string. It's prepended before the task:
+pi-subagent delivers context to the child as **independent channels**, never fused into the task string. This keeps the task an unambiguous directive and lets each channel be sized independently.
+
+#### `context` (inline text)
+
+Hand the subagent precise context — selected code, a prior delegate's result, a file list, a git diff — without inflating the `task` string. It's delivered as a separate channel:
 
 ```json
 {
@@ -162,7 +166,19 @@ The optional `context` field lets you hand a subagent precise context — select
 }
 ```
 
-The stored/displayed task stays as the original `task`; the `context` is merged into the prompt the subagent receives.
+The stored/displayed task stays as the original `task`. When small, `context` inlines as a `<context>` block; when large (over 8,000 chars) it spills to a temp file injected via `@file`, so a large context never drags a short task into a spill.
+
+#### `files` (reference paths)
+
+```json
+{
+  "role": "explorer",
+  "task": "Report the public API of the auth module",
+  "files": ["src/auth.ts", "src/auth.types.ts"]
+}
+```
+
+Each path is injected as an independent `@file` attachment the subagent reads directly. **File contents stay out of your context window** — you pass only the paths. Prefer this over pasting file contents into `context`, since the child receives the content on its first turn without spending a tool call to read it.
 
 ### Budget enforcement
 

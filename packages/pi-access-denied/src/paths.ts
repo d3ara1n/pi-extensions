@@ -52,6 +52,8 @@ export function toPosix(p: string): string {
 /**
  * POSIX-style prefix check (separator `/`). Pure — usable on any platform to
  * test a posix-normalized target against a posix-normalized root.
+ *
+ * @internal — exported for testing; use {@link underRoot} in production.
  */
 export function posixUnder(posixTarget: string, posixRoot: string): boolean {
 	return posixTarget === posixRoot || posixTarget.startsWith(posixRoot + "/");

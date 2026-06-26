@@ -112,7 +112,7 @@ async function readSettingsFile(filePath: string): Promise<Record<string, unknow
  * Only lines starting with @ (after trim) are matched.
  * Lines inside fenced code blocks (```) are ignored.
  *
- * Exported for testing.
+ * @internal — exported for testing.
  */
 export function extractReferences(content: string): string[] {
 	const refs: string[] = [];

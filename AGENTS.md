@@ -211,7 +211,7 @@ pi-access-denied 拦截的是整个 `tool_call`。一条 bash 命令里若 token
 | 用途 | 命令 | 说明 |
 |------|------|------|
 | 类型检查（整个 monorepo） | `npx tsc --noEmit` | 仓库根或任意子目录均可（tsc 向上找根 tsconfig） |
-| 跑单个测试 | `node --test packages/xxx/src/__tests__/foo.test.ts` | Node 原生跑 `.ts`，零依赖 |
+| 跑单个测试 | `node --test packages/xxx/src/*.test.ts` | Node 原生跑 `.ts`，零依赖 |
 
 **反模式：**
 - ❌ 子包目录 `npm run typecheck` —— 子包 `package.json` 无此 script，npm workspace 报 `Missing script`（这正是常见的“目录错误”）
@@ -233,3 +233,22 @@ pi-access-denied 拦截的是整个 `tool_call`。一条 bash 命令里若 token
 - 只有**明确声明支持注释的格式**才需要 JSONC 解析：`tsconfig.json`、`.vscode/*.json`、显式 `.jsonc`——这些有规范支持，且必须用专门库而非正则
 
 **触发案例**：pi-context-include 早期读 `settings.json` 时写了注释剥离，会静默删掉用户配置里的 URL 值导致配置失效。已移除——直接 `JSON.parse`，非法文件自然报错。
+
+### 仅测试导出的内部函数必须标记 `@internal`
+
+当某个函数只在测试中使用（或除了生产代码外还被测试读取），但**不应该暴露给消费者**作为公共 API 时，必须在 JSDoc 中标注 `@internal`。否则它会出现在 IDE 自动补全中，污染消费者的类型推导。
+
+```typescript
+/**
+ * @internal — exported for testing; use {@link underRoot} in production.
+ */
+export function posixUnder(posixTarget: string, posixRoot: string): boolean {
+```
+
+**判断标准**：
+- 如果函数是纯工具函数、生产代码不直接用（或只作为内部实现细节），但需要单独测 → `@internal`
+- 如果函数本身就是公共 API、多个生产模块都会 import → 不需要 `@internal`
+
+**本仓库案例**：
+- `pi-access-denied` 的 `posixUnder` — `underRoot` 的内部实现，仅测试单独验证 → `@internal`
+- `pi-context-include` 的 `extractReferences` — 生产代码也调用，但消费者不应直接使用 → `@internal`

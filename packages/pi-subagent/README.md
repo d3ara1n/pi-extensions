@@ -51,7 +51,7 @@ This means:
 
 - [`@d3ara1n/pi-model-roles`](../pi-model-roles) — model role resolution
 
-## Installation
+## Install
 
 ```bash
 pi install @d3ara1n/pi-subagent
@@ -61,36 +61,20 @@ pi install @d3ara1n/pi-subagent
 
 Edit `~/.pi/agent/settings.json`:
 
-```jsonc
+```json
 {
   "subagent": {
-    // Default timeout per subagent (10 minutes)
     "timeoutMs": 600000,
-
-    // Max subagents running at once; extras queue with a "queued" TUI hint
     "maxConcurrency": 4,
-
-    // Max subagent nesting depth (the main session is depth 0).
-    // Default 3 covers worker → researcher → explorer chains.
     "maxDepth": 3,
-
-    // Turn / cost budgets (0 = unlimited). A run is killed once either is hit;
-    // partial output is returned with stopReason "budget_exceeded".
     "maxTurns": 0,
     "maxCost": 0,
-
-    // Audit log: one JSON per delegate run under
-    // ~/.pi/subagent/history/{sessionId}/{toolCallId}.json
     "history": {
       "enabled": true
     },
-
-    // Summary generation — uses a lightweight model to create
-    // a one-line summary for the TUI display.
-    // Outputs ≤ 150 chars skip the API call and reuse the text directly.
     "summary": {
-      "role": "utility",    // pi-model-roles role for summarization
-      "enabled": true        // set false to disable
+      "role": "utility",
+      "enabled": true
     }
   }
 }
@@ -102,24 +86,19 @@ All fields are optional. Defaults: `timeoutMs: 600000` (10 min; roles that can `
 
 Override, disable, or add subagent roles via `agentOverrides`. Built-in and custom roles are treated equally — all descriptions, examples, and decision triggers feed into the LLM's prompt dynamically.
 
-```jsonc
+```json
 {
   "subagent": {
     "agentOverrides": {
-      // ── Override a built-in role (only specify changed fields) ──
       "worker": {
-        "role": "heavy",              // use a stronger model
-        "timeoutMs": 600000,          // per-role timeout (overrides global)
-        "maxTurns": 50,               // per-role turn budget (0 = unlimited)
-        "maxCost": 1.0                // per-role cost ceiling in USD (0 = unlimited)
+        "role": "heavy",
+        "timeoutMs": 600000,
+        "maxTurns": 50,
+        "maxCost": 1.0
       },
-
-      // ── Disable a built-in role ──
       "reviewer": {
         "disabled": true
       },
-
-      // ── Add a custom role (all required fields must be provided) ──
       "tester": {
         "role": "default",
         "description": "Test automation & QA — write and run tests, validate fixes. Tools: read, bash, edit, write, grep. Can delegate to explorer.",

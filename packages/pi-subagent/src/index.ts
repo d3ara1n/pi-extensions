@@ -127,10 +127,10 @@ async function compressOutput(
 		);
 
 		const compressed =
-			result.content
-				?.filter((block: any) => block.type === "text")
-				?.map((block: any) => block.text)
-				?.join("") ?? "";
+			(result.content as Array<{ type: string; text?: string }> | undefined)
+				?.filter((block) => block.type === "text")
+				.map((block) => block.text ?? "")
+				.join("") || "";
 
 		if (!compressed.trim()) return { text: truncateOutput(text), method: "truncated" };
 		// Model may not compress enough — fall back to truncation so we stay within budget
@@ -183,11 +183,11 @@ async function generateSummary(
 			},
 		);
 
-		const text = result.content
-			?.filter((block: any) => block.type === "text")
-			?.map((block: any) => block.text)
-			?.join("")
-			?.trim();
+		const text = (result.content as Array<{ type: string; text?: string }> | undefined)
+			?.filter((block) => block.type === "text")
+			.map((block) => block.text ?? "")
+			.join("")
+			.trim();
 
 		return text || undefined;
 	} catch {
@@ -273,7 +273,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 	}
 
 	// Apply agent overrides on top of built-in roles
-	function applyAgentOverrides(roles: Record<string, SubagentRole>, overrides: Record<string, any>): void {
+	function applyAgentOverrides(roles: Record<string, SubagentRole>, overrides: Record<string, Partial<SubagentRole> & { disabled?: boolean }>): void {
 		for (const [name, override] of Object.entries(overrides)) {
 			if (override.disabled) {
 				delete roles[name];
@@ -292,6 +292,16 @@ export default function subagentExtension(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		config = loadSubagentConfig(ctx.cwd);
 		concurrencyGate = new AsyncSemaphore(config.maxConcurrency);
+
+		// Rebuild from BUILTIN_ROLES (respecting ALLOWLIST) so repeated
+		// session_start is idempotent — overrides from prior sessions don't accumulate.
+		for (const key of Object.keys(availableRoles)) delete availableRoles[key];
+		for (const [name, role] of Object.entries(BUILTIN_ROLES)) {
+			if (!ALLOWLIST || ALLOWLIST.includes(name)) {
+				availableRoles[name] = role;
+			}
+		}
+
 		applyAgentOverrides(availableRoles, config.agentOverrides);
 
 		// Validate custom roles (skip built-in roles — they already have all fields)
@@ -326,6 +336,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 		}),
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+			const gate = concurrencyGate;
 			const roleDef = availableRoles[params.role];
 			if (!roleDef) {
 				return {
@@ -402,7 +413,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 
 			// Acquire a concurrency slot (abortable while queued)
 			try {
-				await concurrencyGate.acquire(signal);
+				await gate.acquire(signal);
 			} catch {
 				return {
 					content: [{ type: "text", text: `Subagent (${params.role}) was cancelled while queued.` }],
@@ -595,7 +606,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 				// delegates (worker → explorer): the inner crash surfaces as TUI escapes.
 				if (throttleHandle !== undefined) clearTimeout(throttleHandle);
 				pendingPartial = undefined;
-				concurrencyGate.release();
+				gate.release();
 			}
 		},
 

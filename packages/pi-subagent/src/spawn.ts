@@ -6,7 +6,7 @@
  * Fires onProgress on each event for streaming updates.
  */
 
-	import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -361,14 +361,24 @@ export async function spawnSubagent(
 				result.stderr += data.toString();
 			});
 
-			p.on("close", (code) => {
+			p.on("close", (code, signal) => {
 				if (timeoutHandle) clearTimeout(timeoutHandle);
 				for (const t of escalationTimers) clearTimeout(t);
 				if (onAbort && options.signal) options.signal.removeEventListener("abort", onAbort);
 				if (buffer.trim()) processLine(buffer);
-				// Budget stops are intentional (success); timeouts are failures (exit 124, Unix convention);
-				// otherwise use the real exit code (signal kills yield null → 0).
-				resolve(budgetExceeded ? 0 : (wasTimeout ? 124 : (code ?? 0)));
+
+				// External signal death (OOM killer, segfault, kill -9 from elsewhere)
+				// that we didn't trigger. Distinguish from our own budget/timeout/abort kills
+				// which set the flags before we send the signal.
+				const externalKill = signal !== null && !budgetExceeded && !wasTimeout && !wasAborted;
+				if (externalKill) {
+					result.errorMessage = result.errorMessage || `Subagent killed by signal ${signal}`;
+					result.stopReason = "error";
+				}
+
+				// Budget stops are intentional (success); timeouts and external kills
+				// are failures (non-zero); otherwise use the real exit code.
+				resolve(budgetExceeded ? 0 : (wasTimeout || externalKill ? (code ?? 128) : (code ?? 0)));
 			});
 
 			p.on("error", (err) => {

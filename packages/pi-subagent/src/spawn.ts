@@ -308,14 +308,15 @@ export async function spawnSubagent(
 
 		// Shared kill helper used by abort, budget, and timeout paths.
 		// Centralizes reason → stopReason mapping and the SIGTERM → 5s → SIGKILL escalation.
+		const escalationTimers: ReturnType<typeof setTimeout>[] = [];
 		const killProc = (reason: "abort" | "budget" | "timeout") => {
 			if (reason === "abort") wasAborted = true;
 			else if (reason === "budget") result.stopReason = "budget_exceeded";
 			else if (reason === "timeout") { result.stopReason = "timeout"; wasTimeout = true; }
 			try { proc?.kill("SIGTERM"); } catch { /* ignore */ }
-			setTimeout(() => {
+			escalationTimers.push(setTimeout(() => {
 				try { if (proc && !proc.killed) proc.kill("SIGKILL"); } catch { /* ignore */ }
-			}, 5000);
+			}, 5000));
 		};
 
 		const exitCode = await new Promise<number>((resolve) => {
@@ -348,6 +349,7 @@ export async function spawnSubagent(
 
 			p.on("close", (code) => {
 				if (timeoutHandle) clearTimeout(timeoutHandle);
+				for (const t of escalationTimers) clearTimeout(t);
 				if (onAbort && options.signal) options.signal.removeEventListener("abort", onAbort);
 				if (buffer.trim()) processLine(buffer);
 				// Budget stops are intentional (success); timeouts are failures (exit 124, Unix convention);
@@ -357,6 +359,7 @@ export async function spawnSubagent(
 
 			p.on("error", (err) => {
 				if (timeoutHandle) clearTimeout(timeoutHandle);
+				for (const t of escalationTimers) clearTimeout(t);
 				if (onAbort && options.signal) options.signal.removeEventListener("abort", onAbort);
 				// Surface the real cause (e.g. ENOENT when pi is not in PATH) instead of "unknown error".
 				result.errorMessage = err?.message || String(err);

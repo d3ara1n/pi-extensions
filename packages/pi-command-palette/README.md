@@ -24,7 +24,7 @@ Or add to `~/.pi/agent/settings.json`:
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+Shift+P` | Open command palette |
+| `Ctrl+Shift+P` _(default, configurable)_ | Open command palette |
 
 The palette lists:
 
@@ -42,4 +42,28 @@ The "Model: Switch Model" action opens a secondary overlay listing all models wi
 
 ## Configuration
 
-No configuration needed. Works out of the box.
+The default shortcut is `Ctrl+Shift+P`. If it conflicts with your terminal, override it via either of the following (evaluated in order, first match wins).
+
+### 1. Environment variable
+
+Useful for terminals that intercept `Ctrl+Shift+<key>` before it reaches the session (e.g. Termius on Windows/WSL2):
+
+```bash
+export PI_COMMAND_PALETTE_KEY=ctrl+alt+k
+```
+
+Add it to your shell profile to persist (`~/.zshrc` on macOS, `~/.bashrc` on bash).
+
+### 2. settings.json
+
+Set `commandPalette.shortcut` in `~/.pi/agent/settings.json` (global) or `.pi/settings.json` in your project (project overrides global):
+
+```jsonc
+{
+  "commandPalette": {
+    "shortcut": "ctrl+alt+k"
+  }
+}
+```
+
+Any valid pi keybinding string works (e.g. `ctrl+shift+k`, `ctrl+alt+p`, `ctrl+k`). Restart pi (or run `/reload`) after changing the shortcut.

@@ -51,7 +51,7 @@ This means:
 
 - [`@d3ara1n/pi-model-roles`](../pi-model-roles) — model role resolution
 
-## Install
+## Installation
 
 ```bash
 pi install @d3ara1n/pi-subagent

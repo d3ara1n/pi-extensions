@@ -133,7 +133,7 @@ const roles: ModelRolesAPI = getModelRolesAPI();  // 完整类型推导
 
 ### README 与依赖文档规范
 
-**每个包 README 必须包含 `## Install` 和 `## Dependencies`。** 即使是纯依赖库扩展（不注册 tool/command，只注册 hook），也要有 Install 段告诉用户如何安装。
+**每个包 README 必须包含 `## Installation` 和 `## Dependencies`。** 即使是纯依赖库扩展（不注册 tool/command，只注册 hook），也要有 Install 段告诉用户如何安装。
 
 **Extension vs Library 判定：**
 - **Extension** — `package.json` 中有 `"pi": { "extensions": [...] }`，注册了 hook/tool/command。**必须**出现在用户 `settings.json` 的 `extensions` 数组里

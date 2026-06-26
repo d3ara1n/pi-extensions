@@ -30,7 +30,7 @@ Pure npm packages — no `pi.extensions` entry point, no hooks/tools/commands. I
 |---------|-------------|
 | [`pi-usage-block-core`](./packages/pi-usage-block-core) | Shared types and singleton registry for usage quota reporting |
 
-## Install
+## Installation
 
 ```bash
 pi install npm:@d3ara1n/pi-context-include

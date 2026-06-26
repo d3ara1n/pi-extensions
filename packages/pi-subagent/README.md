@@ -64,8 +64,8 @@ Edit `~/.pi/agent/settings.json`:
 ```jsonc
 {
   "subagent": {
-    // Default timeout per subagent (5 minutes)
-    "timeoutMs": 300000,
+    // Default timeout per subagent (10 minutes)
+    "timeoutMs": 600000,
 
     // Max subagents running at once; extras queue with a "queued" TUI hint
     "maxConcurrency": 4,
@@ -96,7 +96,7 @@ Edit `~/.pi/agent/settings.json`:
 }
 ```
 
-All fields are optional. Defaults: `timeoutMs: 300000`, `maxConcurrency: 4`, `maxDepth: 3`, `maxTurns: 0` (unlimited), `maxCost: 0` (unlimited), `history.enabled: true`, `summary.role: "utility"`, `summary.enabled: true`.
+All fields are optional. Defaults: `timeoutMs: 600000` (10 min; roles that can `delegate` get 2× automatically when no per-role timeout is set), `maxConcurrency: 4`, `maxDepth: 3`, `maxTurns: 0` (unlimited), `maxCost: 0` (unlimited), `history.enabled: true`, `summary.role: "utility"`, `summary.enabled: true`.
 
 ### Agent Overrides
 
@@ -138,7 +138,7 @@ Override, disable, or add subagent roles via `agentOverrides`. Built-in and cust
 
 **Required fields for custom roles:** `role`, `description`, `examples`, `decisionTrigger`, `tools`, `systemPrompt`.
 
-**Optional fields:** `subagentRoles` (roles this role can spawn via delegate), `timeoutMs` (per-role timeout override), `maxTurns` / `maxCost` (per-role budget overrides; 0 = unlimited), `fallbackRole` (backup pi-model-roles role on provider errors).
+**Optional fields:** `subagentRoles` (roles this role can spawn via delegate), `timeoutMs` (per-role timeout override; when unset, delegate-capable roles get 2× the global default automatically), `maxTurns` / `maxCost` (per-role budget overrides; 0 = unlimited), `fallbackRole` (backup pi-model-roles role on provider errors).
 
 Invalid custom roles (missing required fields) are silently skipped with an error notification at session start.
 

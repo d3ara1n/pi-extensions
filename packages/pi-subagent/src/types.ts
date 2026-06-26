@@ -34,7 +34,7 @@ export interface SubagentSummaryConfig {
 }
 
 export const DEFAULT_CONFIG: SubagentConfig = {
-  timeoutMs: 300_000,
+  timeoutMs: 600_000,
   maxConcurrency: 4,
   maxDepth: 3,
   maxTurns: 0,

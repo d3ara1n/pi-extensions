@@ -312,7 +312,14 @@ export async function spawnSubagent(
 		const killProc = (reason: "abort" | "budget" | "timeout") => {
 			if (reason === "abort") wasAborted = true;
 			else if (reason === "budget") result.stopReason = "budget_exceeded";
-			else if (reason === "timeout") { result.stopReason = "timeout"; wasTimeout = true; }
+			else if (reason === "timeout") {
+				result.stopReason = "timeout";
+				wasTimeout = true;
+				// Human-readable message so the caller/TUI never falls back to the
+				// raw stderr (which is full of TUI teardown escape sequences).
+				const secs = Math.round((options.timeoutMs ?? 0) / 1000);
+				result.errorMessage = `Timed out after ${secs}s (completed ${result.usage.turns} turn${result.usage.turns === 1 ? "" : "s"})`;
+			}
 			try { proc?.kill("SIGTERM"); } catch { /* ignore */ }
 			escalationTimers.push(setTimeout(() => {
 				try { if (proc && !proc.killed) proc.kill("SIGKILL"); } catch { /* ignore */ }

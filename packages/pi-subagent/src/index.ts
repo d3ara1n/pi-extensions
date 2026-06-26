@@ -180,7 +180,7 @@ function renderDisplayItems(
 }
 
 function isFailedResult(r: SubagentResult): boolean {
-	return r.exitCode !== 0 || r.stopReason === "error" || r.stopReason === "aborted";
+	return r.exitCode !== 0 || r.stopReason === "error" || r.stopReason === "aborted" || r.stopReason === "timeout";
 }
 
 /** Heuristic: does this result look like a provider-side failure worth retrying on the fallback role? */

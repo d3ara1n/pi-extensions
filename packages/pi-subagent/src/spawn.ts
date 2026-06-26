@@ -177,6 +177,7 @@ export async function spawnSubagent(
 		const invocation = getPiInvocation(args);
 		let wasAborted = false;
 		let budgetExceeded = false;
+		let wasTimeout = false;
 		let buffer = "";
 
 		const emitProgress = () => {
@@ -199,11 +200,10 @@ export async function spawnSubagent(
 		const checkBudget = () => {
 			const mt = options.maxTurns ?? 0;
 			const mc = options.maxCost ?? 0;
-			if (budgetExceeded) return;
+			if (budgetExceeded || wasTimeout) return;
 			if ((mt > 0 && result.usage.turns >= mt) || (mc > 0 && result.usage.cost >= mc)) {
 				budgetExceeded = true;
-				result.stopReason = "budget_exceeded";
-				try { proc?.kill("SIGTERM"); } catch { /* ignore */ }
+				killProc("budget");
 			}
 		};
 
@@ -307,8 +307,11 @@ export async function spawnSubagent(
 		let proc: ChildProcess | undefined;
 
 		// Shared kill helper used by abort, budget, and timeout paths.
+		// Centralizes reason → stopReason mapping and the SIGTERM → 5s → SIGKILL escalation.
 		const killProc = (reason: "abort" | "budget" | "timeout") => {
 			if (reason === "abort") wasAborted = true;
+			else if (reason === "budget") result.stopReason = "budget_exceeded";
+			else if (reason === "timeout") { result.stopReason = "timeout"; wasTimeout = true; }
 			try { proc?.kill("SIGTERM"); } catch { /* ignore */ }
 			setTimeout(() => {
 				try { if (proc && !proc.killed) proc.kill("SIGKILL"); } catch { /* ignore */ }
@@ -347,13 +350,16 @@ export async function spawnSubagent(
 				if (timeoutHandle) clearTimeout(timeoutHandle);
 				if (onAbort && options.signal) options.signal.removeEventListener("abort", onAbort);
 				if (buffer.trim()) processLine(buffer);
-				// Budget stops are intentional, not failures — surface as success with stopReason set
-				resolve(budgetExceeded ? 0 : (code ?? 0));
+				// Budget stops are intentional (success); timeouts are failures (exit 124, Unix convention);
+				// otherwise use the real exit code (signal kills yield null → 0).
+				resolve(budgetExceeded ? 0 : (wasTimeout ? 124 : (code ?? 0)));
 			});
 
-			p.on("error", () => {
+			p.on("error", (err) => {
 				if (timeoutHandle) clearTimeout(timeoutHandle);
 				if (onAbort && options.signal) options.signal.removeEventListener("abort", onAbort);
+				// Surface the real cause (e.g. ENOENT when pi is not in PATH) instead of "unknown error".
+				result.errorMessage = err?.message || String(err);
 				resolve(1);
 			});
 

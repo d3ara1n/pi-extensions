@@ -32,12 +32,13 @@ export function formatUsageStats(usage: SubagentResult["usage"], model?: string)
 }
 
 /**
- * 计算用于展示的运行耗时（秒）。
- * - 运行中（exitCode === -1 且有 startTime）：基于墙钟实时计算；
- * - 终态（exitCode !== -1 且有 elapsedMs）：冻结值；
- * - queued 或字段缺失：undefined（调用方应跳过耗时展示）。
+ * Display elapsed time in seconds.
+ * - Running (exitCode === -1 with startTime): live wall-clock value.
+ * - Terminal (exitCode !== -1 with elapsedMs): frozen value.
+ * - Queued or fields missing: undefined (caller should skip the elapsed display).
  *
- * 用结构子集而非 SubagentResult，便于在无需引入完整类型的纯工具上下文中复用与测试。
+ * Takes a structural subset rather than the full SubagentResult so it can be reused
+ * and tested in pure-helper contexts without importing the full type.
  */
 export function elapsedSeconds(r: {
 	exitCode: number;
@@ -193,7 +194,10 @@ export function isProviderError(result: SubagentResult): boolean {
 	return /429|quota|rate.?limit|auth|timeout|exhausted|unavailable|503|server error|temporary|declined|overloaded|econnreset|socket hang up|epipe|network|connection/i.test(haystack);
 }
 
-/** Shape-based preview for tools we don't have a dedicated formatter for. */
+/**
+ * Shape-based preview for tools we don't have a dedicated formatter for.
+ * @internal — exported for testing; used internally by {@link formatToolCall}.
+ */
 export function previewArgs(args: Record<string, unknown>): string {
 	const command = args.command as string | undefined;
 	if (command) return `$ ${command.length > 60 ? command.slice(0, 60) + "..." : command}`;

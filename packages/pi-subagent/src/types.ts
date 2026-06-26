@@ -35,7 +35,7 @@ export interface SubagentSummaryConfig {
 }
 
 export const DEFAULT_CONFIG: SubagentConfig = {
-  timeout: 600,
+  timeout: 1500,
   maxConcurrency: 4,
   maxDepth: 3,
   maxTurns: 0,
@@ -151,14 +151,14 @@ export interface SubagentResult {
   /** Real-time activity log: thinking blocks and tool calls in arrival order. */
   activityLog: ActivityEntry[];
 
-  // ── TUI 渲染辅助字段（非子进程产出，由 execute 层填入）──────────
-  /** 运行开始墙钟时间；仅 queued/running 帧存在，供 TUI 实时算耗时。终态帧无此字段。 */
+  // ── TUI rendering helpers (not produced by the child; filled in by the execute layer) ──
+  /** Wall-clock start time; present only on queued/running frames so the TUI can compute live elapsed time. Absent on terminal frames. */
   startTime?: number;
-  /** 终态总耗时(ms)，由 execute 在结束时写入；覆盖整个 delegate 区间（含 fallback 重试）。 */
+  /** Total elapsed time (ms) for terminal frames, written by execute when the run ends; spans the whole delegate interval (incl. fallback retries). */
   elapsedMs?: number;
-  /** delegate 传入的引用文件路径（params.files），展开视图渲染用。 */
+  /** Reference file paths passed to delegate (params.files); used by the expanded view. */
   files?: string[];
-  /** delegate 传入的额外上下文（params.context），展开视图渲染用。 */
+  /** Extra context passed to delegate (params.context); used by the expanded view. */
   context?: string;
 }
 

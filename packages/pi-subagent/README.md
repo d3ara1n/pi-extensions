@@ -64,7 +64,7 @@ Edit `~/.pi/agent/settings.json`:
 ```json
 {
   "subagent": {
-    "timeout": 600,
+    "timeout": 1500,
     "maxConcurrency": 4,
     "maxDepth": 3,
     "maxTurns": 0,
@@ -80,7 +80,7 @@ Edit `~/.pi/agent/settings.json`:
 }
 ```
 
-All fields are optional. Defaults: `timeout: 600` (seconds; 10 min; roles that can `delegate` get 2× automatically when no per-role timeout is set), `maxConcurrency: 4`, `maxDepth: 3`, `maxTurns: 0` (unlimited), `maxCost: 0` (unlimited), `history.enabled: true`, `summary.role: "utility"`, `summary.enabled: true`.
+All fields are optional. Defaults: `timeout: 1500` (seconds; 25 min; roles that can `delegate` get 2× automatically when no per-role timeout is set), `maxConcurrency: 4`, `maxDepth: 3`, `maxTurns: 0` (unlimited), `maxCost: 0` (unlimited), `history.enabled: true`, `summary.role: "utility"`, `summary.enabled: true`.
 
 ### Agent Overrides
 
@@ -92,7 +92,7 @@ Override, disable, or add subagent roles via `agentOverrides`. Built-in and cust
     "agentOverrides": {
       "worker": {
         "role": "heavy",
-        "timeout": 600,
+        "timeout": 1500,
         "maxTurns": 50,
         "maxCost": 1.0
       },

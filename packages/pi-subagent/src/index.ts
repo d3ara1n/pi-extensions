@@ -686,27 +686,27 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			const stats = formatUsageStats(r.usage, r.model);
 			const usageLine = [secs != null ? `${secs}s` : null, stats].filter(Boolean).join(" \u00b7 ");
 
-			// Result line content (shared between collapsed and expanded).
-			let resultContent: string | undefined;
-			let resultCol: ThemeColor | undefined;
+			// resultline: fixed line on terminal frames — `<icon> <content>` colored by outcome.
+			// success → summary; error/timeout/budget → errorMessage (or a default label).
+			let resultline: string | undefined;
 			if (!isRunning) {
 				if (isFailedState) {
-					resultContent = r.errorMessage || (isTimeout ? "Timed out" : isBudget ? "Budget exceeded" : "failed");
-					resultCol = isTimeout || isBudget ? "warning" : "error";
+					const content = r.errorMessage || (isTimeout ? "Timed out" : isBudget ? "Budget exceeded" : "failed");
+					const col: ThemeColor = isTimeout || isBudget ? "warning" : "error";
+					resultline = `${icon} ${theme.fg(col, content)}`;
 				} else {
-					resultContent = r.summary || undefined;
-					resultCol = "text";
+					const content = r.summary;
+					resultline = content ? `${icon} ${theme.fg("text", content)}` : undefined;
 				}
 			}
 
 			if (expanded) {
 				const container = new Container();
 
-				// Header: taskline (+ error line on failure; success has no summary line here
-				// — full output below makes it redundant).
+				// Header: taskline + resultline (summary on success, error message on failure).
 				container.addChild(new Text(taskline, 0, 0));
-				if (resultContent) {
-					container.addChild(new Text(`${icon} ${theme.fg(resultCol!, resultContent)}`, 0, 0));
+				if (resultline) {
+					container.addChild(new Text(resultline, 0, 0));
 				}
 
 				// Input block: reference files + context char count + task full text,
@@ -768,8 +768,8 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			// Collapsed view.
 			let text = taskline;
 			if (!isRunning) {
-				// Result line (shared computation above).
-				if (resultContent) text += `\n${icon} ${theme.fg(resultCol!, resultContent)}`;
+				// resultline (shared computation above).
+				if (resultline) text += `\n${resultline}`;
 			} else if (!r.queued) {
 				// Running (not queued): show recent activity only.
 				const activity = displayItems.filter((item) => item.type === "toolCall" || item.type === "thinking");

@@ -19,7 +19,8 @@ import {
 	previewArgs,
 	truncateOutput,
 	formatTokens,
-	effectiveTimeoutMs,
+	effectiveTimeout,
+	elapsedSeconds,
 } from "./utils.ts";
 import type { SubagentResult, SubagentRole } from "./types.ts";
 
@@ -192,22 +193,22 @@ describe("previewArgs", () => {
 	});
 });
 
-// ── effectiveTimeoutMs: guards delegate-role auto-widening ──
-describe("effectiveTimeoutMs", () => {
-	const role = (tools: string[], timeoutMs?: number): SubagentRole =>
-		({ role: "default", description: "", examples: [], decisionTrigger: "", tools, systemPrompt: "", timeoutMs }) as unknown as SubagentRole;
+// ── effectiveTimeout: guards delegate-role auto-widening (seconds) ──
+describe("effectiveTimeout", () => {
+	const role = (tools: string[], timeout?: number): SubagentRole =>
+		({ role: "default", description: "", examples: [], decisionTrigger: "", tools, systemPrompt: "", timeout }) as unknown as SubagentRole;
 
 	test("non-delegate role uses base timeout", () => {
-		assert.equal(effectiveTimeoutMs(role(["read", "grep"]), 600000), 600000);
+		assert.equal(effectiveTimeout(role(["read", "grep"]), 600), 600);
 	});
 	test("delegate role doubles base when no explicit timeout", () => {
-		assert.equal(effectiveTimeoutMs(role(["read", "delegate"]), 600000), 1200000);
+		assert.equal(effectiveTimeout(role(["read", "delegate"]), 600), 1200);
 	});
-	test("explicit roleDef.timeoutMs is always honored (no widening)", () => {
-		assert.equal(effectiveTimeoutMs(role(["read", "delegate"], 300000), 600000), 300000);
+	test("explicit roleDef.timeout is always honored (no widening)", () => {
+		assert.equal(effectiveTimeout(role(["read", "delegate"], 300), 600), 300);
 	});
 	test("explicit timeout on non-delegate also honored", () => {
-		assert.equal(effectiveTimeoutMs(role(["read"]), 600000), 600000);
+		assert.equal(effectiveTimeout(role(["read"]), 600), 600);
 	});
 });
 
@@ -248,5 +249,30 @@ describe("formatTokens", () => {
 	});
 	test(">= 1000000 in M", () => {
 		assert.equal(formatTokens(1000000), "1.0M");
+	});
+});
+
+// ── elapsedSeconds: live/terminal time derivation ──
+describe("elapsedSeconds", () => {
+	test("terminal state: rounds elapsedMs to whole seconds", () => {
+		assert.equal(elapsedSeconds({ exitCode: 0, elapsedMs: 12345 }), 12);
+		assert.equal(elapsedSeconds({ exitCode: 0, elapsedMs: 400 }), 0);
+		assert.equal(elapsedSeconds({ exitCode: 1, elapsedMs: 59999 }), 60);
+	});
+	test("terminal state without elapsedMs -> undefined", () => {
+		assert.equal(elapsedSeconds({ exitCode: 0 }), undefined);
+	});
+	test("queued (running sentinel, no startTime) -> undefined", () => {
+		assert.equal(elapsedSeconds({ exitCode: -1 }), undefined);
+	});
+	test("running: live seconds from startTime (within ~1s drift)", () => {
+		const start = Date.now() - 3500;
+		const s = elapsedSeconds({ exitCode: -1, startTime: start });
+		assert.ok(s !== undefined, "should be defined while running");
+		assert.ok(s >= 3 && s <= 4, `expected ~3s, got ${s}`);
+	});
+	test("running: clamps negative drift (future startTime) to 0", () => {
+		const start = Date.now() + 10000; // 10s in the future
+		assert.equal(elapsedSeconds({ exitCode: -1, startTime: start }), 0);
 	});
 });

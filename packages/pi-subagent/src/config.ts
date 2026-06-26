@@ -54,7 +54,7 @@ export function loadSubagentConfig(cwd?: string): SubagentConfig {
 	const rawSummary = raw?.summary;
 	const rawHistory = raw?.history;
 	return {
-		timeoutMs: raw.timeoutMs ?? DEFAULT_CONFIG.timeoutMs,
+		timeout: raw.timeout ?? DEFAULT_CONFIG.timeout,
 		maxConcurrency: raw.maxConcurrency ?? DEFAULT_CONFIG.maxConcurrency,
 		maxDepth: raw.maxDepth ?? DEFAULT_CONFIG.maxDepth,
 		maxTurns: raw.maxTurns ?? DEFAULT_CONFIG.maxTurns,

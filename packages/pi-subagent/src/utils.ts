@@ -31,6 +31,28 @@ export function formatUsageStats(usage: SubagentResult["usage"], model?: string)
 	return parts.join(" ");
 }
 
+/**
+ * 计算用于展示的运行耗时（秒）。
+ * - 运行中（exitCode === -1 且有 startTime）：基于墙钟实时计算；
+ * - 终态（exitCode !== -1 且有 elapsedMs）：冻结值；
+ * - queued 或字段缺失：undefined（调用方应跳过耗时展示）。
+ *
+ * 用结构子集而非 SubagentResult，便于在无需引入完整类型的纯工具上下文中复用与测试。
+ */
+export function elapsedSeconds(r: {
+	exitCode: number;
+	startTime?: number;
+	elapsedMs?: number;
+}): number | undefined {
+	if (r.exitCode === -1 && typeof r.startTime === "number") {
+		return Math.max(0, Math.round((Date.now() - r.startTime) / 1000));
+	}
+	if (r.exitCode !== -1 && typeof r.elapsedMs === "number") {
+		return Math.round(r.elapsedMs / 1000);
+	}
+	return undefined;
+}
+
 export type DisplayItem =
 	| { type: "toolCall"; name: string; args: Record<string, any>; status?: ToolStatus }
 	| { type: "thinking"; status?: ToolStatus };
@@ -238,14 +260,15 @@ export class AsyncSemaphore {
 /**
  * Effective per-role timeout. Roles that can `delegate` need headroom for
  * nested runs to complete, so when no explicit per-role timeout is set we
- * double the base. An explicit roleDef.timeoutMs is always honored as-is.
+ * double the base. An explicit roleDef.timeout (seconds) is always honored as-is.
+ * All inputs/outputs are in SECONDS — convert to ms at the spawn boundary.
  */
-export function effectiveTimeoutMs(roleDef: SubagentRole, baseTimeoutMs: number): number {
+export function effectiveTimeout(roleDef: SubagentRole, baseTimeoutSec: number): number {
 	const canDelegate = (roleDef.tools ?? []).includes("delegate");
-	if (canDelegate && roleDef.timeoutMs == null) {
-		return baseTimeoutMs * 2;
+	if (canDelegate && roleDef.timeout == null) {
+		return baseTimeoutSec * 2;
 	}
-	return roleDef.timeoutMs ?? baseTimeoutMs;
+	return roleDef.timeout ?? baseTimeoutSec;
 }
 
 // ── Output truncation ────────────────────────────────────────

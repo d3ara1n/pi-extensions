@@ -4,7 +4,8 @@
 
 /** Configuration for the subagent extension. */
 export interface SubagentConfig {
-  timeoutMs: number;
+  /** Per-subagent timeout in seconds. Roles that can `delegate` get 2× automatically when no per-role timeout is set. */
+  timeout: number;
   /** Max number of subagents allowed to run concurrently. Extras queue with a TUI hint. */
   maxConcurrency: number;
   /** Max subagent nesting depth (the top-level session is depth 0). */
@@ -34,7 +35,7 @@ export interface SubagentSummaryConfig {
 }
 
 export const DEFAULT_CONFIG: SubagentConfig = {
-  timeoutMs: 600_000,
+  timeout: 600,
   maxConcurrency: 4,
   maxDepth: 3,
   maxTurns: 0,
@@ -60,8 +61,8 @@ export interface SubagentRole {
   tools: string[];
   /** If this role has `delegate`, restrict which roles it may spawn. undefined = no restriction. */
   subagentRoles?: string[];
-  /** Per-role timeout override (ms). Falls back to config.timeoutMs when unset. */
-  timeoutMs?: number;
+  /** Per-role timeout override in seconds. Falls back to config.timeout when unset. */
+  timeout?: number;
   /** Max assistant turns before the run is killed (0 = use config default; unset = unlimited). */
   maxTurns?: number;
   /** Max cumulative cost (USD) before the run is killed (0 = use config default; unset = unlimited). */
@@ -149,6 +150,16 @@ export interface SubagentResult {
   errorMessage?: string;
   /** Real-time activity log: thinking blocks and tool calls in arrival order. */
   activityLog: ActivityEntry[];
+
+  // ── TUI 渲染辅助字段（非子进程产出，由 execute 层填入）──────────
+  /** 运行开始墙钟时间；仅 queued/running 帧存在，供 TUI 实时算耗时。终态帧无此字段。 */
+  startTime?: number;
+  /** 终态总耗时(ms)，由 execute 在结束时写入；覆盖整个 delegate 区间（含 fallback 重试）。 */
+  elapsedMs?: number;
+  /** delegate 传入的引用文件路径（params.files），展开视图渲染用。 */
+  files?: string[];
+  /** delegate 传入的额外上下文（params.context），展开视图渲染用。 */
+  context?: string;
 }
 
 /** TUI details structure passed via tool result details. */

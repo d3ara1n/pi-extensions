@@ -9,7 +9,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import { getMarkdownTheme, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { complete } from "@earendil-works/pi-ai";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -27,6 +27,7 @@ import {
 	AsyncSemaphore,
 	buildDisplayItems,
 	formatUsageStats,
+	elapsedSeconds,
 	formatToolCall,
 	statusStyle,
 	formatThinking,
@@ -34,7 +35,7 @@ import {
 	isFailedResult,
 	sanitizeFilename,
 	isProviderError,
-	effectiveTimeoutMs,
+	effectiveTimeout,
 	type DisplayItem,
 } from "./utils.ts";
 import * as os from "node:os";
@@ -400,6 +401,8 @@ export default function subagentExtension(pi: ExtensionAPI) {
 					stderr: "",
 					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
 					activityLog: [],
+					files: params.files,
+					context: params.context,
 				};
 				onUpdate({
 					content: [{ type: "text", text: `${params.role}: queued...` }],
@@ -464,6 +467,9 @@ export default function subagentExtension(pi: ExtensionAPI) {
 						model: partial.model,
 						stopReason: partial.stopReason,
 						activityLog: partial.activityLog ?? [],
+						startTime,
+						files: params.files,
+						context: params.context,
 					};
 					const statusText = `${params.role}  ${elapsed}s  ${liveResult.usage.turns} turn${liveResult.usage.turns !== 1 ? "s" : ""}`;
 					onUpdate!({
@@ -494,6 +500,9 @@ export default function subagentExtension(pi: ExtensionAPI) {
 						stderr: "",
 						usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
 						activityLog: [],
+						startTime,
+						files: params.files,
+						context: params.context,
 					};
 					onUpdate({
 						content: [{ type: "text", text: `${params.role}: running...` }],
@@ -508,7 +517,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 					context: params.context,
 					contextFiles: params.files,
 					subagentRoles: roleDef.subagentRoles,
-					timeoutMs: effectiveTimeoutMs(roleDef, config.timeoutMs),
+					timeoutMs: effectiveTimeout(roleDef, config.timeout) * 1000,
 					maxTurns: roleDef.maxTurns ?? config.maxTurns,
 					maxCost: roleDef.maxCost ?? config.maxCost,
 					depth: CURRENT_DEPTH + 1,
@@ -530,7 +539,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 							context: params.context,
 							contextFiles: params.files,
 							subagentRoles: roleDef.subagentRoles,
-							timeoutMs: effectiveTimeoutMs(roleDef, config.timeoutMs),
+							timeoutMs: effectiveTimeout(roleDef, config.timeout) * 1000,
 							maxTurns: roleDef.maxTurns ?? config.maxTurns,
 							maxCost: roleDef.maxCost ?? config.maxCost,
 							depth: CURRENT_DEPTH + 1,
@@ -540,6 +549,12 @@ export default function subagentExtension(pi: ExtensionAPI) {
 						result.task = params.task;
 					}
 				}
+
+				// Stamp terminal fields once, after any fallback retry: elapsedMs covers
+				// the whole delegate span (incl. retry); files/context mirror params for the TUI.
+				result.files = params.files;
+				result.context = params.context;
+				result.elapsedMs = Date.now() - startTime;
 
 				// Compress/truncate oversized output before it reaches the main model or TUI.
 				// Keep the raw original for the history file (audit), feed the prepared text to LLM + expanded view.
@@ -610,21 +625,17 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			}
 		},
 
-		// ── renderCall: what the user sees when the tool is invoked ──────
+		// ── renderCall: what the user sees when the tool is invoked ─────
 
 		renderCall(args, theme, _context) {
 			const roleName = (args as any).role || "...";
-			const task = (args as any).task || "";
-			const preview = task.length > 60 ? `${task.slice(0, 60)}...` : task;
 			const text =
-				theme.fg("toolTitle", theme.bold("subagent ")) +
-				theme.fg("accent", roleName) +
-				"\n  " +
-				theme.fg("dim", preview);
+				theme.fg("toolTitle", theme.bold("delegate ")) +
+				theme.fg("accent", roleName);
 			return new Text(text, 0, 0);
 		},
 
-		// ── renderResult: TUI display when the tool finishes ─────────────
+		// ── renderResult: TUI display when the tool finishes ────────
 
 		renderResult(result, { expanded }, theme, _context) {
 			const details = result.details as SubagentDetails | undefined;
@@ -638,52 +649,90 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			const isError = !isRunning && isFailedResult(r);
 			const isTimeout = !isRunning && r.stopReason === "timeout";
 			const isBudget = !isRunning && r.stopReason === "budget_exceeded";
+			const isFailedState = isError || isTimeout || isBudget;
+
+			// Status icon. ⏳ running / ⏸ queued (pause) / ⏱ timeout / ⏲ budget / ✗ error / ✓ ok
 			let icon: string;
 			if (isRunning) {
-				icon = theme.fg("warning", "\u23F3"); // ⏳ hourglass — time flowing
+				icon = r.queued ? theme.fg("warning", "\u23F8") : theme.fg("warning", "\u23F3");
 			} else if (isTimeout) {
-				icon = theme.fg("warning", "\u23F1"); // ⏱ stopwatch — time ran out
+				icon = theme.fg("warning", "\u23F1");
 			} else if (isBudget) {
-				icon = theme.fg("warning", "\u23F2"); // ⏲ timer — budget exhausted
+				icon = theme.fg("warning", "\u23F2");
 			} else if (isError) {
-				icon = theme.fg("error", "\u2717"); // ✗
+				icon = theme.fg("error", "\u2717");
 			} else {
 				icon = theme.fg("success", "\u2713");
 			}
+
 			const displayItems = buildDisplayItems(r.activityLog);
 			const mdTheme = getMarkdownTheme();
+			const fg = theme.fg.bind(theme) as (color: string, text: string) => string;
+
+			// Task preview: first line, truncated to one row (always-visible anchor).
+			const firstLine = r.task.split("\n")[0];
+			const taskPreview = firstLine.length > 70 ? `${firstLine.slice(0, 70)}...` : firstLine;
+			// taskline: indicator prefix while running/queued; bare text once finished.
+			let taskline: string;
+			if (isRunning) {
+				const label = r.queued ? "(queued)" : "(running)";
+				taskline = `${icon} ${theme.fg("dim", label)} ${theme.fg("text", taskPreview)}`;
+			} else {
+				taskline = theme.fg("text", taskPreview);
+			}
+
+			// usage line: elapsed/live prefix + existing stats.
+			const secs = elapsedSeconds(r);
+			const stats = formatUsageStats(r.usage, r.model);
+			const usageLine = [secs != null ? `${secs}s` : null, stats].filter(Boolean).join(" \u00b7 ");
+
+			// Result line content (shared between collapsed and expanded).
+			let resultContent: string | undefined;
+			let resultCol: ThemeColor | undefined;
+			if (!isRunning) {
+				if (isFailedState) {
+					resultContent = r.errorMessage || (isTimeout ? "Timed out" : isBudget ? "Budget exceeded" : "failed");
+					resultCol = isTimeout || isBudget ? "warning" : "error";
+				} else {
+					resultContent = r.summary || undefined;
+					resultCol = "text";
+				}
+			}
 
 			if (expanded) {
 				const container = new Container();
 
-				// Header
-				let header = `${icon} ${theme.fg("toolTitle", theme.bold(r.role))}`;
-				if (isError && r.stopReason) header += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
-				container.addChild(new Text(header, 0, 0));
-				if (isTimeout && r.errorMessage)
-					container.addChild(new Text(theme.fg("warning", `\u23F1 ${r.errorMessage}`), 0, 0));
-				else if (isBudget && r.errorMessage)
-					container.addChild(new Text(theme.fg("warning", `\u23F2 ${r.errorMessage}`), 0, 0));
-				else if (isError && r.errorMessage)
-					container.addChild(new Text(theme.fg("error", `Error: ${r.errorMessage}`), 0, 0));
-
-				if (!isRunning) {
-					container.addChild(new Spacer(1));
-					container.addChild(new Text(theme.fg("muted", "\u2500\u2500\u2500 Task \u2500\u2500\u2500"), 0, 0));
-					container.addChild(new Text(theme.fg("dim", r.task), 0, 0));
+				// Header: taskline (+ error line on failure; success has no summary line here
+				// — full output below makes it redundant).
+				container.addChild(new Text(taskline, 0, 0));
+				if (resultContent) {
+					container.addChild(new Text(`${icon} ${theme.fg(resultCol!, resultContent)}`, 0, 0));
 				}
 
+				// Input block: reference files + context char count + task full text,
+				// grouped without inner spacing (they are all subagent input).
+				container.addChild(new Spacer(1));
+				if (r.files) {
+					for (const f of r.files) {
+						container.addChild(new Text(theme.fg("dim", `@${f}`), 0, 0));
+					}
+				}
+				if (r.context) {
+					container.addChild(new Text(theme.fg("dim", `ctx ${r.context.length} chars`), 0, 0));
+				}
+				container.addChild(new Text(theme.fg("dim", r.task), 0, 0));
+
+				// Activity stream (shown while running and after completion).
 				container.addChild(new Spacer(1));
 				const activity = displayItems.filter((item) => item.type === "toolCall" || item.type === "thinking");
 				if (activity.length === 0) {
 					const runningLabel = isRunning
 						? r.queued
-							? "(queued — waiting for a concurrency slot...)"
+							? "(queued \u2014 waiting for a concurrency slot...)"
 							: "(waiting for first event...)"
 						: "(none)";
 					container.addChild(new Text(theme.fg("muted", runningLabel), 0, 0));
 				} else {
-					const fg = theme.fg.bind(theme) as (color: string, text: string) => string;
 					for (const item of activity) {
 						if (item.type === "thinking") {
 							container.addChild(new Text(formatThinking(item.status, fg), 0, 0));
@@ -696,9 +745,9 @@ export default function subagentExtension(pi: ExtensionAPI) {
 					}
 				}
 
+				// Full output (terminal runs only).
 				if (!isRunning && r.output.trim()) {
 					container.addChild(new Spacer(1));
-					container.addChild(new Text(theme.fg("muted", "\u2500\u2500\u2500 Output \u2500\u2500\u2500"), 0, 0));
 					container.addChild(new Markdown(r.output.trim(), 0, 0, mdTheme));
 					if (r.outputMethod === "compressed") {
 						container.addChild(new Text(theme.fg("muted", "(output compressed by summary model \u2014 full text in history)"), 0, 0));
@@ -707,53 +756,34 @@ export default function subagentExtension(pi: ExtensionAPI) {
 					}
 				}
 
-				const usageStr = formatUsageStats(r.usage, r.model);
-				if (usageStr) {
+				// Usage (with elapsed).
+				if (usageLine) {
 					container.addChild(new Spacer(1));
-					container.addChild(new Text(theme.fg("dim", usageStr), 0, 0));
+					container.addChild(new Text(theme.fg("dim", usageLine), 0, 0));
 				}
 
 				return container;
 			}
 
-			// Collapsed view
-			let text = `${icon} ${theme.fg("toolTitle", theme.bold(r.role))}`;
-
-			if (isRunning) {
-				if (r.queued) {
-					text += `\n${theme.fg("muted", "(queued — waiting for a concurrency slot...)")}`;
+			// Collapsed view.
+			let text = taskline;
+			if (!isRunning) {
+				// Result line (shared computation above).
+				if (resultContent) text += `\n${icon} ${theme.fg(resultCol!, resultContent)}`;
+			} else if (!r.queued) {
+				// Running (not queued): show recent activity only.
+				const activity = displayItems.filter((item) => item.type === "toolCall" || item.type === "thinking");
+				if (activity.length === 0) {
+					text += `\n${theme.fg("muted", "(running...)")}`;
 				} else {
-					// Running: show recent tool calls only
-					const activity = displayItems.filter((item) => item.type === "toolCall" || item.type === "thinking");
-					if (activity.length === 0) {
-						text += `\n${theme.fg("muted", "(running...)")}`;
-					} else {
-						const rendered = renderDisplayItems(activity, 5, theme.fg.bind(theme) as (color: string, text: string) => string);
-						if (rendered) text += `\n${rendered}`;
-					}
+					const rendered = renderDisplayItems(activity, 5, fg);
+					if (rendered) text += `\n${rendered}`;
 				}
-			} else {
-				// Finished: summary + usage, no tool calls
-				if (r.summary) {
-					text += ` ${theme.fg("dim", "\u00b7")} ${theme.fg("text", r.summary)}`;
-				}
-				if (isTimeout) {
-					const msg = r.errorMessage || "Timed out";
-					text += `\n${theme.fg("warning", `\u23F1 ${msg}`)}`;
-				} else if (isBudget) {
-					const msg = r.errorMessage || "Budget exceeded";
-					text += `\n${theme.fg("warning", `\u23F2 ${msg}`)}`;
-				} else if (isError) {
-					const errMsg = r.errorMessage || (r.stderr ? r.stderr.trim().split("\n")[0].slice(0, 80) : r.stopReason);
-					if (errMsg) text += `\n${theme.fg("error", `Error: ${errMsg}`)}`;
-				}
-				const usageStr = formatUsageStats(r.usage, r.model);
-				if (usageStr) text += `\n${theme.fg("dim", usageStr)}`;
 			}
+			if (usageLine) text += `\n${theme.fg("dim", usageLine)}`;
 			return new Text(text, 0, 0);
 		},
 	});
-
 	pi.registerCommand("subagent:doctor", {
 		description: "Diagnose pi-subagent configuration and dependencies",
 		handler: async (_args, ctx) => {
@@ -772,7 +802,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 				// 3. config
 				try {
 					const cfg = loadSubagentConfig(ctx.cwd);
-					lines.push(`[\u2713] config: timeout=${cfg.timeoutMs}ms concurrency=${cfg.maxConcurrency} depth=${cfg.maxDepth} turns=${cfg.maxTurns || "∞"} cost=$${cfg.maxCost || "∞"} summary=${cfg.summary.enabled ? cfg.summary.role : "off"} history=${cfg.history.enabled}`);
+					lines.push(`[\u2713] config: timeout=${cfg.timeout}s concurrency=${cfg.maxConcurrency} depth=${cfg.maxDepth} turns=${cfg.maxTurns || "∞"} cost=$${cfg.maxCost || "∞"} summary=${cfg.summary.enabled ? cfg.summary.role : "off"} history=${cfg.history.enabled}`);
 				} catch {
 					lines.push("[\u2717] config: failed to load");
 					allOk = false;

@@ -64,7 +64,7 @@ Edit `~/.pi/agent/settings.json`:
 ```json
 {
   "subagent": {
-    "timeoutMs": 600000,
+    "timeout": 600,
     "maxConcurrency": 4,
     "maxDepth": 3,
     "maxTurns": 0,
@@ -80,7 +80,7 @@ Edit `~/.pi/agent/settings.json`:
 }
 ```
 
-All fields are optional. Defaults: `timeoutMs: 600000` (10 min; roles that can `delegate` get 2× automatically when no per-role timeout is set), `maxConcurrency: 4`, `maxDepth: 3`, `maxTurns: 0` (unlimited), `maxCost: 0` (unlimited), `history.enabled: true`, `summary.role: "utility"`, `summary.enabled: true`.
+All fields are optional. Defaults: `timeout: 600` (seconds; 10 min; roles that can `delegate` get 2× automatically when no per-role timeout is set), `maxConcurrency: 4`, `maxDepth: 3`, `maxTurns: 0` (unlimited), `maxCost: 0` (unlimited), `history.enabled: true`, `summary.role: "utility"`, `summary.enabled: true`.
 
 ### Agent Overrides
 
@@ -92,7 +92,7 @@ Override, disable, or add subagent roles via `agentOverrides`. Built-in and cust
     "agentOverrides": {
       "worker": {
         "role": "heavy",
-        "timeoutMs": 600000,
+        "timeout": 600,
         "maxTurns": 50,
         "maxCost": 1.0
       },
@@ -117,7 +117,7 @@ Override, disable, or add subagent roles via `agentOverrides`. Built-in and cust
 
 **Required fields for custom roles:** `role`, `description`, `examples`, `decisionTrigger`, `tools`, `systemPrompt`.
 
-**Optional fields:** `subagentRoles` (roles this role can spawn via delegate), `timeoutMs` (per-role timeout override; when unset, delegate-capable roles get 2× the global default automatically), `maxTurns` / `maxCost` (per-role budget overrides; 0 = unlimited), `fallbackRole` (backup pi-model-roles role on provider errors).
+**Optional fields:** `subagentRoles` (roles this role can spawn via delegate), `timeout` (per-role timeout override in seconds; when unset, delegate-capable roles get 2× the global default automatically), `maxTurns` / `maxCost` (per-role budget overrides; 0 = unlimited), `fallbackRole` (backup pi-model-roles role on provider errors).
 
 Invalid custom roles (missing required fields) are silently skipped with an error notification at session start.
 

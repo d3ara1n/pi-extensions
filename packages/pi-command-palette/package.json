@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-command-palette",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "type": "module",
   "description": "Global command palette for pi — press Ctrl+Shift+P to search and run commands from anywhere",
   "main": "src/index.ts",

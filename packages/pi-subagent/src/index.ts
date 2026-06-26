@@ -687,7 +687,8 @@ export default function subagentExtension(pi: ExtensionAPI) {
 			const usageLine = [secs != null ? `${secs}s` : null, stats].filter(Boolean).join(" \u00b7 ");
 
 			// resultline: fixed line on terminal frames — `<icon> <content>` colored by outcome.
-			// success → summary; error/timeout/budget → errorMessage (or a default label).
+			// success → AI summary, else first line of output (truncated), else a placeholder — never blank.
+			// error/timeout/budget → errorMessage (or a default label).
 			let resultline: string | undefined;
 			if (!isRunning) {
 				if (isFailedState) {
@@ -695,8 +696,12 @@ export default function subagentExtension(pi: ExtensionAPI) {
 					const col: ThemeColor = isTimeout || isBudget ? "warning" : "error";
 					resultline = `${icon} ${theme.fg(col, content)}`;
 				} else {
-					const content = r.summary;
-					resultline = content ? `${icon} ${theme.fg("text", content)}` : undefined;
+					// success fallback chain: summary → output first line → placeholder.
+					const firstLine = r.output.trim().split("\n")[0] ?? "";
+					const preview = firstLine.length > 70 ? `${firstLine.slice(0, 70)}...` : firstLine;
+					const content = r.summary || preview;
+					const col: ThemeColor = content ? "text" : "muted";
+					resultline = `${icon} ${theme.fg(col, content || "(no output)")}`;
 				}
 			}
 
@@ -745,14 +750,19 @@ export default function subagentExtension(pi: ExtensionAPI) {
 					}
 				}
 
-				// Full output (terminal runs only).
-				if (!isRunning && r.output.trim()) {
+				// Full output (terminal runs only). Always render the slot — show a
+				// placeholder when empty so the user never thinks output was lost.
+				if (!isRunning) {
 					container.addChild(new Spacer(1));
-					container.addChild(new Markdown(r.output.trim(), 0, 0, mdTheme));
-					if (r.outputMethod === "compressed") {
-						container.addChild(new Text(theme.fg("muted", "(output compressed by summary model \u2014 full text in history)"), 0, 0));
-					} else if (r.outputMethod === "truncated") {
-						container.addChild(new Text(theme.fg("muted", "(output truncated \u2014 full text in history)"), 0, 0));
+					if (r.output.trim()) {
+						container.addChild(new Markdown(r.output.trim(), 0, 0, mdTheme));
+						if (r.outputMethod === "compressed") {
+							container.addChild(new Text(theme.fg("muted", "(output compressed by summary model \u2014 full text in history)"), 0, 0));
+						} else if (r.outputMethod === "truncated") {
+							container.addChild(new Text(theme.fg("muted", "(output truncated \u2014 full text in history)"), 0, 0));
+						}
+					} else {
+						container.addChild(new Text(theme.fg("muted", "(no output \u2014 the run produced no text)"), 0, 0));
 					}
 				}
 

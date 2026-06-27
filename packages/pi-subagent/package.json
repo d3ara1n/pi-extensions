@@ -31,7 +31,8 @@
   "pi": {
     "extensions": [
       "./src/index.ts"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/d3ara1n/pi-extensions/main/packages/pi-subagent/preview.png"
   },
   "repository": {
     "type": "git",

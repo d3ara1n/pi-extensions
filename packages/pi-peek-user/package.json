@@ -30,7 +30,8 @@
   "pi": {
     "extensions": [
       "./src/index.ts"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/d3ara1n/pi-extensions/main/packages/pi-peek-user/preview.png"
   },
   "repository": {
     "type": "git",

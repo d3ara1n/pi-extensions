@@ -1,246 +1,153 @@
-# pi-subagent 改进计划
+# pi-subagent — 改进与后续计划
 
-> 基于 [nicobailon/pi-subagents](https://github.com/nicobailon/pi-subagents) 的对比分析，生成于 2026-06-06。
+> **状态：进行中** — 第一批改动已完成并修复（未提交），待 reload 验证崩溃修复后提交。
+> 第二批（剩余项 + 测试）为下次工作。
 
-## 当前状态
-
-`@d3ara1n/pi-subagent` 是一个精简的子代理扩展（~990 行，5 个核心文件），实现了：
-
-- 4 个内置角色 (explorer/reviewer/worker/researcher)
-- 单次子代理执行 + 流式 TUI
-- 嵌套权限白名单 (PI_SUBAGENT_ALLOWED)
-- pi-model-roles 集成 + 中文摘要
-- 输出截断保护 (50KB)
-- **并行委托**：主模型一次发出多个 `delegate` 工具调用，pi 框架自动并行执行
-- **嵌套委派**：worker 可委派 explorer/researcher，researcher 可委派 explorer
-- **Windows 路径解析**：`process.argv[1]` / `import.meta.resolve` / PATH 三级回退
-
-对比参考项目 `pi-subagents`（50+ 文件，~5000+ 行），以下是差距和改进方向。
+本文件记录对 `packages/pi-subagent` 的两轮改进成果、遗留问题、待办与测试方向，供下次接续。
 
 ---
 
-## P0 — 高优先级（实际影响大）
+## 一、已完成（已实现 + 已修复，未提交）
 
-### 1. ~修复 Windows spawn 路径问题~ ✅ 已实施（2026-06-06）
+跨两轮 review，共完成 12 项改动 + 4 项 bug 修复。`tsc --noEmit` 通过。
 
-**旧现状**：`getPiInvocation()` 仅返回 `"pi"` 字符串，pi 不在 PATH 时失败。
+### 第一轮（功能增强）
 
-**已实施**：`spawn.ts` 的 `getPiInvocation()` 现采用三步策略：
-- **Windows**：
-  1. `process.argv[1]` 如果是可执行脚本 → `spawn(process.execPath, [argv1, ...args])`（`bun` 模式）
-  2. `import.meta.resolve("@earendil-works/pi-coding-agent")` → 读 `bin` 字段 → `spawn(process.execPath, [binPath, ...args])`
-  3. 兜底 `spawn("pi", args)`（从 PATH 走）
-- **非 Windows**：直接 `spawn("pi", args)`（不变）
+| # | 项 | 文件 |
+|---|----|------|
+| 1 | fallback spawn 丢失 `onProgress`（TUI 冻结）→ 抽出 `emitProgress` 复用 | index.ts |
+| 2 | `proc.on("error")` 未清 `timeoutHandle` → 已清 | spawn.ts |
+| 3 | 无并发控制 → `AsyncSemaphore` + `maxConcurrency`（默认 4，排队显示 queued hint） | index.ts |
+| 4 | 全局超时 → 支持 per-role `timeoutMs` 覆盖 | types/index/spawn |
+| 5 | 短输出多余的 summary API 调用 → ≤150 字符直接取首行 | index.ts |
+| 8 | 嵌套深度无上限 → `PI_SUBAGENT_DEPTH` env + `maxDepth`（默认 3） | types/spawn/index |
+| 12 | `/subagent:doctor` 校验 `subagentRoles` 引用 + `fallbackRole` 解析 + 显示 depth/concurrency | index.ts |
 
-**注意**：参考项目用 `process.execPath` 启动的是 bun（不是编译版 exe 的虚拟路径），同时先用 `process.argv[1]` 或 `import.meta.resolve` 解析出**真实的 CLI 脚本路径**。虚拟路径出现时前两步会失败并降级到兜底，永远不会被实际传给子进程。详见 `resolveWindowsPiCliScript()`。
+### 第二轮（功能增强 + 正确性）
 
-**行动项**：
-- [x] 修改 `getPiInvocation()` 增加 Windows 回退逻辑
-- [ ] 在 Windows 上测试 `pi` 不在 PATH 时的行为
+| # | 项 | 文件 |
+|---|----|------|
+| 1 | `contextTokens` 记的是末轮而非峰值 → 改 `Math.max`（真实 bug） | spawn.ts |
+| 5 | `emitProgress` 无节流 → 50ms trailing 合并 | index.ts |
+| 6 | `activityLog.find()` O(n) → `toolCallIndex` Map O(1) | spawn.ts |
+| 8 | `resolveRoleAsync` 在并发闸门前 → 移到 acquire 之后（零开销等待） | index.ts |
+| 9 | fallback 正则硬匹配 → 抽 `isProviderError()`，词表 7→16 | index.ts |
+| 10 | 自定义工具 TUI 显示 JSON → `previewArgs()` 按参数形状智能预览 | index.ts |
+| 12 | `delegate` 加可选 `context` 参数（prepend 到 task） | index.ts |
+| 13 | 预算上限 → `maxTurns`/`maxCost`（全局 + per-role，进程侧 kill） | types/spawn/index |
+| 14 | 历史持久化 → `.pi/subagent/history/{sessionId}/{id}.json` | index.ts |
+| 2+15 | output 压缩（summary model 按 task 压缩 + 回退截断）+ 删除冗余 `getFinalOutput` | spawn/index |
 
----
+### 第三轮（review 发现的 bug 修复）
 
-### 2. 添加 Parallel 并行执行支持
-
-**现状**：主模型可通过同时发出多个 `delegate` 工具调用，利用 pi 框架原生的多工具调用并行机制实现并行。`promptGuidelines` 中专门教导模型：
-> "For multiple independent subagent tasks, emit multiple `delegate` tool calls in the same turn — they run in parallel automatically."
-
-**但在以下方面还有差距**（`pi-subagents` 的 parallel API）：
-- 无专用 `agents: [{name, task}, ...]` 数组参数的 parallel API
-- 无多 TUI slot 实时汇总各子代理进度
-- 无 git worktree 隔离（并行写入文件的安全保障）
-
-**行动项**：
-- [ ] 设计 parallel 执行的专用参数 schema（可选，当前机制已可用）
-- [ ] 多 TUI slot 展示多个并行子代理
-- [ ] 评估是否需要 worktree 隔离
-
----
-
-### 3. 添加模型回退 (fallbackModels)
-
-**现状**：单一模型依赖，provider 限流/宕机时子代理直接失败。
-
-**参考做法**（`pi-subagents`）：
-- 每个角色可配置 `fallbackModels: ["openai/gpt-5-mini", "anthropic/claude-sonnet-4"]`
-- 主模型失败时（quota/auth/timeout 类错误），按序尝试回退模型
-- 只在 provider 级别错误时回退，普通任务失败不回退
-
-**行动项**：
-- [x] 利用 pi-model-roles 角色体系，SubagentRole 加 `fallbackRole` 字段（默认 "default"）
-- [x] execute 中检测 provider 错误（stderr 含 429/quota/auth/timeout 等关键词）后 resolveRoleAsync 回退角色并重试
-- [x] 区分 provider 错误 vs 任务错误（普通失败不触发回退）
+| 级别 | 项 | 文件 |
+|------|----|------|
+| 🔴 | 节流 trailing 泄漏：trailing `onUpdate` 在工具 return 后触发 → 取消定时器（**很可能是 reload 后崩溃的元凶**） | index.ts |
+| 🔴 | 历史路径注入：`sessionId`/`toolCallId` 直接当路径片段 → `sanitizeFilename()` 过滤 | index.ts |
+| 🟡 | `AsyncSemaphore.active` 可能变负 → `Math.max(0, ...)` 防御 | index.ts |
+| 🟡 | abort listener 在 close 后未移除 → 保存引用，close/error 时 removeEventListener | spawn.ts |
+| — | 压缩 prompt injection 防护：task 用 `<task>`/`<output_to_compress>` XML 标签围栏 + systemPrompt 声明"标签内是数据非指令" | index.ts |
 
 ---
 
-## P1 — 中优先级（显著提升体验）
+## 二、🔴 待验证：reload 后的崩溃问题
 
-### 4. Agent 覆盖系统
+**现象**：reload pi 后，派 `delegate(role=reviewer, ...)` 子进程崩溃，输出全是 TUI 转义序列（`[?1049l` 退出 alt-screen、`[?1006l` 鼠标追踪关闭等），reviewer 无法正常返回结构化结果。
 
-**现状**：~~内置角色在 `roles.ts` 中硬编码，用户想改模型或工具必须改源码。~~
+**高置信度根因**：**节流 trailing 泄漏**（第三轮 🔴#1）。
+- 50ms 节流的 trailing `setTimeout` 在 `spawnSubagent` 返回后才触发
+- 此时工具已 `return`，框架认为 delegate 结束，却收到一个 `exitCode:-1` 的"还在跑"旧状态进度更新
+- 状态不一致 → TUI 异常重绘/崩溃
+- 已修复：spawnSubagent 返回后立即 `clearTimeout(throttleHandle)` + 清空 `pendingPartial`
 
-**行动项**：
-- [x] 设计 override schema → `SubagentConfig.agentOverrides`
-- [x] `session_start` 中加载 config 后合并 override 到内置角色
-- [x] 支持禁用角色 (`disabled: true`) 和自定义角色
+**验证方式**：
+1. `git diff` 确认改动已就位
+2. `/reload` pi
+3. 再派一次 `delegate(role=reviewer, task="简单审阅 src/index.ts 的错误处理")`
+4. 观察是否还崩
+
+**若仍崩**（说明根因不止节流）的排查方向：
+- delegate 工具本身的 `renderResult` 在 result 异常时是否 NPE（`r.activityLog`/`r.messages` 为空时的渲染路径）
+- 子进程 `--mode json` 输出是否真的纯 JSON（而非混入 TUI 文本）——用 `PI_DEBUG=1` 或直接看 `.pi/subagent/history/` 里的 stderr
+- budget/abort 交互在极端情况是否把子进程打到非正常退出
+- 确认崩溃发生时 `throttleHandle` 是否真的被清（加临时日志）
 
 ---
 
-### 5. ❌ Chain 链式执行 — 设计决策：不实现
+## 三、下次要做（方案已定，待实施）
 
-**理由**：pi-subagent 的设计原则是「主模型做决策，子代理执行具体任务」。链式编排意味着子代理之间传递上下文、多步流水线——这本质上是编排工作，应该由主模型来主导。主模型会在每步之后检查结果、决定下一步派谁。
+### A. 正确性 / 健壮性
 
-**替代方式**：主模型需要多步时，直接连续调用 `delegate` 即可，每步都可检查结果再决定下一步：
+- **`toolCallIndex` / `activityLog` 无限增长**（第二轮 🟡#3，未做）
+  - Map 只 set 不 delete，activityLog 只 push。长任务内存峰值高。
+  - 方案：工具调用完成后从 Map 删除该 id（activityLog 保留用于 expanded 视图）；或两者都设滚动上限（保留最近 N 条 + 最终 assistant 文本）。
+
+- **节流 flush 策略**（第三轮修复后可再优化）
+  - 当前是"取消 trailing"。更优是"flush 最后一次再取消"——但需确认框架允许 return 后调用 onUpdate。先观察崩溃修复是否足够，不够再改。
+
+### B. 测试（当前 0 测试覆盖，见下节）
+
+---
+
+## 四、待测试方向（当前无任何测试）
+
+项目用 `node:test` + `node:assert`（零依赖），命令：
+```bash
+node --test packages/pi-subagent/src/__tests__/<file>.test.ts
 ```
-主模型: delegate(explorer) → 返回结果 → 主模型检查 → delegate(worker) → ...
+建议在 `packages/pi-subagent/src/__tests__/` 下补齐，按纯函数/模块拆分（易测、无需起子进程）：
+
+### 1. 纯函数单元测试（高优先级，无外部依赖）
+
+| 目标 | 文件 | 重点 |
+|------|------|------|
+| `sanitizeFilename` | index.ts | `../`、`/`、`\`、空串、纯特殊字符 → 全部被 `_`/`unknown` 兜底，绝不逃逸目录 |
+| `isProviderError` | index.ts | 16 个关键词各覆盖 + 业务错误（如 "TypeError: undefined"）**不应**误判 |
+| `previewArgs` | index.ts | command/path/url/query/regex 各分支 + 空对象 + 超长截断 |
+| `formatTokens` | index.ts | 边界：999/1000/9999/10000/999999/1000000 |
+| `compressOutput` 的 `truncateOutput` 部分 | index.ts | head+tail 切片正确性、边界长度 |
+| `AsyncSemaphore` | index.ts | acquire/release 配对、排队顺序、abort 清理（waiter 移除）、`active` 不为负（🟡#4 验证）、release 唤醒下一个 |
+| `loadSubagentConfig` | config.ts | merge 优先级（global→project）、缺字段用默认、agentOverrides 结构 |
+
+### 2. spawn.ts 集成测试（需 mock，中优先级）
+
+`spawnSubagent` 依赖真实 `pi` 二进制，难直接测。可选：
+- mock `child_process.spawn`，喂预制 JSON event 流，验证 `processLine` 解析：
+  - `message_end` 的 usage 累加（input/output/cacheRead/cost 都是 `+=`，**contextTokens 是 `Math.max` 峰值** ← 验证第一轮 bug 修复）
+  - `tool_execution_start/end` 的 activityLog 状态流转 + `toolCallIndex` 命中
+  - `thinking_start/end` 配对
+- budget 执行：mock 一个 usage 持续增长的流，验证 `maxTurns`/`maxCost` 触发 `checkBudget` → kill → `stopReason="budget_exceeded"` 且 exitCode 被置 0
+- abort 信号：注册后立即 abort，验证 `wasAborted` + killProc
+
+### 3. 回归测试（针对已修 bug）
+
+- 节流泄漏：构造连续多个 progress 事件，确认 spawnSubagent resolve 后**不再有 onUpdate 触发**（这是崩溃修复的回归守护）
+- 路径注入：sessionId=`../../etc` 应写入 `.pi/subagent/history/_..._/` 而非逃逸
+- fallback onProgress：fallback 路径确实调用了 emitProgress（验证第一轮 #1 修复）
+
+### 4. 手动/端到端（确认崩溃修复）
+
+- reload 后派 reviewer/explorer/worker 各一次，确认正常返回
+- 触发 output > 50K（让 explorer 输出大段内容）→ 验证压缩触发、`outputMethod` 正确、history 存 rawOutput
+- 触发 budget：设 `maxTurns: 2` 跑一个长任务，验证截断 + stopReason
+- 多 delegate 并发（一次 emit 5 个）→ 验证排队 + queued hint + 并发上限
+
+---
+
+## 五、明确不做
+
+- **#7 每次 spawn 冷启动开销**（架构级）——当前 `--no-session` 隔离是设计意图，改造成本高、收益不确定，暂不动。若未来要优化，方向是 `--resume` 复用已加载 session，但需重新评估隔离语义。
+
+---
+
+## 附：本次改动文件清单
+
+```
+packages/pi-subagent/README.md     — 文档（新配置项 + 新特性章节 + 默认值）
+packages/pi-subagent/src/config.ts — 加载新字段
+packages/pi-subagent/src/index.ts  — 主体（并发/深度/预算/压缩/历史/格式化/修复）
+packages/pi-subagent/src/spawn.ts  — 进程管理（budget/kill/abort/index/peak contextTokens）
+packages/pi-subagent/src/types.ts  — 类型扩展（maxTurns/maxCost/outputMethod/rawOutput/...）
 ```
 
----
-
-### 6. ❌ Fork 上下文模式 — 设计决策：不实现
-
-**理由**：fork 是为了让子代理「理解前因后果」后做判断——这更适合 planner/oracle 这类参谋角色。但 pi-subagent 的定位是**执行者**而非**参谋者**：
-- 主模型拥有最完整的上下文，决策应由主模型做出
-- 子代理只需要清晰的任务描述，不需要知道讨论历史
-- 如果某个子代理确实需要上下文，主模型可以在 task 描述中携带必要的背景信息
-
-> 详见 `spawn.ts` 中 `getPiInvocation()` 设计权衡的分析：参考项目 nicobailon/pi-subagents 确实实现了 fork 模式，但那是为 planner/oracle 等决策角色服务的。我们的 4 个角色（explorer/reviewer/worker/researcher）全是执行型，fresh 上下文是正确选择。
-
----
-
-### 7. Background/Async 后台执行
-
-**现状**：子代理运行时阻塞主会话。
-
-**参考做法**（`pi-subagents`）：
-- `--bg` 标志或 `action: "run-async"` 触发后台执行
-- 异步作业追踪器 (`async-job-tracker.ts`) + 结果文件系统
-- `result-watcher.ts` 轮询结果目录
-- 完成时发送通知
-- `subagent({ action: "status" })` 查看运行状态
-
-**行动项**：
-- [ ] 设计 async 执行架构
-- [ ] 实现后台子进程 spawn + 状态持久化
-- [ ] 实现结果文件 + 轮询/通知机制
-- [ ] TUI 添加 async widget
-
----
-
-## P2 — 低优先级（锦上添花）
-
-### 8. Slash 命令
-
-**参考**：`/run [agent] "task"`, `/chain step1 -> step2`, `/parallel task1 -> task2`, `/subagents-doctor`
-
-**行动项**：
-- [ ] 使用 `pi.registerCommand()` 注册命令
-- [ ] 解析命令参数 + 路由到对应执行模式
-
----
-
-### 9. Intercom 双向通信
-
-**参考**：子进程可通过 `contact_supervisor` 工具主动与父进程通信，父进程可下发控制指令。
-
-**行动项**：
-- [ ] 调研是否需要 `pi-intercom` 配合
-- [ ] 设计文件系统事件通道
-
----
-
-### 10. Acceptance Gate
-
-**参考**：子代理完成后自动评估输出质量，分为 attested/checked/verified/reviewed 4 级。
-
-**行动项**：
-- [ ] 设计验收规则和级别
-- [ ] 实现自动验收逻辑
-
----
-
-### 11. 更多内置角色
-
-**参考项目有 8 个**，当前只有 4 个。参考项目额外有：`planner`、`oracle`、`context-builder`、`delegate`。
-
-**设计决策**：`planner` 和 `oracle` 是参谋型角色（需要理解全局上下文），不匹配 pi-subagent「执行者」的定位，**不引入**。
-
-可以考虑引入的：
-
-| 新角色 | 用途 | 是否执行型 |
-|--------|------|-----------|
-| `context-builder` | 强化的上下文收集，输出 context.md | ❌ 不需要 — explorer 已覆盖此场景 |
-| `delegate` | 轻量通用代理，行为接近父会话 | ⚠️ 与现有 4 角色分工重叠 |
-
----
-
-### 12. 角色定义外部化
-
-**现状**：角色在 `roles.ts` 中 TypeScript 硬编码。
-
-**参考做法**：
-- 每个角色一个 `.md` 文件（YAML frontmatter + markdown body）
-- 三层发现：builtin → user (`~/.pi/agents/`) → project (`.pi/agents/`)
-- 运行时 CRUD：通过工具动态创建/更新/删除角色
-
-**行动项**：
-- [ ] 设计 `.md` frontmatter 格式
-- [ ] 实现角色发现和加载逻辑
-- [ ] 迁移内置角色到 .md 文件
-
----
-
-### 13. 单元测试
-
-**参考项目有 50+ 单元测试 + 20+ 集成测试**。当前无任何测试。
-
-**行动项**：
-- [ ] 为 `spawnSubagent` 核心逻辑添加测试（mock child_process）
-- [ ] 为配置加载添加测试
-- [ ] 为角色解析添加测试
-- [ ] 为 TUI 渲染函数添加测试
-
----
-
-### 14. Diagnostics 诊断工具
-
-**参考**：`/subagents-doctor` 检查配置正确性、依赖是否安装、路径是否可用。
-
-**行动项**：
-- [x] 添加 `pi.registerCommand("subagent:doctor", ...)` 命令
-- [x] 检查项：pi 可执行、pi-model-roles 已加载、配置格式正确、角色可解析、ALLOWLIST
-
----
-
-### 15. 摘要调用 token 保护
-
-**现状**：~~子代理完整输出全部发给摘要模型，大输出时可能消耗大量 token。~~
-
-**行动项**：
-- [x] 截断发送给摘要模型的 input（头尾各 2000 字符，共 ≤4000）
-
----
-
-## 参考项目关键文件索引
-
-| 功能模块 | 参考文件路径 |
-|---------|-------------|
-| 扩展入口 | `src/extension/index.ts` |
-| 工具 Schema | `src/extension/schemas.ts` |
-| 配置 | `src/extension/config.ts` |
-| Agent 系统 | `src/agents/agents.ts`, `agent-selection.ts`, `agent-management.ts` |
-| 前台执行 | `src/runs/foreground/subagent-executor.ts`, `execution.ts` |
-| 后台执行 | `src/runs/background/subagent-runner.ts`, `async-execution.ts` |
-| Pi 启动 | `src/runs/shared/pi-spawn.ts` |
-| 工作流图 | `src/runs/shared/workflow-graph.ts` |
-| 嵌套事件 | `src/runs/shared/nested-events.ts` |
-| Intercom | `src/intercom/intercom-bridge.ts`, `result-intercom.ts` |
-| 类型定义 | `src/shared/types.ts` |
-| Slash 命令 | `src/slash/slash-commands.ts` |
-| TUI | `src/tui/render.ts`, `render-helpers.ts` |
-| 内置角色 | `agents/*.md` (scout, researcher, planner, worker, reviewer, context-builder, oracle, delegate) |
-| 技能 | `skills/pi-subagents/SKILL.md` |
-| 提示模板 | `prompts/*.md` |
-| 测试 | `test/unit/*.test.ts`, `test/integration/*.test.ts` |
-
-本地克隆路径：`\tmp\pi-github-repos\nicobailon\pi-subagents`
+**未提交**。待崩溃验证通过后，一次性 `git commit`（建议拆 2 个 commit：feat 改进 + fix 回归）。

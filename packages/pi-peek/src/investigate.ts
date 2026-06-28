@@ -49,6 +49,9 @@ export async function investigateWithReference(
 
 	const options: Record<string, any> = {
 		maxTokens: 2048,
+		// referenceText 整个 session 序列化通常远超 Anthropic 1024-token 缓存门槛，
+		// 同 session 多次 peek 时 system prompt 整体不变 → 命中 prompt cache。
+		cacheRetention: "short",
 		apiKey: resolved.apiKey,
 		headers: resolved.headers,
 	};

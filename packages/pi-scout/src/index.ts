@@ -20,11 +20,16 @@ import { callSideAgent } from "./side-agent.ts";
 import { buildScoutSystemPrompt, buildScoutUserMessage } from "./scout-prompt.ts";
 import { filterSkillsBlock, resetSkillCache } from "./skill-inject.ts";
 import { switchToRole } from "./model-switch.ts";
+import { evaluateShortCircuit } from "./short-circuit.ts";
 
 const STATUS_KEY = "scout";
 
 /** Build a one-line status summary from a scout decision. */
 function formatDecisionStatus(decision: ScoutDecision, theme: any): string {
+	if (decision.source === "short-circuit") {
+		return theme.fg("success", "✓ scout:") + " " + theme.fg("dim", `(skipped) ${decision.reasoning}`);
+	}
+
 	const parts: string[] = [];
 
 	if (decision.skills.length > 0) {
@@ -77,6 +82,7 @@ export default function scoutExtension(pi: ExtensionAPI) {
 				`Modules:`,
 				`  skill-router: ${config.modules.skillRouter ? "on" : "off"}`,
 				`  model-router: ${config.modules.modelRouter ? "on" : "off"}`,
+				`  short-circuit: ${config.modules.shortCircuit ? "on" : "off"}`,
 			];
 
 			if (lastDecision) {
@@ -121,6 +127,23 @@ export default function scoutExtension(pi: ExtensionAPI) {
 				ctx.ui.notify("Scout: model-router disabled", "info");
 			} else {
 				ctx.ui.notify("Usage: /scout:model-router on|off", "info");
+			}
+		},
+	});
+
+	// ── /scout:short-circuit on/off ─────────────────────────────────
+	pi.registerCommand("scout:short-circuit", {
+		description: "Toggle short-circuit module (on/off)",
+		handler: async (args, ctx) => {
+			const value = (args ?? "").trim().toLowerCase();
+			if (value === "on") {
+				config.modules.shortCircuit = true;
+				ctx.ui.notify("Scout: short-circuit enabled", "info");
+			} else if (value === "off") {
+				config.modules.shortCircuit = false;
+				ctx.ui.notify("Scout: short-circuit disabled", "info");
+			} else {
+				ctx.ui.notify("Usage: /scout:short-circuit on|off", "info");
 			}
 		},
 	});
@@ -192,6 +215,52 @@ export default function scoutExtension(pi: ExtensionAPI) {
 
 		const theme = ctx.ui.theme;
 
+		// Skills available this turn — used by both the short-circuit layer
+		// and the side-agent path.
+		const skills = event.systemPromptOptions?.skills ?? [];
+		if (cachedAllSkills.length === 0 && skills.length > 0) {
+			cachedAllSkills = skills.map((s: any) => ({
+				name: s.name,
+				description: s.description ?? "",
+				filePath: s.filePath,
+			}));
+		}
+		const skillEntries = skills.map((s: any) => ({
+			name: s.name,
+			description: s.description ?? "",
+			filePath: s.filePath,
+		}));
+
+		// ── Short-circuit layer ───────────────────────────────────
+		// Skip the side model on trivial acknowledgments. A trivial ack means
+		// "no skills, don't switch models" — both answers are certain, so this
+		// is safe even with model-router on. Runs before model resolution to
+		// save that cost too.
+		if (config.modules.shortCircuit) {
+			const skip = evaluateShortCircuit(event.prompt, config.shortCircuit);
+			if (skip) {
+				const decision: ScoutDecision = {
+					skills: [],
+					role: null,
+					reasoning: skip.reasoning,
+					source: "short-circuit",
+				};
+				lastDecision = decision;
+
+				let systemPrompt = event.systemPrompt;
+				if (config.modules.skillRouter) {
+					systemPrompt = filterSkillsBlock(systemPrompt, [], skillEntries);
+				}
+
+				// Keep prevTurn current so the next turn still has context.
+				prevTurn = { userPrompt: event.prompt, assistantSummary: "" };
+
+				ctx.ui.setStatus(STATUS_KEY, formatDecisionStatus(decision, theme));
+				if (systemPrompt !== event.systemPrompt) return { systemPrompt };
+				return;
+			}
+		}
+
 		// Show "Scouting..." indicator
 		ctx.ui.setStatus(STATUS_KEY, theme.fg("accent", "◎") + theme.fg("dim", " Scouting..."));
 
@@ -206,15 +275,7 @@ export default function scoutExtension(pi: ExtensionAPI) {
 		// Update status: resolving
 		ctx.ui.setStatus(STATUS_KEY, theme.fg("accent", "◎") + theme.fg("dim", ` Scouting via ${sideResolved.model.provider}/${sideResolved.model.id}...`));
 
-		// 1. Get available skills from systemPromptOptions
-		const skills = event.systemPromptOptions?.skills ?? [];
-		if (cachedAllSkills.length === 0 && skills.length > 0) {
-			cachedAllSkills = skills.map((s: any) => ({
-				name: s.name,
-				description: s.description ?? "",
-				filePath: s.filePath,
-			}));
-		}
+		// 1. Build the skills list for the side agent prompt
 		const skillsList = skills
 			.map((s: any) => `- ${s.name}: ${s.description ?? "(no description)"}`)
 			.join("\n");
@@ -265,11 +326,7 @@ export default function scoutExtension(pi: ExtensionAPI) {
 
 		// 6. skill-router: filter skills XML to only selected ones
 		if (config.modules.skillRouter) {
-			systemPrompt = filterSkillsBlock(
-				systemPrompt,
-				decision.skills,
-				skills.map((s: any) => ({ name: s.name, description: s.description ?? "", filePath: s.filePath })),
-			);
+			systemPrompt = filterSkillsBlock(systemPrompt, decision.skills, skillEntries);
 		}
 
 		// 7. model-router: switch model if side agent recommends a different role

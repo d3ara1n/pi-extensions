@@ -31,7 +31,7 @@ export async function callSideAgent(
 	systemPrompt: string,
 	userMessage: string,
 ): Promise<ScoutDecision> {
-	const fallback: ScoutDecision = { skills: [], role: null, reasoning: "side agent error" };
+	const fallback: ScoutDecision = { skills: [], role: null, reasoning: "side agent error", source: "side-agent" };
 
 	const context: SideAgentContext = {
 		systemPrompt,
@@ -71,7 +71,7 @@ export async function callSideAgent(
  * Tolerant of markdown wrapping, extra whitespace, etc.
  */
 function parseDecision(raw: string): ScoutDecision {
-	const fallback: ScoutDecision = { skills: [], role: null, reasoning: "parse error" };
+	const fallback: ScoutDecision = { skills: [], role: null, reasoning: "parse error", source: "side-agent" };
 
 	// Strip markdown code fences if present
 	let text = raw.trim();
@@ -92,6 +92,7 @@ function parseDecision(raw: string): ScoutDecision {
 			reasoning: typeof parsed.reasoning === "string"
 				? parsed.reasoning
 				: "no reasoning provided",
+			source: "side-agent",
 		};
 	} catch {
 		console.warn("[pi-scout] Failed to parse side agent response:", raw.slice(0, 200));

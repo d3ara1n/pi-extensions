@@ -62,6 +62,14 @@ export function loadScoutConfig(cwd?: string): ScoutConfig {
 		modules: {
 			skillRouter: raw.modules?.skillRouter ?? DEFAULT_CONFIG.modules.skillRouter,
 			modelRouter: raw.modules?.modelRouter ?? DEFAULT_CONFIG.modules.modelRouter,
+			shortCircuit: raw.modules?.shortCircuit ?? DEFAULT_CONFIG.modules.shortCircuit,
+		},
+		shortCircuit: {
+			trivialAck: raw.shortCircuit?.trivialAck ?? DEFAULT_CONFIG.shortCircuit.trivialAck,
+			maxAckLength: raw.shortCircuit?.maxAckLength ?? DEFAULT_CONFIG.shortCircuit.maxAckLength,
+			ackPhrases: Array.isArray(raw.shortCircuit?.ackPhrases)
+				? raw.shortCircuit.ackPhrases.filter((p: any) => typeof p === "string")
+				: DEFAULT_CONFIG.shortCircuit.ackPhrases,
 		},
 	};
 }

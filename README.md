@@ -10,7 +10,7 @@ A collection of small extensions for [Pi Coding Agent](https://pi.dev).
 | [`pi-context-include`](./packages/pi-context-include) | `@path` syntax for AGENTS.md — include files by reference |
 | [`pi-provider-zhipu-coding-plan`](./packages/pi-provider-zhipu-coding-plan) | Zhipu AI Coding Plan provider — auto-discover models, report usage |
 | [`pi-usage-block`](./packages/pi-usage-block) | Usage quota status bar block for powerline |
-| [`pi-scout`](./packages/pi-scout) <sup>†</sup> | Per-turn side agent — lazy skill injection + automatic model routing |
+| [`pi-scout`](./packages/pi-scout) <sup>†</sup> | Per-turn side agent — lazy skill injection, automatic model routing, and trivial-ack short-circuit (skips the side model on `好的`/`ok`/`はい`) |
 | [`pi-subagent`](./packages/pi-subagent) <sup>†</sup> | Role-based subagent orchestration — delegates tasks to specialized pi child processes with real-time TUI progress |
 | [`pi-model-roles`](./packages/pi-model-roles) | Named model role definitions with resolution to Model instances |
 | [`pi-command-palette`](./packages/pi-command-palette) | Global command palette — Ctrl+Shift+P to search and run commands from anywhere |

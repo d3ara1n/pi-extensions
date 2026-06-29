@@ -12,26 +12,26 @@ import type { ModelRolesAPI } from "@d3ara1n/pi-model-roles";
  * @returns true if the switch was successful
  */
 export async function switchToRole(
-	pi: ExtensionAPI,
-	roleName: string,
-	rolesApi: ModelRolesAPI,
+  pi: ExtensionAPI,
+  roleName: string,
+  rolesApi: ModelRolesAPI,
 ): Promise<boolean> {
-	const resolved = await rolesApi.resolveRoleAsync(roleName);
+  const resolved = await rolesApi.resolveRoleAsync(roleName);
 
-	if (!resolved.model) {
-		console.warn(`[pi-scout] Role "${roleName}" could not be resolved — model not available`);
-		return false;
-	}
+  if (!resolved.model) {
+    console.warn(`[pi-scout] Role "${roleName}" could not be resolved — model not available`);
+    return false;
+  }
 
-	const success = await pi.setModel(resolved.model);
-	if (!success) {
-		console.warn(`[pi-scout] setModel() returned false for role "${roleName}" — no API key?`);
-		return false;
-	}
+  const success = await pi.setModel(resolved.model);
+  if (!success) {
+    console.warn(`[pi-scout] setModel() returned false for role "${roleName}" — no API key?`);
+    return false;
+  }
 
-	if (resolved.config.thinking) {
-		pi.setThinkingLevel(resolved.config.thinking);
-	}
+  if (resolved.config.thinking) {
+    pi.setThinkingLevel(resolved.config.thinking);
+  }
 
-	return true;
+  return true;
 }

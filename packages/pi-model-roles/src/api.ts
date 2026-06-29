@@ -14,142 +14,150 @@ const GLOBAL_KEY = "__piModelRoles";
 
 /** Mutable state. */
 interface APIState {
-	config: ModelRolesConfig | undefined;
-	currentModel: any;
-	modelRegistry: any;
+  config: ModelRolesConfig | undefined;
+  currentModel: any;
+  modelRegistry: any;
 }
 
-export function initModelRolesAPI(modelRegistry: any, currentModel: any, cwd?: string): ModelRolesAPI {
-	const state: APIState = {
-		config: undefined,
-		currentModel,
-		modelRegistry,
-	};
+export function initModelRolesAPI(
+  modelRegistry: any,
+  currentModel: any,
+  cwd?: string,
+): ModelRolesAPI {
+  const state: APIState = {
+    config: undefined,
+    currentModel,
+    modelRegistry,
+  };
 
-	function getConfig(): ModelRolesConfig {
-		if (!state.config) {
-			state.config = loadRolesConfig(cwd);
-		}
-		return state.config;
-	}
+  function getConfig(): ModelRolesConfig {
+    if (!state.config) {
+      state.config = loadRolesConfig(cwd);
+    }
+    return state.config;
+  }
 
-	const api: ModelRolesAPI = {
-		getRoles(): Record<string, RoleConfig> {
-			return getConfig().roles;
-		},
+  const api: ModelRolesAPI = {
+    getRoles(): Record<string, RoleConfig> {
+      return getConfig().roles;
+    },
 
-		getRole(name: string): RoleConfig | undefined {
-			return getConfig().roles[name];
-		},
+    getRole(name: string): RoleConfig | undefined {
+      return getConfig().roles[name];
+    },
 
-		resolveRole(name: string): ResolvedRole {
-			const roleConfig = getConfig().roles[name];
-			if (!roleConfig) {
-				return {
-					name,
-					config: { model: null },
-					model: state.currentModel,
-					apiKey: undefined,
-					headers: undefined,
-				};
-			}
+    resolveRole(name: string): ResolvedRole {
+      const roleConfig = getConfig().roles[name];
+      if (!roleConfig) {
+        return {
+          name,
+          config: { model: null },
+          model: state.currentModel,
+          apiKey: undefined,
+          headers: undefined,
+        };
+      }
 
-			const resolved = resolveModelForRole(roleConfig, state.modelRegistry, state.currentModel);
-			return { name, config: roleConfig, ...resolved };
-		},
+      const resolved = resolveModelForRole(roleConfig, state.modelRegistry, state.currentModel);
+      return { name, config: roleConfig, ...resolved };
+    },
 
-		async resolveRoleAsync(name: string): Promise<ResolvedRole> {
-			const roleConfig = getConfig().roles[name];
-			if (!roleConfig) {
-				if (state.currentModel) {
-					const auth = await state.modelRegistry.getApiKeyAndHeaders(state.currentModel);
-					return {
-						name,
-						config: { model: null },
-						model: state.currentModel,
-						apiKey: auth.ok ? auth.apiKey : undefined,
-						headers: auth.ok ? auth.headers : undefined,
-					};
-				}
-				return {
-					name,
-					config: { model: null },
-					model: undefined,
-					apiKey: undefined,
-					headers: undefined,
-				};
-			}
+    async resolveRoleAsync(name: string): Promise<ResolvedRole> {
+      const roleConfig = getConfig().roles[name];
+      if (!roleConfig) {
+        if (state.currentModel) {
+          const auth = await state.modelRegistry.getApiKeyAndHeaders(state.currentModel);
+          return {
+            name,
+            config: { model: null },
+            model: state.currentModel,
+            apiKey: auth.ok ? auth.apiKey : undefined,
+            headers: auth.ok ? auth.headers : undefined,
+          };
+        }
+        return {
+          name,
+          config: { model: null },
+          model: undefined,
+          apiKey: undefined,
+          headers: undefined,
+        };
+      }
 
-			const resolved = await resolveModelForRoleAsync(roleConfig, state.modelRegistry, state.currentModel);
-			if (!resolved) {
-				return {
-					name,
-					config: roleConfig,
-					model: undefined,
-					apiKey: undefined,
-					headers: undefined,
-				};
-			}
+      const resolved = await resolveModelForRoleAsync(
+        roleConfig,
+        state.modelRegistry,
+        state.currentModel,
+      );
+      if (!resolved) {
+        return {
+          name,
+          config: roleConfig,
+          model: undefined,
+          apiKey: undefined,
+          headers: undefined,
+        };
+      }
 
-			return { name, config: roleConfig, ...resolved };
-		},
+      return { name, config: roleConfig, ...resolved };
+    },
 
-		getDefaultRole(): string {
-			return getConfig().defaultRole ?? "default";
-		},
+    getDefaultRole(): string {
+      return getConfig().defaultRole ?? "default";
+    },
 
-		getVisibleRoles(): Record<string, RoleConfig> {
-			const roles = getConfig().roles;
-			const result: Record<string, RoleConfig> = {};
-			for (const [name, config] of Object.entries(roles)) {
-				if (!config.hidden) {
-					result[name] = config;
-				}
-			}
-			return result;
-		},
+    getVisibleRoles(): Record<string, RoleConfig> {
+      const roles = getConfig().roles;
+      const result: Record<string, RoleConfig> = {};
+      for (const [name, config] of Object.entries(roles)) {
+        if (!config.hidden) {
+          result[name] = config;
+        }
+      }
+      return result;
+    },
 
-		findRoleByModel(modelId: string): string | undefined {
-			const roles = getConfig().roles;
-			for (const [name, config] of Object.entries(roles)) {
-				if (config.model === modelId) {
-					return name;
-				}
-			}
-			return undefined;
-		},
+    findRoleByModel(modelId: string): string | undefined {
+      const roles = getConfig().roles;
+      for (const [name, config] of Object.entries(roles)) {
+        if (config.model === modelId) {
+          return name;
+        }
+      }
+      return undefined;
+    },
 
-		getCurrentRole(modelId: string): string | undefined {
-			const roles = getConfig().roles;
-			// 1. Exact match wins: a role explicitly bound to this model.
-			const exact = Object.entries(roles).find(([, c]) => c.model === modelId)?.[0];
-			if (exact) return exact;
-			// 2. Default role — when model=null it transparently uses the current
-			//    model, so it is the meaningful base in the all-null config.
-			const defaultName = getConfig().defaultRole ?? "default";
-			const defaultConfig = roles[defaultName];
-			if (defaultConfig && !defaultConfig.model) return defaultName;
-			// 3. First model=null role (reached only when default is bound elsewhere).
-			const nullRole = Object.entries(roles).find(([, c]) => !c.model)?.[0];
-			return nullRole;
-		},
-	};
+    getCurrentRole(modelId: string): string | undefined {
+      const roles = getConfig().roles;
+      // 1. Exact match wins: a role explicitly bound to this model.
+      const exact = Object.entries(roles).find(([, c]) => c.model === modelId)?.[0];
+      if (exact) return exact;
+      // 2. Default role — when model=null it transparently uses the current
+      //    model, so it is the meaningful base in the all-null config.
+      const defaultName = getConfig().defaultRole ?? "default";
+      const defaultConfig = roles[defaultName];
+      if (defaultConfig && !defaultConfig.model) return defaultName;
+      // 3. First model=null role (reached only when default is bound elsewhere).
+      const nullRole = Object.entries(roles).find(([, c]) => !c.model)?.[0];
+      return nullRole;
+    },
+  };
 
-	// Store on globalThis — survives module identity mismatches
-	(globalThis as any)[GLOBAL_KEY] = api;
-	return api;
+  // Store on globalThis — survives module identity mismatches
+  (globalThis as any)[GLOBAL_KEY] = api;
+  return api;
 }
 
 /**
  * Update the tracked current model.
  */
 export function updateCurrentModel(model: any): void {
-	const api = (globalThis as any)[GLOBAL_KEY] as ModelRolesAPI | undefined;
-	if (!api) return;
-	const state = (api as any).__state as APIState | undefined;
-	if (state) {
-		state.currentModel = model;
-	}
+  const api = (globalThis as any)[GLOBAL_KEY] as ModelRolesAPI | undefined;
+  if (!api) return;
+  const state = (api as any).__state as APIState | undefined;
+  if (state) {
+    state.currentModel = model;
+  }
 }
 
 /**
@@ -157,12 +165,12 @@ export function updateCurrentModel(model: any): void {
  * Throws if initModelRolesAPI() has not been called yet.
  */
 export function getModelRolesAPI(): ModelRolesAPI {
-	const api = (globalThis as any)[GLOBAL_KEY] as ModelRolesAPI | undefined;
-	if (!api) {
-		throw new Error(
-			"ModelRolesAPI not initialized. " +
-			"Ensure @d3ara1n/pi-model-roles extension is loaded and session_start has fired.",
-		);
-	}
-	return api;
+  const api = (globalThis as any)[GLOBAL_KEY] as ModelRolesAPI | undefined;
+  if (!api) {
+    throw new Error(
+      "ModelRolesAPI not initialized. " +
+        "Ensure @d3ara1n/pi-model-roles extension is loaded and session_start has fired.",
+    );
+  }
+  return api;
 }

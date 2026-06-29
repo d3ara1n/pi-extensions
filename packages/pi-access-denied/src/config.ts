@@ -12,33 +12,33 @@ import * as path from "node:path";
 import { DEFAULT_CONFIG, type AccessDeniedConfig, type AccessMode } from "./types.ts";
 /** Get the pi agent directory path. Honors PI_AGENT_DIR override. */
 function getAgentDir(): string {
-	const envDir = process.env.PI_AGENT_DIR;
-	if (envDir) return envDir;
-	return path.join(os.homedir(), ".pi", "agent");
+  const envDir = process.env.PI_AGENT_DIR;
+  if (envDir) return envDir;
+  return path.join(os.homedir(), ".pi", "agent");
 }
 
 /** Read and parse a settings.json file. Returns parsed object or {}. */
 function readSettingsFile(filePath: string): any {
-	try {
-		if (!fs.existsSync(filePath)) return {};
-		const content = fs.readFileSync(filePath, "utf-8");
-		return JSON.parse(content);
-	} catch {
-		return {};
-	}
+  try {
+    if (!fs.existsSync(filePath)) return {};
+    const content = fs.readFileSync(filePath, "utf-8");
+    return JSON.parse(content);
+  } catch {
+    return {};
+  }
 }
 
 const VALID_MODES: ReadonlySet<AccessMode> = new Set(["prompt", "deny", "allow"]);
 
 function asMode(value: unknown): AccessMode | undefined {
-	return typeof value === "string" && VALID_MODES.has(value as AccessMode)
-		? (value as AccessMode)
-		: undefined;
+  return typeof value === "string" && VALID_MODES.has(value as AccessMode)
+    ? (value as AccessMode)
+    : undefined;
 }
 
 function asStringArray(value: unknown): string[] | undefined {
-	if (!Array.isArray(value)) return undefined;
-	return value.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
 }
 
 /**
@@ -60,23 +60,23 @@ function asStringArray(value: unknown): string[] | undefined {
  * This lenient parsing means a typo in settings can never crash the gate.
  */
 function asDeniedPaths(value: unknown): Record<string, string | null> {
-	if (!Array.isArray(value)) return {};
-	const out: Record<string, string | null> = {};
-	for (const group of value) {
-		if (!group || typeof group !== "object" || Array.isArray(group)) continue;
-		const g = group as Record<string, unknown>;
-		const paths = g.paths;
-		if (!Array.isArray(paths)) continue; // missing or non-array paths → skip group
-		// reason: omitted / null → null; string → that string; else skip group.
-		let reason: string | null;
-		if (g.reason === undefined || g.reason === null) reason = null;
-		else if (typeof g.reason === "string") reason = g.reason;
-		else continue;
-		for (const p of paths) {
-			if (typeof p === "string" && p.trim()) out[p] = reason;
-		}
-	}
-	return out;
+  if (!Array.isArray(value)) return {};
+  const out: Record<string, string | null> = {};
+  for (const group of value) {
+    if (!group || typeof group !== "object" || Array.isArray(group)) continue;
+    const g = group as Record<string, unknown>;
+    const paths = g.paths;
+    if (!Array.isArray(paths)) continue; // missing or non-array paths → skip group
+    // reason: omitted / null → null; string → that string; else skip group.
+    let reason: string | null;
+    if (g.reason === undefined || g.reason === null) reason = null;
+    else if (typeof g.reason === "string") reason = g.reason;
+    else continue;
+    for (const p of paths) {
+      if (typeof p === "string" && p.trim()) out[p] = reason;
+    }
+  }
+  return out;
 }
 
 /**
@@ -84,18 +84,18 @@ function asDeniedPaths(value: unknown): Record<string, string | null> {
  * @param cwd - Project working directory (for .pi/settings.json lookup)
  */
 export function loadConfig(cwd?: string): AccessDeniedConfig {
-	const globalSettings = readSettingsFile(path.join(getAgentDir(), "settings.json"));
-	const projectSettings = cwd ? readSettingsFile(path.join(cwd, ".pi", "settings.json")) : {};
+  const globalSettings = readSettingsFile(path.join(getAgentDir(), "settings.json"));
+  const projectSettings = cwd ? readSettingsFile(path.join(cwd, ".pi", "settings.json")) : {};
 
-	// Project overrides global. Only the accessDenied key matters here.
-	const globalCfg = globalSettings?.accessDenied ?? {};
-	const projectCfg = projectSettings?.accessDenied ?? {};
-	const raw = { ...globalCfg, ...projectCfg };
+  // Project overrides global. Only the accessDenied key matters here.
+  const globalCfg = globalSettings?.accessDenied ?? {};
+  const projectCfg = projectSettings?.accessDenied ?? {};
+  const raw = { ...globalCfg, ...projectCfg };
 
-	return {
-		mode: asMode(raw.mode) ?? DEFAULT_CONFIG.mode,
-		allowedPaths: asStringArray(raw.allowedPaths) ?? DEFAULT_CONFIG.allowedPaths,
-		deniedPaths: asDeniedPaths(raw.deniedPaths),
-		tools: asStringArray(raw.tools) ?? DEFAULT_CONFIG.tools,
-	};
+  return {
+    mode: asMode(raw.mode) ?? DEFAULT_CONFIG.mode,
+    allowedPaths: asStringArray(raw.allowedPaths) ?? DEFAULT_CONFIG.allowedPaths,
+    deniedPaths: asDeniedPaths(raw.deniedPaths),
+    tools: asStringArray(raw.tools) ?? DEFAULT_CONFIG.tools,
+  };
 }

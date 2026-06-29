@@ -26,327 +26,342 @@ const STATUS_KEY = "scout";
 
 /** Build a one-line status summary from a scout decision. */
 function formatDecisionStatus(decision: ScoutDecision, theme: any): string {
-	if (decision.source === "short-circuit") {
-		return theme.fg("success", "✓ scout:") + " " + theme.fg("dim", `(skipped) ${decision.reasoning}`);
-	}
+  if (decision.source === "short-circuit") {
+    return (
+      theme.fg("success", "✓ scout:") + " " + theme.fg("dim", `(skipped) ${decision.reasoning}`)
+    );
+  }
 
-	const parts: string[] = [];
+  const parts: string[] = [];
 
-	if (decision.skills.length > 0) {
-		const names = decision.skills.length <= 3
-			? decision.skills.join(", ")
-			: `${decision.skills.slice(0, 2).join(", ")} +${decision.skills.length - 2}`;
-		parts.push(theme.fg("accent", `skills: ${names}`));
-	}
-	if (decision.role) {
-		parts.push(theme.fg("warning", `→ ${decision.role}`));
-	}
+  if (decision.skills.length > 0) {
+    const names =
+      decision.skills.length <= 3
+        ? decision.skills.join(", ")
+        : `${decision.skills.slice(0, 2).join(", ")} +${decision.skills.length - 2}`;
+    parts.push(theme.fg("accent", `skills: ${names}`));
+  }
+  if (decision.role) {
+    parts.push(theme.fg("warning", `→ ${decision.role}`));
+  }
 
-	if (parts.length === 0) {
-		return theme.fg("dim", "✓ scout: no changes");
-	}
+  if (parts.length === 0) {
+    return theme.fg("dim", "✓ scout: no changes");
+  }
 
-	return theme.fg("success", "✓ scout:") + " " + parts.join(" | ");
+  return theme.fg("success", "✓ scout:") + " " + parts.join(" | ");
 }
 
 export default function scoutExtension(pi: ExtensionAPI) {
-	let config: ScoutConfig = DEFAULT_CONFIG;
-	let lastDecision: ScoutDecision | undefined;
+  let config: ScoutConfig = DEFAULT_CONFIG;
+  let lastDecision: ScoutDecision | undefined;
 
-	/** Cache of previous turn context for better routing decisions. */
-	let prevTurn: { userPrompt: string; assistantSummary: string } | undefined;
+  /** Cache of previous turn context for better routing decisions. */
+  let prevTurn: { userPrompt: string; assistantSummary: string } | undefined;
 
-	function tryGetRolesApi(ctx: ExtensionContext): ModelRolesAPI | undefined {
-		try {
-			return getModelRolesAPI();
-		} catch {
-			ctx.ui.notify(
-				"pi-model-roles not loaded. Ensure @d3ara1n/pi-model-roles is in extensions and restart.",
-				"error",
-			);
-			return undefined;
-		}
-	}
+  function tryGetRolesApi(ctx: ExtensionContext): ModelRolesAPI | undefined {
+    try {
+      return getModelRolesAPI();
+    } catch {
+      ctx.ui.notify(
+        "pi-model-roles not loaded. Ensure @d3ara1n/pi-model-roles is in extensions and restart.",
+        "error",
+      );
+      return undefined;
+    }
+  }
 
-	// ── /scout — show status ────────────────────────────────────────
-	pi.registerCommand("scout", {
-		description: "Show scout status and last decision",
-		handler: async (_args, ctx) => {
-			const rolesApi = tryGetRolesApi(ctx);
-			const sideRole = rolesApi?.getRole(config.sideAgentRole);
-			const theme = ctx.ui.theme;
-			const lines = [
-				`Scout: ${config.enabled ? "enabled" : "disabled"}`,
-				`Side agent role: ${config.sideAgentRole} (${sideRole?.model ?? "current model"})`,
-				``,
-				`Modules:`,
-				`  skill-router: ${config.modules.skillRouter ? "on" : "off"}`,
-				`  model-router: ${config.modules.modelRouter ? "on" : "off"}`,
-				`  short-circuit: ${config.modules.shortCircuit ? "on" : "off"}`,
-			];
+  // ── /scout — show status ────────────────────────────────────────
+  pi.registerCommand("scout", {
+    description: "Show scout status and last decision",
+    handler: async (_args, ctx) => {
+      const rolesApi = tryGetRolesApi(ctx);
+      const sideRole = rolesApi?.getRole(config.sideAgentRole);
+      const theme = ctx.ui.theme;
+      const lines = [
+        `Scout: ${config.enabled ? "enabled" : "disabled"}`,
+        `Side agent role: ${config.sideAgentRole} (${sideRole?.model ?? "current model"})`,
+        ``,
+        `Modules:`,
+        `  skill-router: ${config.modules.skillRouter ? "on" : "off"}`,
+        `  model-router: ${config.modules.modelRouter ? "on" : "off"}`,
+        `  short-circuit: ${config.modules.shortCircuit ? "on" : "off"}`,
+      ];
 
-			if (lastDecision) {
-				lines.push(``);
-				lines.push(`Last decision:`);
-				lines.push(`  skills: ${lastDecision.skills.length > 0 ? lastDecision.skills.join(", ") : "(none)"}`);
-				lines.push(`  role: ${lastDecision.role ?? "(no change)"}`);
-				lines.push(`  reasoning: ${lastDecision.reasoning}`);
-			}
+      if (lastDecision) {
+        lines.push(``);
+        lines.push(`Last decision:`);
+        lines.push(
+          `  skills: ${lastDecision.skills.length > 0 ? lastDecision.skills.join(", ") : "(none)"}`,
+        );
+        lines.push(`  role: ${lastDecision.role ?? "(no change)"}`);
+        lines.push(`  reasoning: ${lastDecision.reasoning}`);
+      }
 
-			ctx.ui.notify(lines.join("\n"), "info");
-		},
-	});
+      ctx.ui.notify(lines.join("\n"), "info");
+    },
+  });
 
-	// ── /scout:skill-router on/off ──────────────────────────────────
-	pi.registerCommand("scout:skill-router", {
-		description: "Toggle skill-router module (on/off)",
-		handler: async (args, ctx) => {
-			const value = (args ?? "").trim().toLowerCase();
-			if (value === "on") {
-				config.modules.skillRouter = true;
-				ctx.ui.notify("Scout: skill-router enabled", "info");
-			} else if (value === "off") {
-				config.modules.skillRouter = false;
-				ctx.ui.notify("Scout: skill-router disabled", "info");
-			} else {
-				ctx.ui.notify("Usage: /scout:skill-router on|off", "info");
-			}
-		},
-	});
+  // ── /scout:skill-router on/off ──────────────────────────────────
+  pi.registerCommand("scout:skill-router", {
+    description: "Toggle skill-router module (on/off)",
+    handler: async (args, ctx) => {
+      const value = (args ?? "").trim().toLowerCase();
+      if (value === "on") {
+        config.modules.skillRouter = true;
+        ctx.ui.notify("Scout: skill-router enabled", "info");
+      } else if (value === "off") {
+        config.modules.skillRouter = false;
+        ctx.ui.notify("Scout: skill-router disabled", "info");
+      } else {
+        ctx.ui.notify("Usage: /scout:skill-router on|off", "info");
+      }
+    },
+  });
 
-	// ── /scout:model-router on/off ──────────────────────────────────
-	pi.registerCommand("scout:model-router", {
-		description: "Toggle model-router module (on/off)",
-		handler: async (args, ctx) => {
-			const value = (args ?? "").trim().toLowerCase();
-			if (value === "on") {
-				config.modules.modelRouter = true;
-				ctx.ui.notify("Scout: model-router enabled", "info");
-			} else if (value === "off") {
-				config.modules.modelRouter = false;
-				ctx.ui.notify("Scout: model-router disabled", "info");
-			} else {
-				ctx.ui.notify("Usage: /scout:model-router on|off", "info");
-			}
-		},
-	});
+  // ── /scout:model-router on/off ──────────────────────────────────
+  pi.registerCommand("scout:model-router", {
+    description: "Toggle model-router module (on/off)",
+    handler: async (args, ctx) => {
+      const value = (args ?? "").trim().toLowerCase();
+      if (value === "on") {
+        config.modules.modelRouter = true;
+        ctx.ui.notify("Scout: model-router enabled", "info");
+      } else if (value === "off") {
+        config.modules.modelRouter = false;
+        ctx.ui.notify("Scout: model-router disabled", "info");
+      } else {
+        ctx.ui.notify("Usage: /scout:model-router on|off", "info");
+      }
+    },
+  });
 
-	// ── /scout:short-circuit on/off ─────────────────────────────────
-	pi.registerCommand("scout:short-circuit", {
-		description: "Toggle short-circuit module (on/off)",
-		handler: async (args, ctx) => {
-			const value = (args ?? "").trim().toLowerCase();
-			if (value === "on") {
-				config.modules.shortCircuit = true;
-				ctx.ui.notify("Scout: short-circuit enabled", "info");
-			} else if (value === "off") {
-				config.modules.shortCircuit = false;
-				ctx.ui.notify("Scout: short-circuit disabled", "info");
-			} else {
-				ctx.ui.notify("Usage: /scout:short-circuit on|off", "info");
-			}
-		},
-	});
+  // ── /scout:short-circuit on/off ─────────────────────────────────
+  pi.registerCommand("scout:short-circuit", {
+    description: "Toggle short-circuit module (on/off)",
+    handler: async (args, ctx) => {
+      const value = (args ?? "").trim().toLowerCase();
+      if (value === "on") {
+        config.modules.shortCircuit = true;
+        ctx.ui.notify("Scout: short-circuit enabled", "info");
+      } else if (value === "off") {
+        config.modules.shortCircuit = false;
+        ctx.ui.notify("Scout: short-circuit disabled", "info");
+      } else {
+        ctx.ui.notify("Usage: /scout:short-circuit on|off", "info");
+      }
+    },
+  });
 
-	// ── list_skills tool ───────────────────────────────────────────
-	let cachedAllSkills: Array<{ name: string; description: string; filePath: string }> = [];
+  // ── list_skills tool ───────────────────────────────────────────
+  let cachedAllSkills: Array<{ name: string; description: string; filePath: string }> = [];
 
-	pi.registerTool({
-		name: "list_skills",
-		label: "List all skills",
-		description: "List all available skills with name and description. Use this when the user asks what skills are installed or you need to discover skills beyond those currently active.",
-		parameters: { type: "object", properties: {}, required: [] } as any,
-		async execute() {
-			if (cachedAllSkills.length === 0) {
-				return { content: [{ type: "text", text: "No skills available." }], details: undefined as any };
-			}
-			const lines = cachedAllSkills.map((s) => `- **${s.name}**: ${s.description}`);
-			return { content: [{ type: "text", text: lines.join("\n") }], details: undefined as any };
-		},
-	});
+  pi.registerTool({
+    name: "list_skills",
+    label: "List all skills",
+    description:
+      "List all available skills with name and description. Use this when the user asks what skills are installed or you need to discover skills beyond those currently active.",
+    parameters: { type: "object", properties: {}, required: [] } as any,
+    async execute() {
+      if (cachedAllSkills.length === 0) {
+        return {
+          content: [{ type: "text", text: "No skills available." }],
+          details: undefined as any,
+        };
+      }
+      const lines = cachedAllSkills.map((s) => `- **${s.name}**: ${s.description}`);
+      return { content: [{ type: "text", text: lines.join("\n") }], details: undefined as any };
+    },
+  });
 
-	// ── session_start: load config ──────────────────────────────────
-	pi.on("session_start", async (_event, ctx) => {
-		config = loadScoutConfig(ctx.cwd);
-		resetSkillCache();
-		prevTurn = undefined;
-	});
+  // ── session_start: load config ──────────────────────────────────
+  pi.on("session_start", async (_event, ctx) => {
+    config = loadScoutConfig(ctx.cwd);
+    resetSkillCache();
+    prevTurn = undefined;
+  });
 
-	// ── turn_end: cache assistant response for next turn's context ──
-	pi.on("turn_end", async (event) => {
-		const msg = event.message;
-		if (msg.role !== "assistant") return;
+  // ── turn_end: cache assistant response for next turn's context ──
+  pi.on("turn_end", async (event) => {
+    const msg = event.message;
+    if (msg.role !== "assistant") return;
 
-		// Extract text content, skip thinking blocks and tool calls
-		const textParts: string[] = [];
-		for (const block of msg.content) {
-			if ("type" in block && block.type === "text" && "text" in block) {
-				textParts.push(block.text);
-			}
-		}
-		const fullText = textParts.join("");
-		if (!fullText.trim()) return;
+    // Extract text content, skip thinking blocks and tool calls
+    const textParts: string[] = [];
+    for (const block of msg.content) {
+      if ("type" in block && block.type === "text" && "text" in block) {
+        textParts.push(block.text);
+      }
+    }
+    const fullText = textParts.join("");
+    if (!fullText.trim()) return;
 
-		// Truncate to avoid bloating the side agent context
-		const MAX_SUMMARY = 500;
-		const assistantSummary = fullText.length > MAX_SUMMARY
-			? fullText.slice(0, MAX_SUMMARY) + "..."
-			: fullText;
+    // Truncate to avoid bloating the side agent context
+    const MAX_SUMMARY = 500;
+    const assistantSummary =
+      fullText.length > MAX_SUMMARY ? fullText.slice(0, MAX_SUMMARY) + "..." : fullText;
 
-		// before_agent_start already created/updated prevTurn with the user prompt.
-		// We just fill in the assistant summary here.
-		if (prevTurn) {
-			prevTurn.assistantSummary = assistantSummary;
-		}
-	});
+    // before_agent_start already created/updated prevTurn with the user prompt.
+    // We just fill in the assistant summary here.
+    if (prevTurn) {
+      prevTurn.assistantSummary = assistantSummary;
+    }
+  });
 
-	// ── before_agent_start: core scout logic ────────────────────────
-	pi.on("before_agent_start", async (event, ctx) => {
-		if (!config.enabled) return;
-		if (!config.modules.skillRouter && !config.modules.modelRouter) return;
+  // ── before_agent_start: core scout logic ────────────────────────
+  pi.on("before_agent_start", async (event, ctx) => {
+    if (!config.enabled) return;
+    if (!config.modules.skillRouter && !config.modules.modelRouter) return;
 
-		let rolesApi: ModelRolesAPI;
-		try {
-			rolesApi = getModelRolesAPI();
-		} catch {
-			console.warn("[pi-scout] pi-model-roles not initialized — skipping scout");
-			return;
-		}
+    let rolesApi: ModelRolesAPI;
+    try {
+      rolesApi = getModelRolesAPI();
+    } catch {
+      console.warn("[pi-scout] pi-model-roles not initialized — skipping scout");
+      return;
+    }
 
-		const theme = ctx.ui.theme;
+    const theme = ctx.ui.theme;
 
-		// Skills available this turn — used by both the short-circuit layer
-		// and the side-agent path.
-		const skills = event.systemPromptOptions?.skills ?? [];
-		if (cachedAllSkills.length === 0 && skills.length > 0) {
-			cachedAllSkills = skills.map((s: any) => ({
-				name: s.name,
-				description: s.description ?? "",
-				filePath: s.filePath,
-			}));
-		}
-		const skillEntries = skills.map((s: any) => ({
-			name: s.name,
-			description: s.description ?? "",
-			filePath: s.filePath,
-		}));
+    // Skills available this turn — used by both the short-circuit layer
+    // and the side-agent path.
+    const skills = event.systemPromptOptions?.skills ?? [];
+    if (cachedAllSkills.length === 0 && skills.length > 0) {
+      cachedAllSkills = skills.map((s: any) => ({
+        name: s.name,
+        description: s.description ?? "",
+        filePath: s.filePath,
+      }));
+    }
+    const skillEntries = skills.map((s: any) => ({
+      name: s.name,
+      description: s.description ?? "",
+      filePath: s.filePath,
+    }));
 
-		// ── Short-circuit layer ───────────────────────────────────
-		// Skip the side model on trivial acknowledgments. A trivial ack means
-		// "no skills, don't switch models" — both answers are certain, so this
-		// is safe even with model-router on. Runs before model resolution to
-		// save that cost too.
-		if (config.modules.shortCircuit) {
-			const skip = evaluateShortCircuit(event.prompt, config.shortCircuit);
-			if (skip) {
-				const decision: ScoutDecision = {
-					skills: [],
-					role: null,
-					reasoning: skip.reasoning,
-					source: "short-circuit",
-				};
-				lastDecision = decision;
+    // ── Short-circuit layer ───────────────────────────────────
+    // Skip the side model on trivial acknowledgments. A trivial ack means
+    // "no skills, don't switch models" — both answers are certain, so this
+    // is safe even with model-router on. Runs before model resolution to
+    // save that cost too.
+    if (config.modules.shortCircuit) {
+      const skip = evaluateShortCircuit(event.prompt, config.shortCircuit);
+      if (skip) {
+        const decision: ScoutDecision = {
+          skills: [],
+          role: null,
+          reasoning: skip.reasoning,
+          source: "short-circuit",
+        };
+        lastDecision = decision;
 
-				let systemPrompt = event.systemPrompt;
-				if (config.modules.skillRouter) {
-					systemPrompt = filterSkillsBlock(systemPrompt, [], skillEntries);
-				}
+        let systemPrompt = event.systemPrompt;
+        if (config.modules.skillRouter) {
+          systemPrompt = filterSkillsBlock(systemPrompt, [], skillEntries);
+        }
 
-				// Keep prevTurn current so the next turn still has context.
-				prevTurn = { userPrompt: event.prompt, assistantSummary: "" };
+        // Keep prevTurn current so the next turn still has context.
+        prevTurn = { userPrompt: event.prompt, assistantSummary: "" };
 
-				ctx.ui.setStatus(STATUS_KEY, formatDecisionStatus(decision, theme));
-				if (systemPrompt !== event.systemPrompt) return { systemPrompt };
-				return;
-			}
-		}
+        ctx.ui.setStatus(STATUS_KEY, formatDecisionStatus(decision, theme));
+        if (systemPrompt !== event.systemPrompt) return { systemPrompt };
+        return;
+      }
+    }
 
-		// Show "Scouting..." indicator
-		ctx.ui.setStatus(STATUS_KEY, theme.fg("accent", "◎") + theme.fg("dim", " Scouting..."));
+    // Show "Scouting..." indicator
+    ctx.ui.setStatus(STATUS_KEY, theme.fg("accent", "◎") + theme.fg("dim", " Scouting..."));
 
-		// Resolve side agent model
-		const sideResolved = await rolesApi.resolveRoleAsync(config.sideAgentRole);
-		if (!sideResolved.model) {
-			ctx.ui.setStatus(STATUS_KEY, theme.fg("warning", "◎ scout: side model unavailable"));
-			console.warn(`[pi-scout] Side agent role "${config.sideAgentRole}" not available — skipping`);
-			return;
-		}
+    // Resolve side agent model
+    const sideResolved = await rolesApi.resolveRoleAsync(config.sideAgentRole);
+    if (!sideResolved.model) {
+      ctx.ui.setStatus(STATUS_KEY, theme.fg("warning", "◎ scout: side model unavailable"));
+      console.warn(`[pi-scout] Side agent role "${config.sideAgentRole}" not available — skipping`);
+      return;
+    }
 
-		// Update status: resolving
-		ctx.ui.setStatus(STATUS_KEY, theme.fg("accent", "◎") + theme.fg("dim", ` Scouting via ${sideResolved.model.provider}/${sideResolved.model.id}...`));
+    // Update status: resolving
+    ctx.ui.setStatus(
+      STATUS_KEY,
+      theme.fg("accent", "◎") +
+        theme.fg("dim", ` Scouting via ${sideResolved.model.provider}/${sideResolved.model.id}...`),
+    );
 
-		// 1. Build the skills list for the side agent prompt
-		const skillsList = skills
-			.map((s: any) => `- ${s.name}: ${s.description ?? "(no description)"}`)
-			.join("\n");
+    // 1. Build the skills list for the side agent prompt
+    const skillsList = skills
+      .map((s: any) => `- ${s.name}: ${s.description ?? "(no description)"}`)
+      .join("\n");
 
-		// 2. Determine current role (use getCurrentRole: it recognizes the
-		//    default role even when model=null, so the router has a real
-		//    baseline instead of an opaque "unknown".)
-		const currentModel = ctx.model;
-		const currentRole = currentModel
-			? (rolesApi.getCurrentRole(`${currentModel.provider}/${currentModel.id}`) ?? "unknown")
-			: "unknown";
+    // 2. Determine current role (use getCurrentRole: it recognizes the
+    //    default role even when model=null, so the router has a real
+    //    baseline instead of an opaque "unknown".)
+    const currentModel = ctx.model;
+    const currentRole = currentModel
+      ? (rolesApi.getCurrentRole(`${currentModel.provider}/${currentModel.id}`) ?? "unknown")
+      : "unknown";
 
-		// 3. Build roles list
-		const visibleRoles = rolesApi.getVisibleRoles();
-		const rolesList = Object.entries(visibleRoles)
-			.map(([name, cfg]: [string, any]) => `- ${name}: ${cfg.description ?? "(no description)"}${cfg.model ? ` (model: ${cfg.model})` : " (current model)"}`)
-			.join("\n");
+    // 3. Build roles list
+    const visibleRoles = rolesApi.getVisibleRoles();
+    const rolesList = Object.entries(visibleRoles)
+      .map(
+        ([name, cfg]: [string, any]) =>
+          `- ${name}: ${cfg.description ?? "(no description)"}${cfg.model ? ` (model: ${cfg.model})` : " (current model)"}`,
+      )
+      .join("\n");
 
-		// 4. Build user message with conversation context
-		const prevTurnContext = prevTurn?.assistantSummary
-			? { userPrompt: prevTurn.userPrompt, assistantSummary: prevTurn.assistantSummary }
-			: undefined;
-		const userMessage = buildScoutUserMessage(event.prompt, currentRole, prevTurnContext);
+    // 4. Build user message with conversation context
+    const prevTurnContext = prevTurn?.assistantSummary
+      ? { userPrompt: prevTurn.userPrompt, assistantSummary: prevTurn.assistantSummary }
+      : undefined;
+    const userMessage = buildScoutUserMessage(event.prompt, currentRole, prevTurnContext);
 
-		// Reset prevTurn for the current turn — user prompt now, assistant filled by turn_end
-		prevTurn = { userPrompt: event.prompt, assistantSummary: "" };
+    // Reset prevTurn for the current turn — user prompt now, assistant filled by turn_end
+    prevTurn = { userPrompt: event.prompt, assistantSummary: "" };
 
-		// 5. Call side agent
-		const scoutSystemPrompt = buildScoutSystemPrompt(config, skillsList, rolesList);
-		const decision = await callSideAgent(
-			sideResolved.model,
-			sideResolved.apiKey,
-			sideResolved.headers,
-			scoutSystemPrompt,
-			userMessage,
-		);
+    // 5. Call side agent
+    const scoutSystemPrompt = buildScoutSystemPrompt(config, skillsList, rolesList);
+    const decision = await callSideAgent(
+      sideResolved.model,
+      sideResolved.apiKey,
+      sideResolved.headers,
+      scoutSystemPrompt,
+      userMessage,
+    );
 
-		// Enforce module toggles at the application layer, regardless of what
-		// the side agent returned. A disabled module's decision field is zeroed
-		// so the status bar, /scout command, and apply logic all see clean
-		// values (no misleading "→ fast" when model-router is off).
-		if (!config.modules.modelRouter) decision.role = null;
-		if (!config.modules.skillRouter) decision.skills = [];
-		lastDecision = decision;
+    // Enforce module toggles at the application layer, regardless of what
+    // the side agent returned. A disabled module's decision field is zeroed
+    // so the status bar, /scout command, and apply logic all see clean
+    // values (no misleading "→ fast" when model-router is off).
+    if (!config.modules.modelRouter) decision.role = null;
+    if (!config.modules.skillRouter) decision.skills = [];
+    lastDecision = decision;
 
-		let systemPrompt = event.systemPrompt;
-		let switchedRole: string | undefined;
+    let systemPrompt = event.systemPrompt;
+    let switchedRole: string | undefined;
 
-		// 6. skill-router: filter skills XML to only selected ones
-		if (config.modules.skillRouter) {
-			systemPrompt = filterSkillsBlock(systemPrompt, decision.skills, skillEntries);
-		}
+    // 6. skill-router: filter skills XML to only selected ones
+    if (config.modules.skillRouter) {
+      systemPrompt = filterSkillsBlock(systemPrompt, decision.skills, skillEntries);
+    }
 
-		// 7. model-router: switch model if side agent recommends a different role
-		if (config.modules.modelRouter && decision.role && decision.role !== currentRole) {
-			const switched = await switchToRole(pi, decision.role, rolesApi);
-			if (switched) {
-				switchedRole = decision.role;
-				const newModel = await rolesApi.resolveRoleAsync(decision.role);
-				if (newModel?.model) {
-					systemPrompt += `\n\n<current_model>${newModel.model.provider}/${newModel.model.id} (role: ${decision.role})</current_model>`;
-				}
-			}
-		}
+    // 7. model-router: switch model if side agent recommends a different role
+    if (config.modules.modelRouter && decision.role && decision.role !== currentRole) {
+      const switched = await switchToRole(pi, decision.role, rolesApi);
+      if (switched) {
+        switchedRole = decision.role;
+        const newModel = await rolesApi.resolveRoleAsync(decision.role);
+        if (newModel?.model) {
+          systemPrompt += `\n\n<current_model>${newModel.model.provider}/${newModel.model.id} (role: ${decision.role})</current_model>`;
+        }
+      }
+    }
 
-		// 8. Show result in status bar
-		ctx.ui.setStatus(STATUS_KEY, formatDecisionStatus(decision, theme));
+    // 8. Show result in status bar
+    ctx.ui.setStatus(STATUS_KEY, formatDecisionStatus(decision, theme));
 
-		// 9. Return modified system prompt
-		if (systemPrompt !== event.systemPrompt) {
-			return { systemPrompt };
-		}
-	});
+    // 9. Return modified system prompt
+    if (systemPrompt !== event.systemPrompt) {
+      return { systemPrompt };
+    }
+  });
 }

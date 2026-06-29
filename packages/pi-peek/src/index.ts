@@ -19,25 +19,24 @@ import { loadPeekConfig } from "./config.ts";
 
 export { getPeekAPI } from "./api.ts";
 export type {
-	PeekAPI,
-	MainAgentStatus,
-	InvestigateOptions,
-	InvestigateResult,
-	PeekConfig,
+  PeekAPI,
+  MainAgentStatus,
+  InvestigateOptions,
+  InvestigateResult,
+  PeekConfig,
 } from "./types.ts";
 
 export default function registerPeekExtension(pi: ExtensionAPI): void {
-	pi.on("session_start", async (_event, ctx) => {
-		initPeekAPI({
-			sessionManager: ctx.sessionManager,
-			config: loadPeekConfig(ctx.cwd),
-		});
-	});
+  pi.on("session_start", async (_event, ctx) => {
+    initPeekAPI({
+      sessionManager: ctx.sessionManager,
+      config: loadPeekConfig(ctx.cwd),
+    });
+  });
 
-	// ── tracker hooks (fire every turn; feed the status snapshot) ─────────
-	pi.on("turn_start", (event) => tracker.onTurnStart(event.turnIndex));
-	pi.on("turn_end", (event) => tracker.onTurnEnd(event.turnIndex));
-	pi.on("tool_execution_start", (event) => tracker.onToolStart(event.toolName, event.args));
-	pi.on("tool_execution_end", (event) => tracker.onToolEnd(event.toolName));
-
+  // ── tracker hooks (fire every turn; feed the status snapshot) ─────────
+  pi.on("turn_start", (event) => tracker.onTurnStart(event.turnIndex));
+  pi.on("turn_end", (event) => tracker.onTurnEnd(event.turnIndex));
+  pi.on("tool_execution_start", (event) => tracker.onToolStart(event.toolName, event.args));
+  pi.on("tool_execution_end", (event) => tracker.onToolEnd(event.toolName));
 }

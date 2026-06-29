@@ -12,60 +12,58 @@ import type { SubagentConfig } from "./types.ts";
 import { DEFAULT_CONFIG } from "./types.ts";
 
 function getAgentDir(): string {
-	const envDir = process.env.PI_AGENT_DIR;
-	if (envDir) return envDir;
-	return path.join(os.homedir(), ".pi", "agent");
+  const envDir = process.env.PI_AGENT_DIR;
+  if (envDir) return envDir;
+  return path.join(os.homedir(), ".pi", "agent");
 }
 
 function readSettingsFile(filePath: string): any {
-	try {
-		if (!fs.existsSync(filePath)) return {};
-		const content = fs.readFileSync(filePath, "utf-8");
-		return JSON.parse(content);
-	} catch {
-		return {};
-	}
+  try {
+    if (!fs.existsSync(filePath)) return {};
+    const content = fs.readFileSync(filePath, "utf-8");
+    return JSON.parse(content);
+  } catch {
+    return {};
+  }
 }
 
 function merge(target: any, source: any): any {
-	if (!source || typeof source !== "object") return target;
-	if (!target || typeof target !== "object") return source;
-	const result = { ...target };
-	for (const key of Object.keys(source)) {
-		if (source[key] && typeof source[key] === "object" && !Array.isArray(source[key])) {
-			result[key] = merge(result[key], source[key]);
-		} else {
-			result[key] = source[key];
-		}
-	}
-	return result;
+  if (!source || typeof source !== "object") return target;
+  if (!target || typeof target !== "object") return source;
+  const result = { ...target };
+  for (const key of Object.keys(source)) {
+    if (source[key] && typeof source[key] === "object" && !Array.isArray(source[key])) {
+      result[key] = merge(result[key], source[key]);
+    } else {
+      result[key] = source[key];
+    }
+  }
+  return result;
 }
 
 export function loadSubagentConfig(cwd?: string): SubagentConfig {
-	const globalSettings = readSettingsFile(path.join(getAgentDir(), "settings.json"));
-	const projectSettings = cwd
-		? readSettingsFile(path.join(cwd, ".pi", "settings.json"))
-		: {};
-	const settings = merge(globalSettings, projectSettings);
+  const globalSettings = readSettingsFile(path.join(getAgentDir(), "settings.json"));
+  const projectSettings = cwd ? readSettingsFile(path.join(cwd, ".pi", "settings.json")) : {};
+  const settings = merge(globalSettings, projectSettings);
 
-	const raw = settings?.subagent;
-	if (!raw) return DEFAULT_CONFIG;
+  const raw = settings?.subagent;
+  if (!raw) return DEFAULT_CONFIG;
 
-	const rawSummary = raw?.summary;
-	const rawHistory = raw?.history;
-	return {
-		timeout: raw.timeout ?? DEFAULT_CONFIG.timeout,
-		maxConcurrency: raw.maxConcurrency ?? DEFAULT_CONFIG.maxConcurrency,
-		maxDepth: raw.maxDepth ?? DEFAULT_CONFIG.maxDepth,
-		maxTurns: raw.maxTurns ?? DEFAULT_CONFIG.maxTurns,
-		maxCost: raw.maxCost ?? DEFAULT_CONFIG.maxCost,
-		history: {
-			enabled: rawHistory?.enabled ?? DEFAULT_CONFIG.history.enabled,
-		},
-		summary: {
-			role: rawSummary?.role ?? DEFAULT_CONFIG.summary.role,
-			enabled: rawSummary?.enabled ?? DEFAULT_CONFIG.summary.enabled,
-		},
-		agentOverrides: raw.agentOverrides ?? {},
-	};
+  const rawSummary = raw?.summary;
+  const rawHistory = raw?.history;
+  return {
+    timeout: raw.timeout ?? DEFAULT_CONFIG.timeout,
+    maxConcurrency: raw.maxConcurrency ?? DEFAULT_CONFIG.maxConcurrency,
+    maxDepth: raw.maxDepth ?? DEFAULT_CONFIG.maxDepth,
+    maxTurns: raw.maxTurns ?? DEFAULT_CONFIG.maxTurns,
+    maxCost: raw.maxCost ?? DEFAULT_CONFIG.maxCost,
+    history: {
+      enabled: rawHistory?.enabled ?? DEFAULT_CONFIG.history.enabled,
+    },
+    summary: {
+      role: rawSummary?.role ?? DEFAULT_CONFIG.summary.role,
+      enabled: rawSummary?.enabled ?? DEFAULT_CONFIG.summary.enabled,
+    },
+    agentOverrides: raw.agentOverrides ?? {},
+  };
 }

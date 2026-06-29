@@ -152,5 +152,4 @@ function createRegistry(): UsageRegistry {
   return reg;
 }
 
-export const usageRegistry: UsageRegistry =
-  (globalThis as any)[GLOBAL_KEY] ?? createRegistry();
+export const usageRegistry: UsageRegistry = (globalThis as any)[GLOBAL_KEY] ?? createRegistry();

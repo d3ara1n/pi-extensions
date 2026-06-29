@@ -10,59 +10,59 @@
 import type { MainAgentStatus } from "./types.ts";
 
 let status: MainAgentStatus = {
-	activity: "idle",
-	toolIndex: 0,
-	turn: 0,
-	lastUpdated: nowIso(),
+  activity: "idle",
+  toolIndex: 0,
+  turn: 0,
+  lastUpdated: nowIso(),
 };
 
 function nowIso(): string {
-	return new Date().toISOString();
+  return new Date().toISOString();
 }
 
 export function getMainAgentStatus(): MainAgentStatus {
-	return { ...status };
+  return { ...status };
 }
 
 export function onTurnStart(turnIndex: number): void {
-	status = {
-		activity: "thinking",
-		toolIndex: 0,
-		turn: turnIndex,
-		lastUpdated: nowIso(),
-	};
+  status = {
+    activity: "thinking",
+    toolIndex: 0,
+    turn: turnIndex,
+    lastUpdated: nowIso(),
+  };
 }
 
 export function onTurnEnd(_turnIndex: number): void {
-	status = {
-		...status,
-		activity: "idle",
-		lastUpdated: nowIso(),
-	};
+  status = {
+    ...status,
+    activity: "idle",
+    lastUpdated: nowIso(),
+  };
 }
 
 export function onToolStart(toolName: string, args: any): void {
-	const detail = formatToolActivity(toolName, args);
-	status = {
-		activity: detail ? `${toolName}: ${detail}` : `executing ${toolName}`,
-		toolName,
-		toolIndex: status.toolIndex + 1,
-		turn: status.turn,
-		lastUpdated: nowIso(),
-	};
+  const detail = formatToolActivity(toolName, args);
+  status = {
+    activity: detail ? `${toolName}: ${detail}` : `executing ${toolName}`,
+    toolName,
+    toolIndex: status.toolIndex + 1,
+    turn: status.turn,
+    lastUpdated: nowIso(),
+  };
 }
 
 export function onToolEnd(_toolName: string): void {
-	status = { ...status, lastUpdated: nowIso() };
+  status = { ...status, lastUpdated: nowIso() };
 }
 
 function formatToolActivity(name: string, args: any): string {
-	if (!args || typeof args !== "object") return "";
-	if (name === "bash" && typeof args.command === "string") {
-		return args.command.split("\n")[0]!.slice(0, 80);
-	}
-	if ((name === "read" || name === "write" || name === "edit") && typeof args.path === "string") {
-		return args.path;
-	}
-	return "";
+  if (!args || typeof args !== "object") return "";
+  if (name === "bash" && typeof args.command === "string") {
+    return args.command.split("\n")[0]!.slice(0, 80);
+  }
+  if ((name === "read" || name === "write" || name === "edit") && typeof args.path === "string") {
+    return args.path;
+  }
+  return "";
 }

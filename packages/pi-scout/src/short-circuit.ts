@@ -21,8 +21,8 @@ import type { ShortCircuitConfig } from "./types.ts";
 
 /** Result of a successful short-circuit. */
 export interface ShortCircuitResult {
-	/** Short human-readable reason, surfaced in the status bar. */
-	reasoning: string;
+  /** Short human-readable reason, surfaced in the status bar. */
+  reasoning: string;
 }
 
 /**
@@ -33,20 +33,88 @@ export interface ShortCircuitResult {
  * would silently drop routing. User-supplied `ackPhrases` are merged on top.
  */
 const DEFAULT_ACK_PHRASES: string[] = [
-	// 中文
-	"好的", "好", "嗯", "嗯嗯", "嗯呢", "行", "可以", "对", "对的", "是", "是的",
-	"继续", "继续吧", "往下", "没问题", "明白", "收到", "了解", "知道了", "晓得",
-	"中", "成", "行吧", "可以的", "好的呀", "好嘞", "妥", "妥了", "嗯哼",
-	// English
-	"ok", "okay", "oki", "okie", "okk", "k", "sure", "yes", "yeah", "yep",
-	"yup", "continue", "go", "ahead", "go ahead", "sounds good", "got it",
-	"understood", "will do", "agreed", "roger", "proceed", "ack",
-	"acknowledged", "fine",
-	// 日本語
-	"はい", "うん", "おk", "続けて", "了解", "承知", "わかった", "分かった",
-	"ええ", "継続", "進めて", "いいよ", "いいです", "オッケー", "おけ",
-	// 한국어
-	"네", "응", "응응", "계속", "알겠어", "알겠음", "좋아", "그래", "오키",
+  // 中文
+  "好的",
+  "好",
+  "嗯",
+  "嗯嗯",
+  "嗯呢",
+  "行",
+  "可以",
+  "对",
+  "对的",
+  "是",
+  "是的",
+  "继续",
+  "继续吧",
+  "往下",
+  "没问题",
+  "明白",
+  "收到",
+  "了解",
+  "知道了",
+  "晓得",
+  "中",
+  "成",
+  "行吧",
+  "可以的",
+  "好的呀",
+  "好嘞",
+  "妥",
+  "妥了",
+  "嗯哼",
+  // English
+  "ok",
+  "okay",
+  "oki",
+  "okie",
+  "okk",
+  "k",
+  "sure",
+  "yes",
+  "yeah",
+  "yep",
+  "yup",
+  "continue",
+  "go",
+  "ahead",
+  "go ahead",
+  "sounds good",
+  "got it",
+  "understood",
+  "will do",
+  "agreed",
+  "roger",
+  "proceed",
+  "ack",
+  "acknowledged",
+  "fine",
+  // 日本語
+  "はい",
+  "うん",
+  "おk",
+  "続けて",
+  "了解",
+  "承知",
+  "わかった",
+  "分かった",
+  "ええ",
+  "継続",
+  "進めて",
+  "いいよ",
+  "いいです",
+  "オッケー",
+  "おけ",
+  // 한국어
+  "네",
+  "응",
+  "응응",
+  "계속",
+  "알겠어",
+  "알겠음",
+  "좋아",
+  "그래",
+  "오키",
 ];
 
 /**
@@ -56,11 +124,11 @@ const DEFAULT_ACK_PHRASES: string[] = [
  * @internal — exported for testing.
  */
 export function normalizeAckPrompt(input: string): string {
-	return input
-		.trim()
-		.toLowerCase()
-		.replace(/^[。！？.!?,，、~～…·\s]+/, "")
-		.replace(/[。！？.!?,，、~～…·\s]+$/, "");
+  return input
+    .trim()
+    .toLowerCase()
+    .replace(/^[。！？.!?,，、~～…·\s]+/, "")
+    .replace(/[。！？.!?,，、~～…·\s]+$/, "");
 }
 
 /**
@@ -69,13 +137,13 @@ export function normalizeAckPrompt(input: string): string {
  * @internal — exported for testing.
  */
 export function buildAckSet(extra: string[]): Set<string> {
-	const all = [...DEFAULT_ACK_PHRASES, ...extra];
-	const set = new Set<string>();
-	for (const phrase of all) {
-		const n = normalizeAckPrompt(phrase);
-		if (n.length > 0) set.add(n);
-	}
-	return set;
+  const all = [...DEFAULT_ACK_PHRASES, ...extra];
+  const set = new Set<string>();
+  for (const phrase of all) {
+    const n = normalizeAckPrompt(phrase);
+    if (n.length > 0) set.add(n);
+  }
+  return set;
 }
 
 /**
@@ -87,16 +155,16 @@ export function buildAckSet(extra: string[]): Set<string> {
  * @param config - Short-circuit tuning
  */
 export function evaluateShortCircuit(
-	prompt: string,
-	config: ShortCircuitConfig,
+  prompt: string,
+  config: ShortCircuitConfig,
 ): ShortCircuitResult | null {
-	if (!config.trivialAck) return null;
+  if (!config.trivialAck) return null;
 
-	const normalized = normalizeAckPrompt(prompt);
-	if (normalized.length === 0 || normalized.length > config.maxAckLength) {
-		return null;
-	}
+  const normalized = normalizeAckPrompt(prompt);
+  if (normalized.length === 0 || normalized.length > config.maxAckLength) {
+    return null;
+  }
 
-	const ackSet = buildAckSet(config.ackPhrases);
-	return ackSet.has(normalized) ? { reasoning: "trivial ack" } : null;
+  const ackSet = buildAckSet(config.ackPhrases);
+  return ackSet.has(normalized) ? { reasoning: "trivial ack" } : null;
 }

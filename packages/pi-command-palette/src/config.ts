@@ -22,25 +22,25 @@ import type { KeyId } from "@earendil-works/pi-tui";
 export const DEFAULT_SHORTCUT = "ctrl+shift+p";
 
 function getAgentDir(): string {
-	const envDir = process.env.PI_AGENT_DIR;
-	if (envDir) return envDir;
-	return path.join(os.homedir(), ".pi", "agent");
+  const envDir = process.env.PI_AGENT_DIR;
+  if (envDir) return envDir;
+  return path.join(os.homedir(), ".pi", "agent");
 }
 
 function readSettings(filePath: string): Record<string, unknown> {
-	try {
-		if (!fs.existsSync(filePath)) return {};
-		return JSON.parse(fs.readFileSync(filePath, "utf-8"));
-	} catch {
-		return {};
-	}
+  try {
+    if (!fs.existsSync(filePath)) return {};
+    return JSON.parse(fs.readFileSync(filePath, "utf-8"));
+  } catch {
+    return {};
+  }
 }
 
 /** Lowercase + trim; returns undefined for empty/non-string input. */
 function normalizeKey(raw: unknown): string | undefined {
-	if (typeof raw !== "string") return undefined;
-	const trimmed = raw.trim().toLowerCase();
-	return trimmed || undefined;
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim().toLowerCase();
+  return trimmed || undefined;
 }
 
 /**
@@ -50,18 +50,18 @@ function normalizeKey(raw: unknown): string | undefined {
  *   Defaults to `process.cwd()` (accurate at pi startup when shortcuts register).
  */
 export function resolveShortcutKey(cwd: string = process.cwd()): KeyId {
-	// 1. Env var — highest priority, for terminals that intercept the default combo.
-	const envKey = normalizeKey(process.env.PI_COMMAND_PALETTE_KEY);
-	if (envKey) return envKey as KeyId;
+  // 1. Env var — highest priority, for terminals that intercept the default combo.
+  const envKey = normalizeKey(process.env.PI_COMMAND_PALETTE_KEY);
+  if (envKey) return envKey as KeyId;
 
-	// 2. settings.json — global ~/.pi/agent/settings.json; project overrides global.
-	const globalSettings = readSettings(path.join(getAgentDir(), "settings.json"));
-	const projectSettings = readSettings(path.join(cwd, ".pi", "settings.json"));
-	const globalCfg = (globalSettings.commandPalette ?? {}) as { shortcut?: unknown };
-	const projectCfg = (projectSettings.commandPalette ?? {}) as { shortcut?: unknown };
-	const settingsKey = normalizeKey(projectCfg.shortcut ?? globalCfg.shortcut);
-	if (settingsKey) return settingsKey as KeyId;
+  // 2. settings.json — global ~/.pi/agent/settings.json; project overrides global.
+  const globalSettings = readSettings(path.join(getAgentDir(), "settings.json"));
+  const projectSettings = readSettings(path.join(cwd, ".pi", "settings.json"));
+  const globalCfg = (globalSettings.commandPalette ?? {}) as { shortcut?: unknown };
+  const projectCfg = (projectSettings.commandPalette ?? {}) as { shortcut?: unknown };
+  const settingsKey = normalizeKey(projectCfg.shortcut ?? globalCfg.shortcut);
+  if (settingsKey) return settingsKey as KeyId;
 
-	// 3. default
-	return DEFAULT_SHORTCUT as KeyId;
+  // 3. default
+  return DEFAULT_SHORTCUT as KeyId;
 }

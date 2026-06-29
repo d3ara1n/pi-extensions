@@ -67,14 +67,14 @@ const ZAI_STREAM = {
 } as const;
 
 const KNOWN_MODELS: Record<string, Partial<ModelMeta>> = {
-  "glm-4.5":        { contextWindow: 131_072, maxTokens: 98_304 },
-  "glm-4.5-air":    { contextWindow: 131_072, maxTokens: 98_304 },
-  "glm-4.6":        { contextWindow: 200_000, maxTokens: 131_072 },
-  "glm-4.7":        { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
-  "glm-5":          { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
-  "glm-5-turbo":    { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
-  "glm-5.1":        { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
-  "glm-5.2":        { contextWindow: 1_000_000, maxTokens: 131_072, compat: ZAI_STREAM },
+  "glm-4.5": { contextWindow: 131_072, maxTokens: 98_304 },
+  "glm-4.5-air": { contextWindow: 131_072, maxTokens: 98_304 },
+  "glm-4.6": { contextWindow: 200_000, maxTokens: 131_072 },
+  "glm-4.7": { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
+  "glm-5": { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
+  "glm-5-turbo": { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
+  "glm-5.1": { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
+  "glm-5.2": { contextWindow: 1_000_000, maxTokens: 131_072, compat: ZAI_STREAM },
 };
 
 // ── API helpers ───────────────────────────────────────────────────────────
@@ -86,7 +86,9 @@ function resolveApiKey(): string | undefined {
     if (!fs.existsSync(authPath)) return undefined;
     const auth = JSON.parse(fs.readFileSync(authPath, "utf8"));
     return auth[PROVIDER_ID]?.apiKey ?? auth[PROVIDER_ID]?.key;
-  } catch { return undefined; }
+  } catch {
+    return undefined;
+  }
 }
 
 async function fetchQuota(apiKey: string): Promise<QuotaResponse | null> {
@@ -96,9 +98,11 @@ async function fetchQuota(apiKey: string): Promise<QuotaResponse | null> {
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return null;
-    const body = await res.json() as QuotaResponse;
+    const body = (await res.json()) as QuotaResponse;
     return body.success ? body : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 // ── Model config builder ──────────────────────────────────────────────────
@@ -143,8 +147,8 @@ function createUsageProvider(): UsageProvider {
       // It carries its own percentage and nextResetTime.
       // Lite plan has one; Pro plan may have two (5h + weekly).
       const windows = limits
-        .filter(l => l.type === "TOKENS_LIMIT" && typeof l.percentage === "number")
-        .map(l => {
+        .filter((l) => l.type === "TOKENS_LIMIT" && typeof l.percentage === "number")
+        .map((l) => {
           const period = l.number && l.unit ? `${l.number}${l.unit === 3 ? "h" : "w"}` : "";
           return {
             period,

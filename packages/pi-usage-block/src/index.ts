@@ -34,9 +34,11 @@ function fmtCountdown(ms: number): string {
   if (ms <= 0) return "now";
   const m = Math.round(ms / 60_000);
   if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60), rm = m % 60;
+  const h = Math.floor(m / 60),
+    rm = m % 60;
   if (h < 24) return rm ? `${h}h${rm}m` : `${h}h`;
-  const d = Math.floor(h / 24), rh = h % 24;
+  const d = Math.floor(h / 24),
+    rh = h % 24;
   return rh ? `${d}d${rh}h` : `${d}d`;
 }
 
@@ -50,7 +52,7 @@ function fmtWindow(w: UsageWindow, theme: Theme): string {
 
 function fmtProvider(name: string, windows: UsageWindow[], theme: Theme): string {
   if (!windows.length) return name;
-  const parts = windows.map(w => fmtWindow(w, theme));
+  const parts = windows.map((w) => fmtWindow(w, theme));
   return `${theme.fg("dim", name)} ${parts.join(" ")}`;
 }
 
@@ -147,7 +149,9 @@ export default function (pi: ExtensionAPI) {
     alive = true;
     setActive(c.model?.provider);
     const ms: number = (c as any).settings?.usageBlock?.refreshIntervalMs ?? 60_000;
-    timer = setInterval(() => { if (alive) refresh(); }, ms);
+    timer = setInterval(() => {
+      if (alive) refresh();
+    }, ms);
   });
 
   pi.on("session_shutdown", () => {

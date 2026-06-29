@@ -44,9 +44,9 @@ import * as path from "node:path";
 
 /** Normalize separators to POSIX `/` so `\dev\null` ≡ `/dev/null` for comparison. */
 export function toPosix(p: string): string {
-	// split/join avoids regex-escape pitfalls; after path.normalize() backslash
-	// is the only separator Node ever emits (POSIX paths already use `/`).
-	return p.includes("\\") ? p.split("\\").join("/") : p;
+  // split/join avoids regex-escape pitfalls; after path.normalize() backslash
+  // is the only separator Node ever emits (POSIX paths already use `/`).
+  return p.includes("\\") ? p.split("\\").join("/") : p;
 }
 
 /**
@@ -56,7 +56,7 @@ export function toPosix(p: string): string {
  * @internal — exported for testing; use {@link underRoot} in production.
  */
 export function posixUnder(posixTarget: string, posixRoot: string): boolean {
-	return posixTarget === posixRoot || posixTarget.startsWith(posixRoot + "/");
+  return posixTarget === posixRoot || posixTarget.startsWith(posixRoot + "/");
 }
 
 /**
@@ -65,9 +65,9 @@ export function posixUnder(posixTarget: string, posixRoot: string): boolean {
  * both work. Used by the PathManager for prefix matching.
  */
 export function underRoot(target: string, root: string): boolean {
-	const t = toPosix(target);
-	const r = toPosix(root);
-	return t === r || t.startsWith(r + "/");
+  const t = toPosix(target);
+  const r = toPosix(root);
+  return t === r || t.startsWith(r + "/");
 }
 
 /**
@@ -81,16 +81,38 @@ export function underRoot(target: string, root: string): boolean {
  * the logic on any host.
  */
 export function isWinDeviceName(target: string, platform: string = process.platform): boolean {
-	if (platform !== "win32") return false;
-	// basename on a win32-normalized path yields the final segment. Strip any
-	// `.<ext>` so `NUL.txt` matches (Win32 treats the bare name as the device).
-	const base = path.win32.basename(target).replace(/\.[^.]*$/, "").toUpperCase();
-	return WIN_DEV_NAMES.has(base);
+  if (platform !== "win32") return false;
+  // basename on a win32-normalized path yields the final segment. Strip any
+  // `.<ext>` so `NUL.txt` matches (Win32 treats the bare name as the device).
+  const base = path.win32
+    .basename(target)
+    .replace(/\.[^.]*$/, "")
+    .toUpperCase();
+  return WIN_DEV_NAMES.has(base);
 }
 const WIN_DEV_NAMES: ReadonlySet<string> = new Set([
-	"NUL", "CON", "AUX", "PRN",
-	"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-	"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+  "NUL",
+  "CON",
+  "AUX",
+  "PRN",
+  "COM1",
+  "COM2",
+  "COM3",
+  "COM4",
+  "COM5",
+  "COM6",
+  "COM7",
+  "COM8",
+  "COM9",
+  "LPT1",
+  "LPT2",
+  "LPT3",
+  "LPT4",
+  "LPT5",
+  "LPT6",
+  "LPT7",
+  "LPT8",
+  "LPT9",
 ]);
 
 /**
@@ -106,15 +128,15 @@ const WIN_DEV_NAMES: ReadonlySet<string> = new Set([
  * the logic on any host.
  */
 export function msysDrive(token: string, platform: string = process.platform): string | null {
-	if (platform !== "win32") return null;
-	// `/x` followed by `/` or end, single letter a-z (case insensitive per MSYS).
-	const m = /^\/([a-zA-Z])(\/|$)/.exec(token);
-	if (!m) return null;
-	const drive = m[1].toUpperCase();
-	// slice past the FULL matched prefix (e.g. "/c/"), not just "/c" — otherwise
-	// the leading `/` survives into `rest` and doubles up with the `:\` separator.
-	const rest = token.slice(m[0].length);
-	return `${drive}:\\${rest.replace(/\//g, "\\")}`;
+  if (platform !== "win32") return null;
+  // `/x` followed by `/` or end, single letter a-z (case insensitive per MSYS).
+  const m = /^\/([a-zA-Z])(\/|$)/.exec(token);
+  if (!m) return null;
+  const drive = m[1].toUpperCase();
+  // slice past the FULL matched prefix (e.g. "/c/"), not just "/c" — otherwise
+  // the leading `/` survives into `rest` and doubles up with the `:\` separator.
+  const rest = token.slice(m[0].length);
+  return `${drive}:\\${rest.replace(/\//g, "\\")}`;
 }
 
 // ── Built-in always-safe roots ──────────────────────────────────────────────
@@ -136,23 +158,23 @@ export function msysDrive(token: string, platform: string = process.platform): s
 // they are matched by basename, not by prefix.
 
 const SAFE_DEV_PATHS: readonly string[] = [
-	"/dev/null",
-	"/dev/stdin",
-	"/dev/stdout",
-	"/dev/stderr",
-	"/dev/zero",
-	"/dev/urandom",
-	"/dev/random",
+  "/dev/null",
+  "/dev/stdin",
+  "/dev/stdout",
+  "/dev/stderr",
+  "/dev/zero",
+  "/dev/urandom",
+  "/dev/random",
 ];
 const SAFE_DEV_PREFIXES: readonly string[] = ["/dev/fd/"];
 
 /** Resolve `/tmp` to its real path (handles the macOS `private/tmp` symlink). */
 const TMP_REAL = (() => {
-	try {
-		return fs.realpathSync("/tmp");
-	} catch {
-		return "/tmp";
-	}
+  try {
+    return fs.realpathSync("/tmp");
+  } catch {
+    return "/tmp";
+  }
 })();
 
 /**
@@ -162,40 +184,40 @@ const TMP_REAL = (() => {
  * these into its "builtin" allow rules. Pure of policy beyond this fixed set.
  */
 export function builtinSafeRoots(): string[] {
-	const roots: string[] = [
-		...SAFE_DEV_PATHS,
-		...SAFE_DEV_PREFIXES.map((p) => p.replace(/\/$/, "")), // "/dev/fd/" → "/dev/fd"
-		"/tmp",
-	];
-	// macOS /tmp → /private/tmp symlink: the real path must also be safe.
-	if (TMP_REAL !== "/tmp") roots.push(TMP_REAL);
-	roots.push(path.normalize(os.tmpdir()));
-	// Normalize every entry to POSIX so cross-platform prefix matching works
-	// (e.g. win32 os.tmpdir() → "C:\...\Temp" → "C:/.../Temp").
-	return [...new Set(roots.map(toPosix))];
+  const roots: string[] = [
+    ...SAFE_DEV_PATHS,
+    ...SAFE_DEV_PREFIXES.map((p) => p.replace(/\/$/, "")), // "/dev/fd/" → "/dev/fd"
+    "/tmp",
+  ];
+  // macOS /tmp → /private/tmp symlink: the real path must also be safe.
+  if (TMP_REAL !== "/tmp") roots.push(TMP_REAL);
+  roots.push(path.normalize(os.tmpdir()));
+  // Normalize every entry to POSIX so cross-platform prefix matching works
+  // (e.g. win32 os.tmpdir() → "C:\...\Temp" → "C:/.../Temp").
+  return [...new Set(roots.map(toPosix))];
 }
 
 // ── Path resolution ─────────────────────────────────────────────────────────
 
 /** Expand a leading `~` or `$HOME` form to the home directory. Returns null if not a home form. */
 function expandHome(token: string): string | null {
-	if (token === "~") return os.homedir();
-	if (token.startsWith("~/")) return path.join(os.homedir(), token.slice(2));
-	if (token === "$HOME") return os.homedir();
-	if (token.startsWith("$HOME/")) return path.join(os.homedir(), token.slice(6));
-	return null;
+  if (token === "~") return os.homedir();
+  if (token.startsWith("~/")) return path.join(os.homedir(), token.slice(2));
+  if (token === "$HOME") return os.homedir();
+  if (token.startsWith("$HOME/")) return path.join(os.homedir(), token.slice(6));
+  return null;
 }
 
 /** Resolve any token (absolute, home, or relative-to-cwd) to a normalized absolute path. */
 export function resolveTarget(token: string, cwd: string): string {
-	const home = expandHome(token);
-	if (home !== null) return path.normalize(home);
-	// MSYS drive notation (/c/Users → C:\Users) must be tried before the generic
-	// absolute check: path.win32 mis-resolves /c/... to C:\c\.... (no-op on POSIX.)
-	const msys = msysDrive(token);
-	if (msys) return path.normalize(msys);
-	if (path.isAbsolute(token)) return path.normalize(token);
-	return path.resolve(cwd, token);
+  const home = expandHome(token);
+  if (home !== null) return path.normalize(home);
+  // MSYS drive notation (/c/Users → C:\Users) must be tried before the generic
+  // absolute check: path.win32 mis-resolves /c/... to C:\c\.... (no-op on POSIX.)
+  const msys = msysDrive(token);
+  if (msys) return path.normalize(msys);
+  if (path.isAbsolute(token)) return path.normalize(token);
+  return path.resolve(cwd, token);
 }
 
 // ── bash target extraction (pure syntax; NO policy) ─────────────────────────
@@ -211,10 +233,13 @@ export function resolveTarget(token: string, cwd: string): string {
 // PathManager's job, so policy lives in exactly one place.
 
 function stripQuotes(t: string): string {
-	if (t.length >= 2 && ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'")))) {
-		return t.slice(1, -1);
-	}
-	return t;
+  if (
+    t.length >= 2 &&
+    ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'")))
+  ) {
+    return t.slice(1, -1);
+  }
+  return t;
 }
 
 /**
@@ -224,7 +249,7 @@ function stripQuotes(t: string): string {
  * rather than escapes.
  */
 function unescapeBackslash(t: string): string {
-	return t.replace(/\\(.)/g, "$1");
+  return t.replace(/\\(.)/g, "$1");
 }
 
 const WIN_NATIVE_RE = /^[A-Za-z]:[\\/]/;
@@ -242,17 +267,17 @@ const WIN_NATIVE_RE = /^[A-Za-z]:[\\/]/;
  * Windows regardless of host OS, so this is unit-testable on any platform.
  */
 export function isWindowsNativePath(token: string): boolean {
-	return WIN_NATIVE_RE.test(token);
+  return WIN_NATIVE_RE.test(token);
 }
 
 /** Does this token look like it could escape cwd? */
 function isEscapingCandidate(token: string): boolean {
-	if (token.startsWith("/") || path.isAbsolute(token)) return true; // absolute (posix + windows native)
-	if (token === "~" || token.startsWith("~/")) return true; // home
-	if (token === "$HOME" || token.startsWith("$HOME/")) return true; // home
-	if (token === ".." || token.startsWith("../")) return true; // parent climb
-	if (/\/\.\.(\/|$)/.test(token)) return true; // embedded parent: a/.. or a/../b
-	return false;
+  if (token.startsWith("/") || path.isAbsolute(token)) return true; // absolute (posix + windows native)
+  if (token === "~" || token.startsWith("~/")) return true; // home
+  if (token === "$HOME" || token.startsWith("$HOME/")) return true; // home
+  if (token === ".." || token.startsWith("../")) return true; // parent climb
+  if (/\/\.\.(\/|$)/.test(token)) return true; // embedded parent: a/.. or a/../b
+  return false;
 }
 
 // Shell token splitter. Separators: whitespace, quotes, and shell metachars
@@ -288,27 +313,27 @@ const HEREDOC_RE = /<<-?\s*(?:\\|["']?)([A-Za-z_][\w-]*)["']?/;
  * quoted string was mistaken for absolute path `/`.
  */
 function scanLine(line: string, cwd: string, targets: Set<string>): void {
-	for (const raw of line.matchAll(TOKEN_RE)) {
-		const r = raw[0];
-		// Quoted run = data literal, not a path. See method comment.
-		if (r[0] === '"' || r[0] === "'") continue;
-		const stripped = stripQuotes(r);
-		if (!stripped) continue;
-		// Windows-native paths (C:\...) keep backslashes as separators; any other
-		// token unescapes shell backslash-escapes (\ , \;, \\, \$HOME).
-		const token = isWindowsNativePath(stripped) ? stripped : unescapeBackslash(stripped);
-		if (token.startsWith("-")) continue; // option flag
-		// Unresolved $VAR (other than $HOME) can't be analyzed statically — skip.
-		if (token.includes("$") && !token.startsWith("$HOME")) continue;
-		if (!isEscapingCandidate(token)) continue;
-		targets.add(resolveTarget(token, cwd));
-	}
+  for (const raw of line.matchAll(TOKEN_RE)) {
+    const r = raw[0];
+    // Quoted run = data literal, not a path. See method comment.
+    if (r[0] === '"' || r[0] === "'") continue;
+    const stripped = stripQuotes(r);
+    if (!stripped) continue;
+    // Windows-native paths (C:\...) keep backslashes as separators; any other
+    // token unescapes shell backslash-escapes (\ , \;, \\, \$HOME).
+    const token = isWindowsNativePath(stripped) ? stripped : unescapeBackslash(stripped);
+    if (token.startsWith("-")) continue; // option flag
+    // Unresolved $VAR (other than $HOME) can't be analyzed statically — skip.
+    if (token.includes("$") && !token.startsWith("$HOME")) continue;
+    if (!isEscapingCandidate(token)) continue;
+    targets.add(resolveTarget(token, cwd));
+  }
 }
 
 /** If `line` opens a heredoc (`<<DELIM` forms), return the bare delimiter word. */
 function heredocDelim(line: string): string | null {
-	const m = line.match(HEREDOC_RE);
-	return m ? m[1] : null;
+  const m = line.match(HEREDOC_RE);
+  return m ? m[1] : null;
 }
 
 /**
@@ -328,18 +353,18 @@ function heredocDelim(line: string): string | null {
  * `/...` token in the embedded code.
  */
 export function extractBashTargets(command: string, cwd: string): string[] {
-	const targets = new Set<string>();
-	let pendingDelim: string | null = null;
-	for (const line of command.split("\n")) {
-		if (pendingDelim !== null) {
-			// Heredoc body: stdin data, never a path. Terminated by a line equal to
-			// the delimiter; `<<-` permits leading tabs, so strip those before compare.
-			if (line.replace(/^\t+/, "").trim() === pendingDelim) pendingDelim = null;
-			continue;
-		}
-		const delim = heredocDelim(line);
-		if (delim) pendingDelim = delim;
-		scanLine(line, cwd, targets);
-	}
-	return [...targets];
+  const targets = new Set<string>();
+  let pendingDelim: string | null = null;
+  for (const line of command.split("\n")) {
+    if (pendingDelim !== null) {
+      // Heredoc body: stdin data, never a path. Terminated by a line equal to
+      // the delimiter; `<<-` permits leading tabs, so strip those before compare.
+      if (line.replace(/^\t+/, "").trim() === pendingDelim) pendingDelim = null;
+      continue;
+    }
+    const delim = heredocDelim(line);
+    if (delim) pendingDelim = delim;
+    scanLine(line, cwd, targets);
+  }
+  return [...targets];
 }

@@ -1,0 +1,6 @@
+# 格式化相关的大批量 commit——让 git blame / IDE 自动跳过，避免污染行级归属
+# 本地启用：git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub/GitLab 网页端会自动识别本文件
+
+# style: 全量 reformat 为 2 空格缩进（tab → space，biome.json 驱动）
+42fef5daf68c2ac4915da88f518d71164f87627a

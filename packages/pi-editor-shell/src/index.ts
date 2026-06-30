@@ -300,6 +300,9 @@ export default function (pi: ExtensionAPI) {
       }
     };
 
+    // CardEditor has its own phase-aware spinner — hide pi's built-in working loader.
+    ctx.ui.setWorkingVisible(false);
+
     ctx.ui.setEditorComponent((tui, theme, keybindings) => {
       editor = new CardEditor(tui, theme, keybindings, provider);
       return editor;

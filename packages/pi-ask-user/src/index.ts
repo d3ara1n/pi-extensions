@@ -625,7 +625,8 @@ class AskUserPanel implements Component, Focusable {
     // 7. Review tab: ↑↓ move · Space edit · Enter submit. (Esc + tab
     //    navigation were already handled above.)
     if (this.isReviewTab) {
-      return this.handleReviewInput(data);
+      this.handleReviewInput(data);
+      return;
     }
 
     // 8. Question tab: ↑↓ move cursor · Space toggle/commit · Enter confirm.
@@ -1007,7 +1008,7 @@ class AskUserPanel implements Component, Focusable {
     st: TabState,
     multi: boolean,
     th: Theme,
-    isCursor: boolean,
+    _isCursor: boolean,
     customAnswered: boolean,
   ): string {
     if (opt.isOther) {
@@ -1046,7 +1047,7 @@ class AskUserPanel implements Component, Focusable {
   /** Review summary: one question per entry (header + answer), plus a trailing
    *  "note to assistant" entry. Viewport scrolling reuses the option-screen
    *  layout primitives. */
-  private renderReview(width: number, innerW: number, th: Theme): string[] {
+  private renderReview(_width: number, innerW: number, th: Theme): string[] {
     const lines: string[] = [];
     // Review uses a distinct border color (success/green) so it's visually
     // unmistakable as the review/confirm screen — not another question. The
@@ -1124,7 +1125,7 @@ class AskUserPanel implements Component, Focusable {
   /** Note editor screen: reached from the review's note entry via Space. Uses
    *  the same success-bordered look as the review screen to signal it's part
    *  of the review flow, not a fresh question. */
-  private renderMessageEditor(width: number, innerW: number, th: Theme): string[] {
+  private renderMessageEditor(_width: number, innerW: number, th: Theme): string[] {
     const lines: string[] = [];
     const bc: import("@earendil-works/pi-coding-agent").ThemeColor = "success";
     const row = (content: string) => th.fg(bc, "│") + padRight(content, innerW) + th.fg(bc, "│");
@@ -1533,7 +1534,17 @@ export default function askUserExtension(pi: ExtensionAPI) {
       // context.args.questions is the schema-static type; AskUserResultView
       // only needs header+tab, so the structural subtype is compatible.
       const questions = context.args?.questions ?? [];
-      const details = result.details ?? { questions: [], answers: [], cancelled: true };
+      // Field-level fallback: result.details may be a truthy partial object
+      // (e.g. { cancelled: false }) whose .answers is undefined, which would
+      // crash getStatus/renderCollapsed/renderCard with "Cannot read
+      // properties of undefined (reading 'some')". Normalize every field.
+      const raw = result.details ?? {};
+      const details: AskUserResult = {
+        questions: raw.questions ?? [],
+        answers: raw.answers ?? [],
+        cancelled: raw.cancelled ?? true,
+        message: raw.message,
+      };
       const comp =
         context.lastComponent instanceof AskUserResultView
           ? context.lastComponent

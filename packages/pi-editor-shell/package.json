@@ -1,8 +1,8 @@
 {
-  "name": "@d3ara1n/pi-editor-card",
+  "name": "@d3ara1n/pi-editor-shell",
   "version": "0.1.0",
   "type": "module",
-  "description": "Card/panel-style frame around the pi input editor — rounded-corner box, no Nerd Font required",
+  "description": "Replaces pi's default editor and status bar with a unified rounded-corner shell — no Nerd Font required",
   "keywords": [
     "pi-package",
     "pi"
@@ -21,6 +21,6 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/d3ara1n/pi-extensions",
-    "directory": "packages/pi-editor-card"
+    "directory": "packages/pi-editor-shell"
   }
 }

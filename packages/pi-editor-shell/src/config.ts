@@ -1,5 +1,5 @@
 /**
- * Read editor-card configuration from settings files.
+ * Read editor-shell configuration from settings files.
  *
  * Global (~/.pi/agent/settings.json) + project (.pi/settings.json),
  * project overrides global.
@@ -9,15 +9,15 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-export interface EditorCardConfig {
+export interface EditorShellConfig {
   /**
-   * Status keys to pin to the card's top-right corner.
+   * Status keys to pin to the shell's top-right corner.
    * Only keys set via ctx.ui.setStatus() are eligible.
    */
   pinnedStatus: string[];
 }
 
-export const DEFAULT_CONFIG: EditorCardConfig = {
+export const DEFAULT_CONFIG: EditorShellConfig = {
   pinnedStatus: [],
 };
 
@@ -52,15 +52,15 @@ function merge(target: any, source: any): any {
 }
 
 /**
- * Load editorCard config from merged settings.
+ * Load editorShell config from merged settings.
  * @param cwd - Project working directory
  */
-export function loadEditorCardConfig(cwd?: string): EditorCardConfig {
+export function loadEditorShellConfig(cwd?: string): EditorShellConfig {
   const globalSettings = readSettingsFile(path.join(getAgentDir(), "settings.json"));
   const projectSettings = cwd ? readSettingsFile(path.join(cwd, ".pi", "settings.json")) : {};
   const settings = merge(globalSettings, projectSettings);
 
-  const raw = settings?.editorCard;
+  const raw = settings?.editorShell;
   if (!raw) return { ...DEFAULT_CONFIG };
 
   return {

@@ -2,14 +2,13 @@ import type { ExtensionAPI, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { spawnSync } from "node:child_process";
 import { CardEditor, type FrameProvider } from "./card-editor";
-import { loadEditorCardConfig, type EditorCardConfig } from "./config";
+import { loadEditorShellConfig, type EditorShellConfig } from "./config";
 
 /**
- * pi-editor-card — Card/panel frame around the input editor.
- *
- * Wraps the default input editor in a rounded-corner box and embeds status
- * info in the border: model · thinking level on top, context % + cwd on the
- * bottom. Border color follows pi's thinking/bash indicator automatically.
+ * pi-editor-shell — Replaces pi's default editor and status bar with a
+ * unified rounded-corner shell, embedding status info in the border:
+ * model · thinking level on top, context % + cwd on the bottom.
+ * Border color follows pi's thinking/bash indicator automatically.
  *
  * Caveat: `setEditorComponent` is a *replacement* API — mutually exclusive
  * with other editor-replacing extensions (border-status-editor,
@@ -138,7 +137,7 @@ export default function (pi: ExtensionAPI) {
   // The factory may run again when pi rebuilds the editor (model switch,
   // reload, …), so always drive whichever instance is current.
   let editor: CardEditor | undefined;
-  let config: EditorCardConfig = { pinnedStatus: [] };
+  let config: EditorShellConfig = { pinnedStatus: [] };
   // Shared footer-data ref — the provider (running inside CardEditor.render)
   // reads it to resolve pinned status keys to their current text.
   let footerSnap: FooterSnap | undefined;
@@ -153,12 +152,12 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ── Debug command ──────────────────────────────────────────────
-  pi.registerCommand("editor-card:status", {
-    description: "Show editor-card debug state: status keys, pinned config, cache totals",
+  pi.registerCommand("editor-shell:status", {
+    description: "Show editor-shell debug state: status keys, pinned config, cache totals",
     handler: async (_args, ctx) => {
       const lines: string[] = [];
 
-      lines.push("[editor-card config]");
+      lines.push("[editor-shell config]");
       lines.push(`  pinnedStatus: [${config.pinnedStatus.join(", ")}]`);
 
       lines.push("");
@@ -210,7 +209,7 @@ export default function (pi: ExtensionAPI) {
     if (!ctx.hasUI) return;
 
     _cwd = ctx.cwd;
-    config = loadEditorCardConfig(ctx.cwd);
+    config = loadEditorShellConfig(ctx.cwd);
     refreshGitDirty(ctx.cwd);
 
     // Fresh segments on every render — reads live ctx state, so thinking /
@@ -278,7 +277,7 @@ export default function (pi: ExtensionAPI) {
     });
 
     // Replace pi's built-in footer with an auto-wrapping extension-status
-    // line below the card.  Each status item is atomic — wrapping breaks
+    // line below the shell.  Each status item is atomic — wrapping breaks
     // between items, never mid-word.
     ctx.ui.setFooter((_tui, theme, footerData) => {
       footerSnap = footerData;

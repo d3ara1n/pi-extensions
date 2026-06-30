@@ -145,6 +145,7 @@ export default function (pi: ExtensionAPI) {
   // ── Lifecycle ──────────────────────────────────────────────────────────
 
   pi.on("session_start", async (_e, c) => {
+    if (!c.hasUI) return;
     ctx = c;
     alive = true;
     setActive(c.model?.provider);

@@ -284,7 +284,9 @@ export default function (pi: ExtensionAPI) {
       footerSnap = footerData;
       return {
         render(width: number): string[] {
+          const pinned = new Set(config.pinnedStatus);
           const statuses = Array.from(footerData.getExtensionStatuses().entries())
+            .filter(([key]) => !pinned.has(key))
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([, text]) => text);
           if (statuses.length === 0) return [];

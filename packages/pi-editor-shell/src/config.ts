@@ -1,8 +1,9 @@
 /**
  * Read editor-shell configuration from settings files.
  *
- * Global (~/.pi/agent/settings.json) + project (.pi/settings.json),
- * project overrides global.
+ * Global (~/.pi/agent/settings.json) + project (.pi/settings.json).
+ * Project settings, when present, override global wholesale — standard
+ * "project wins" design, no field-level merging.
  */
 
 import * as fs from "node:fs";
@@ -27,45 +28,32 @@ function getAgentDir(): string {
   return path.join(os.homedir(), ".pi", "agent");
 }
 
-function readSettingsFile(filePath: string): any {
+/** Read the `editorShell` block from a settings file.
+ *  Returns undefined on missing file / parse error / non-object value —
+ *  pi surfaces its own settings errors, this loader stays lenient. */
+function readEditorShell(filePath: string): Record<string, unknown> | undefined {
   try {
-    if (!fs.existsSync(filePath)) return {};
-    const content = fs.readFileSync(filePath, "utf-8");
-    return JSON.parse(content);
+    const raw = JSON.parse(fs.readFileSync(filePath, "utf-8"))?.editorShell;
+    return raw && typeof raw === "object" ? (raw as Record<string, unknown>) : undefined;
   } catch {
-    return {};
+    return undefined;
   }
-}
-
-function merge(target: any, source: any): any {
-  if (!source || typeof source !== "object") return target;
-  if (!target || typeof target !== "object") return source;
-  const result = { ...target };
-  for (const key of Object.keys(source)) {
-    if (source[key] && typeof source[key] === "object" && !Array.isArray(source[key])) {
-      result[key] = merge(result[key], source[key]);
-    } else {
-      result[key] = source[key];
-    }
-  }
-  return result;
 }
 
 /**
- * Load editorShell config from merged settings.
+ * Load editorShell config. Project overrides global wholesale.
  * @param cwd - Project working directory
  */
 export function loadEditorShellConfig(cwd?: string): EditorShellConfig {
-  const globalSettings = readSettingsFile(path.join(getAgentDir(), "settings.json"));
-  const projectSettings = cwd ? readSettingsFile(path.join(cwd, ".pi", "settings.json")) : {};
-  const settings = merge(globalSettings, projectSettings);
-
-  const raw = settings?.editorShell;
+  const globalRaw = readEditorShell(path.join(getAgentDir(), "settings.json"));
+  const projectRaw = cwd ? readEditorShell(path.join(cwd, ".pi", "settings.json")) : undefined;
+  const raw = projectRaw ?? globalRaw;
   if (!raw) return { ...DEFAULT_CONFIG };
 
+  const pinned = raw.pinnedStatus;
   return {
-    pinnedStatus: Array.isArray(raw.pinnedStatus)
-      ? raw.pinnedStatus.filter((k: any) => typeof k === "string")
+    pinnedStatus: Array.isArray(pinned)
+      ? pinned.filter((k): k is string => typeof k === "string")
       : DEFAULT_CONFIG.pinnedStatus,
   };
 }

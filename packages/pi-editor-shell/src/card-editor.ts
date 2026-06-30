@@ -58,24 +58,16 @@ export interface FrameSegments {
   bottomRight: string;
 }
 
-/** Fresh, already-themed segments. The frame color itself comes from pi's
- *  editor.borderColor field (same source as the default editor), kept in
- *  sync by pi on thinking-level / bash-mode changes — so the border
- *  matches the built-in behavior.
- *
- *  (An optional `frame` override exists for experiments; when omitted the
- *  editor falls back to editor.borderColor.) */
-export interface Frame {
-  segments: FrameSegments;
-  frame?: (s: string) => string;
-}
+/** Fresh, already-themed segments on each render call. The frame color
+ *  itself always follows `this.borderColor` (pi keeps it in sync with the
+ *  thinking level / bash mode), so the provider only supplies text. */
+export type FrameProvider = () => FrameSegments;
 
-/** Returns a fresh Frame on each render call. */
-export type FrameProvider = () => Frame;
-
-const EMPTY_FRAME: Frame = {
-  segments: { topLeft: "", topRight: "", bottomLeft: "", bottomRight: "" },
-  frame: (s) => s,
+const EMPTY_SEGMENTS: FrameSegments = {
+  topLeft: "",
+  topRight: "",
+  bottomLeft: "",
+  bottomRight: "",
 };
 
 /** Strip ANSI SGR escapes and pi's zero-width cursor marker so a line can
@@ -122,15 +114,25 @@ function fitFrameRow(
   const minGap = 3;
   let l = leftText;
   let r = rightText;
+  let lw = visibleWidth(l);
+  let rw = visibleWidth(r);
 
-  while (visibleWidth(l) + visibleWidth(r) + minGap > inner && visibleWidth(r) > 0) {
-    r = truncateToWidth(r, Math.max(0, visibleWidth(r) - 1), "");
-  }
-  while (visibleWidth(l) + visibleWidth(r) + minGap > inner && visibleWidth(l) > 0) {
-    l = truncateToWidth(l, Math.max(0, visibleWidth(l) - 1), "");
+  // Shrink right first, then left, so a minimum gap always survives —
+  // but at most one truncate per side instead of a per-character loop.
+  if (lw + rw + minGap > inner) {
+    const maxR = Math.max(0, inner - lw - minGap);
+    if (rw > maxR) {
+      r = truncateToWidth(r, maxR, "");
+      rw = visibleWidth(r);
+    }
+    const maxL = Math.max(0, inner - rw - minGap);
+    if (lw > maxL) {
+      l = truncateToWidth(l, maxL, "");
+      lw = visibleWidth(l);
+    }
   }
 
-  const gap = Math.max(0, inner - visibleWidth(l) - visibleWidth(r));
+  const gap = Math.max(0, inner - lw - rw);
   return `${border(leftCap)}${l}${border("─".repeat(gap))}${r}${border(rightCap)}`;
 }
 
@@ -172,11 +174,15 @@ export class CardEditor extends CustomEditor {
     this.spinnerPhase = phase;
     if (phase) {
       this.spinnerIdx = 0;
+      // One timer serves all phases: the callback re-reads spinnerPhase each
+      // tick so a thinking→outputting transition swaps frames without
+      // rebuilding the interval. The guard keeps TS happy; in practice phase
+      // is always set while the timer is live (cleared the instant it nulls).
       if (!this.spinnerTimer) {
         this.spinnerTimer = setInterval(() => {
-          const frames = this.spinnerPhase ? SPINNERS[this.spinnerPhase] : null;
-          if (!frames) return;
-          this.spinnerIdx = (this.spinnerIdx + 1) % frames.length;
+          const phase = this.spinnerPhase;
+          if (!phase) return;
+          this.spinnerIdx = (this.spinnerIdx + 1) % SPINNERS[phase].length;
           this.tui.requestRender();
         }, SPINNER_INTERVAL_MS);
       }
@@ -184,6 +190,13 @@ export class CardEditor extends CustomEditor {
       if (this.spinnerTimer) clearInterval(this.spinnerTimer);
       this.spinnerTimer = undefined;
     }
+    this.tui.requestRender();
+  }
+
+  /** Request a re-render after external async state changes (e.g. git dirty
+   *  settling). The Editor's own TUI handle is protected, so callers outside
+   *  the class — like the extension's event handlers — go through here. */
+  requestRender(): void {
     this.tui.requestRender();
   }
 
@@ -198,17 +211,17 @@ export class CardEditor extends CustomEditor {
     const inner = super.render(width - 2);
     if (inner.length === 0) return inner;
 
-    // Border color: prefer the provider's override when given, otherwise
-    // fall back to pi's editor.borderColor (same field the default editor
-    // reads, updated by pi on thinking / bash changes).
-    const frameObj = this.frameProvider?.() ?? EMPTY_FRAME;
-    const border = frameObj.frame ?? this.borderColor;
-    const seg = frameObj.segments;
+    // Border color always follows this.borderColor — pi mutates it to encode
+    // thinking level / bash mode (same field the default editor reads), so
+    // the frame retints in lockstep with no extra wiring.
+    const border = this.borderColor;
+    const seg = this.frameProvider?.() ?? EMPTY_SEGMENTS;
     // While the agent is active, the current phase spinner replaces the
     // model text in the top-left slot — a moving indicator reads as "busy"
-    // more strongly than a static label.
+    // more strongly than a static label. spinnerIdx is kept in range by
+    // setSpinner's timer, so no modulo is needed here.
     const topLeft = this.spinnerPhase
-      ? `${RESET}${border(` ${SPINNERS[this.spinnerPhase][this.spinnerIdx % SPINNERS[this.spinnerPhase].length]} `)}${seg.topLeft.trimStart()}`
+      ? `${RESET}${border(` ${SPINNERS[this.spinnerPhase][this.spinnerIdx]} `)}${seg.topLeft.trimStart()}`
       : seg.topLeft;
 
     // The default Editor appends autocomplete rows *after* the bottom border.
@@ -241,25 +254,10 @@ export class CardEditor extends CustomEditor {
         // ctx/cwd always sit just under the editor. With a popup below, this
         // border becomes a T-junction divider; without one it's the rounded
         // bottom of the card.
-        out.push(
-          hasPopup
-            ? fitFrameRow(
-                GLYPH.divLeft,
-                GLYPH.divRight,
-                seg.bottomLeft,
-                seg.bottomRight,
-                width,
-                border,
-              )
-            : fitFrameRow(
-                GLYPH.bottomLeft,
-                GLYPH.bottomRight,
-                seg.bottomLeft,
-                seg.bottomRight,
-                width,
-                border,
-              ),
-        );
+        const [lc, rc] = hasPopup
+          ? [GLYPH.divLeft, GLYPH.divRight]
+          : [GLYPH.bottomLeft, GLYPH.bottomRight];
+        out.push(fitFrameRow(lc, rc, seg.bottomLeft, seg.bottomRight, width, border));
       } else {
         // Content row and popup items alike live inside the card. Reset around
         // the text so its styling never leaks into the frame and vice versa.

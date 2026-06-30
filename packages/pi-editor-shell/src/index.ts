@@ -1,6 +1,8 @@
 import type { ExtensionAPI, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import * as os from "node:os";
+import * as path from "node:path";
 import { CardEditor, type FrameProvider, type SpinnerPhase } from "./card-editor";
 import { loadEditorShellConfig, type EditorShellConfig } from "./config";
 
@@ -15,10 +17,14 @@ import { loadEditorShellConfig, type EditorShellConfig } from "./config";
  * rainbow-editor, modal-editor, …). Disable those when enabling this one.
  */
 
-/** Collapse $HOME to `~` for display. */
+/** Collapse the user's home directory to `~` for display.
+ *  Uses os.homedir() + path.sep so it works across platforms and does not
+ *  match sibling dirs that merely share a string prefix with home. */
 function formatCwd(cwd: string): string {
-  const home = process.env.HOME;
-  if (home && cwd.startsWith(home)) return `~${cwd.slice(home.length)}`;
+  const home = os.homedir();
+  if (!home) return cwd;
+  if (cwd === home) return "~";
+  if (cwd.startsWith(home + path.sep)) return `~${cwd.slice(home.length)}`;
   return cwd;
 }
 
@@ -35,7 +41,7 @@ const THINKING_TOKEN: Record<string, ThemeColor> = {
 
 /** Context-fill severity by usage ratio — green / amber / red. */
 function contextToken(pct: number | null | undefined): ThemeColor {
-  if (pct === null || pct === undefined) return "muted";
+  if (pct == null) return "muted";
   if (pct >= 80) return "error";
   if (pct >= 50) return "warning";
   return "success";
@@ -43,17 +49,15 @@ function contextToken(pct: number | null | undefined): ThemeColor {
 
 // ── Nerd Font icons (Octicons + FontAwesome) ──────────────────────────
 const ICON = {
-  model: "\uf4bc", //   oct-cpu
-  thinking: "\uf400", //   oct-light-bulb
-  context: "\uf49b", //   oct-cache
+  model: "\uf4bc", //   oct-cpu
+  thinking: "\uf400", //   oct-light-bulb
+  context: "\uf49b", //   oct-cache
   cache: "\u26a1", // ⚡  oct-zap
-  folder: "\uf07c", //   fa-folder
+  folder: "\uf07c", //   fa-folder
 } as const;
 
-/** Sum cache-read tokens across all assistant messages — same source and
- *  same accumulation as pi's own footer (which renders "R14M").
- *  Returns null when there is nothing to measure.
- *  Inline types avoid importing the full pi-ai message union tree. */
+/** Minimal inline types to read cache-read totals without importing the
+ *  full pi-ai message union tree. */
 interface MsgSnap {
   role: string;
   usage?: { cacheRead?: number };
@@ -63,8 +67,8 @@ interface EntrySnap {
   message?: MsgSnap;
 }
 
-/** Sum cache-read tokens across all assistant messages,
- *  matching pi's own footer filtering (type === "message"). */
+/** Sum cache-read tokens across all assistant messages, matching pi's own
+ *  footer filtering (type === "message") and accumulation ("R14M"). */
 function sumCacheRead(ctx: { sessionManager: { getEntries(): unknown[] } }): number {
   let total = 0;
   for (const entry of ctx.sessionManager.getEntries()) {
@@ -90,34 +94,57 @@ interface GitDirty {
 }
 let _gitDirty: GitDirty | undefined;
 
-/** Run `git status --porcelain` and count staged / unstaged files. */
-function refreshGitDirty(cwd: string): void {
-  try {
-    const r = spawnSync(
-      "git",
-      ["--no-optional-locks", "status", "--porcelain"],
-      { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 2000 },
-    );
-    if (r.status !== 0 || r.error) { _gitDirty = undefined; return; }
-    const lines = r.stdout.trim();
-    if (!lines) { _gitDirty = { staged: 0, unstaged: 0 }; return; }
+/** Parse `git status --porcelain` output into staged / unstaged counts. */
+function parseGitPorcelain(stdout: string): GitDirty {
+  const lines = stdout.trim();
+  if (!lines) return { staged: 0, unstaged: 0 };
 
-    let staged = 0;
-    let unstaged = 0;
-    for (const line of lines.split("\n")) {
-      if (line.length < 2) continue;
-      const x = line[0];
-      const y = line[1];
-      if (x !== " " && x !== "?" && x !== "!") staged++;
-      if (y !== " ") unstaged++;
-    }
-    _gitDirty = { staged, unstaged };
-  } catch {
-    _gitDirty = undefined;
+  let staged = 0;
+  let unstaged = 0;
+  for (const line of lines.split("\n")) {
+    if (line.length < 2) continue;
+    const x = line[0];
+    const y = line[1];
+    if (x !== " " && x !== "?" && x !== "!") staged++;
+    if (y !== " ") unstaged++;
   }
+  return { staged, unstaged };
 }
 
-/** Format dirty state as pi-style "+2 ~1" string, or "" if clean / unknown. */
+/** Run `git status --porcelain` asynchronously so a slow / hanging git never
+ *  blocks the event loop (turn_end is the most latency-sensitive moment —
+ *  the agent just finished and the user wants to type). Updates `_gitDirty`
+ *  and invokes `onDone` once settled so the caller can trigger a re-render.
+ *  A 2s guard kills a runaway process. */
+function refreshGitDirty(cwd: string, onDone?: () => void): void {
+  const child = spawn(
+    "git",
+    ["--no-optional-locks", "status", "--porcelain"],
+    { cwd, stdio: ["ignore", "pipe", "ignore"] },
+  );
+  let stdout = "";
+  const timer = setTimeout(() => child.kill("SIGTERM"), 2000);
+
+  // spawn emits both 'error' (e.g. git missing → ENOENT) and a subsequent
+  // 'close'; guard so onDone fires exactly once.
+  let done = false;
+  const settle = (ok: boolean, out: string): void => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    _gitDirty = ok ? parseGitPorcelain(out) : undefined;
+    onDone?.();
+  };
+
+  child.stdout?.on("data", (chunk: Buffer | string) => {
+    stdout += chunk;
+  });
+  child.on("error", () => settle(false, ""));
+  child.on("close", (code) => settle(code === 0, stdout));
+}
+
+/** Format dirty state as pi-style "+2 ~1" string (leading space), or "" if
+ *  clean / unknown — ready to splice into a "(branch…)" segment. */
 function gitDirtyDisplay(): string {
   if (!_gitDirty) return "";
   const parts: string[] = [];
@@ -143,17 +170,14 @@ export default function (pi: ExtensionAPI) {
   let footerSnap: FooterSnap | undefined;
   // CWD cached from session_start — used by turn_end to refresh git dirty.
   let _cwd = "";
+  // cacheRead total, refreshed at session_start + agent_end. The render
+  // provider reads this instead of re-scanning entries every frame.
+  let _cacheTotal = 0;
 
-  // ── Phase-aware spinner ────────────────────────────────────────
-  // Track which sub-phase the agent is in so we can pick the right
-  // spinner animation: thinking (●/○), outputting (sand-pile),
-  // toolcall drafting (arc rotation), tool execution (progress bar).
-  let _phase: SpinnerPhase | null = null;
-
-  pi.on("turn_start", () => {
-    _phase = "thinking";
-    editor?.setSpinner("thinking");
-  });
+  // ── Phase-aware spinner + lifecycle ────────────────────────────
+  // Each event asks the editor for a phase; CardEditor.setSpinner is itself
+  // a same-phase no-op, so rapid event streams never reset the animation.
+  pi.on("turn_start", () => editor?.setSpinner("thinking"));
   pi.on("message_update", (event) => {
     const t = event.assistantMessageEvent.type;
     let next: SpinnerPhase;
@@ -161,77 +185,24 @@ export default function (pi: ExtensionAPI) {
     else if (t.startsWith("text_")) next = "outputting";
     else if (t.startsWith("toolcall_")) next = "toolcall";
     else return;
-    if (next !== _phase) {
-      _phase = next;
-      editor?.setSpinner(next);
-    }
+    editor?.setSpinner(next);
   });
-  pi.on("tool_execution_start", () => {
-    _phase = "exec";
-    editor?.setSpinner("exec");
-  });
-  pi.on("agent_end", () => {
-    _phase = null;
+  pi.on("tool_execution_start", () => editor?.setSpinner("exec"));
+  pi.on("agent_end", (_event, ctx) => {
+    // cacheRead totals are stable once a turn finishes — recompute here
+    // instead of on every render frame.
+    _cacheTotal = sumCacheRead(ctx);
     editor?.setSpinner(null);
   });
   pi.on("session_shutdown", () => {
-    _phase = null;
     editor?.setSpinner(null);
     editor = undefined;
   });
 
-  // ── Debug command ──────────────────────────────────────────────
-  pi.registerCommand("editor-shell:status", {
-    description: "Show editor-shell debug state: status keys, pinned config, cache totals",
-    handler: async (_args, ctx) => {
-      const lines: string[] = [];
-
-      lines.push("[editor-shell config]");
-      lines.push(`  pinnedStatus: [${config.pinnedStatus.join(", ")}]`);
-
-      lines.push("");
-      lines.push("[extension statuses]");
-      if (footerSnap) {
-        const entries = Array.from(footerSnap.getExtensionStatuses().entries());
-        if (entries.length === 0) {
-          lines.push("  (none)");
-        } else {
-          const pinned = new Set(config.pinnedStatus);
-          for (const [key, text] of entries.sort(([a], [b]) => a.localeCompare(b))) {
-            const mark = pinned.has(key) ? " ← pinned" : "";
-            lines.push(`  ${key}: ${text}${mark}`);
-          }
-        }
-      } else {
-        lines.push("  (footer not initialized)");
-      }
-
-      lines.push("");
-      lines.push("[cache totals]");
-      const tokens = sumCacheRead(ctx);
-      lines.push(`  cacheRead: ${tokens > 0 ? formatTokens(tokens) : "0"}`);
-
-      lines.push("");
-      const cwd = ctx.cwd;
-      lines.push(`[context] cwd: ${cwd}`);
-      const branch = footerSnap?.getGitBranch();
-      lines.push(`  git branch: ${branch ?? "(not in repo)"}`);
-      if (branch) {
-        const ds = _gitDirty
-          ? `+${_gitDirty.staged} ~${_gitDirty.unstaged}`
-          : "(clean)";
-        lines.push(`  git dirty: ${ds}`);
-      }
-      const m = ctx.model;
-      lines.push(`  model: ${m ? `${m.provider}/${m.id}` : "none"}`);
-
-      ctx.ui.notify(lines.join("\n"), "info");
-    },
-  });
-
   // Refresh git dirty after every agent turn (tools may have changed files).
+  // Async — never blocks the event loop; re-renders once settled.
   pi.on("turn_end", () => {
-    if (_cwd) refreshGitDirty(_cwd);
+    if (_cwd) refreshGitDirty(_cwd, () => editor?.requestRender());
   });
 
   pi.on("session_start", (_event, ctx) => {
@@ -239,7 +210,8 @@ export default function (pi: ExtensionAPI) {
 
     _cwd = ctx.cwd;
     config = loadEditorShellConfig(ctx.cwd);
-    refreshGitDirty(ctx.cwd);
+    _cacheTotal = sumCacheRead(ctx);
+    refreshGitDirty(ctx.cwd, () => editor?.requestRender());
 
     // Fresh segments on every render — reads live ctx state, so thinking /
     // context % updates show up on the next paint without extra wiring.
@@ -247,6 +219,19 @@ export default function (pi: ExtensionAPI) {
     // the default editor's behavior.
     const provider: FrameProvider = () => {
       const theme = ctx.ui.theme;
+
+      // Resolve pinned status keys → already-themed text, " · "-joined.
+      const buildPinned = (): string => {
+        const keys = config.pinnedStatus;
+        if (keys.length === 0 || !footerSnap) return "";
+        const all = footerSnap.getExtensionStatuses();
+        const texts = keys
+          .map((k) => all.get(k))
+          .filter((s): s is string => s != null);
+        if (texts.length === 0) return "";
+        return ` ${texts.map((s) => theme.fg("muted", s)).join(theme.fg("dim", " · "))} `;
+      };
+
       const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "no model";
       const thinking = pi.getThinkingLevel();
       const thinkingColor = THINKING_TOKEN[thinking] ?? "muted";
@@ -255,12 +240,13 @@ export default function (pi: ExtensionAPI) {
       const pct = usage?.percent;
       const ctxWindow = usage?.contextWindow ?? ctx.model?.contextWindow;
       const ctxText =
-        pct !== null && pct !== undefined && ctxWindow
+        pct != null && ctxWindow
           ? `${Math.round(pct)}%/${(ctxWindow / 1000).toFixed(0)}k`
           : "?/??k";
 
-      // Cache-read token total — same data source pi's own footer uses for "R14M".
-      const cacheTokens = sumCacheRead(ctx);
+      // Cache-read token total — refreshed at agent_end (same data source
+      // pi's own footer uses for "R14M"); read from cache off the hot path.
+      const cacheTokens = _cacheTotal;
       const cachePart =
         cacheTokens > 0
           ? `${theme.fg("dim", " · ")}${theme.fg("warning", `${ICON.cache} ${formatTokens(cacheTokens)}`)}`
@@ -275,29 +261,15 @@ export default function (pi: ExtensionAPI) {
           ? `${ICON.folder} ${cwdText} (${branch}${dirty})`
           : `${ICON.folder} ${cwdText}`;
 
+      // Model in accent; thinking label in its level token — same hue the
+      // border takes on, so switching levels visibly retints both together.
       return {
-        segments: {
-          // Model in accent; thinking label in its level token — same hue the
-          // border takes on, so switching levels visibly retints both together.
-          topLeft: ` ${theme.fg("accent", `${ICON.model} ${model}`)}${theme.fg("dim", " · ")}${theme.fg(thinkingColor, `${ICON.thinking} ${thinking}`)} `,
-          topRight: buildPinned(theme),
-          // Context in severity color; cwd stays muted so it never competes.
-          bottomLeft: ` ${theme.fg(contextToken(pct), `${ICON.context} ${ctxText}`)}${cachePart} `,
-          bottomRight: theme.fg("muted", ` ${cwdDisplay} `),
-        },
+        topLeft: ` ${theme.fg("accent", `${ICON.model} ${model}`)}${theme.fg("dim", " · ")}${theme.fg(thinkingColor, `${ICON.thinking} ${thinking}`)} `,
+        topRight: buildPinned(),
+        // Context in severity color; cwd stays muted so it never competes.
+        bottomLeft: ` ${theme.fg(contextToken(pct), `${ICON.context} ${ctxText}`)}${cachePart} `,
+        bottomRight: theme.fg("muted", ` ${cwdDisplay} `),
       };
-
-      /** Resolve pinned status keys → already-themed text, " · "-joined. */
-      function buildPinned(theme: typeof ctx.ui.theme): string {
-        const keys = config.pinnedStatus;
-        if (keys.length === 0 || !footerSnap) return "";
-        const all = footerSnap.getExtensionStatuses();
-        const texts = keys
-          .map((k) => all.get(k))
-          .filter((s): s is string => s != null);
-        if (texts.length === 0) return "";
-        return ` ${texts.map((s) => theme.fg("muted", s)).join(theme.fg("dim", " · "))} `;
-      }
     };
 
     // CardEditor has its own phase-aware spinner — hide pi's built-in working loader.
@@ -341,5 +313,51 @@ export default function (pi: ExtensionAPI) {
         dispose() {},
       };
     });
+  });
+
+  // ── Debug command ──────────────────────────────────────────────
+  pi.registerCommand("editor-shell:status", {
+    description: "Show editor-shell debug state: status keys, pinned config, cache totals",
+    handler: async (_args, ctx) => {
+      const lines: string[] = [];
+
+      lines.push("[editor-shell config]");
+      lines.push(`  pinnedStatus: [${config.pinnedStatus.join(", ")}]`);
+
+      lines.push("");
+      lines.push("[extension statuses]");
+      if (footerSnap) {
+        const entries = Array.from(footerSnap.getExtensionStatuses().entries());
+        if (entries.length === 0) {
+          lines.push("  (none)");
+        } else {
+          const pinned = new Set(config.pinnedStatus);
+          for (const [key, text] of entries.sort(([a], [b]) => a.localeCompare(b))) {
+            const mark = pinned.has(key) ? " ← pinned" : "";
+            lines.push(`  ${key}: ${text}${mark}`);
+          }
+        }
+      } else {
+        lines.push("  (footer not initialized)");
+      }
+
+      lines.push("");
+      lines.push("[cache totals]");
+      const tokens = sumCacheRead(ctx);
+      lines.push(`  cacheRead: ${tokens > 0 ? formatTokens(tokens) : "0"}`);
+
+      lines.push("");
+      lines.push(`[context] cwd: ${ctx.cwd}`);
+      const branch = footerSnap?.getGitBranch();
+      lines.push(`  git branch: ${branch ?? "(not in repo)"}`);
+      if (branch) {
+        const dirty = gitDirtyDisplay().trim();
+        lines.push(`  git dirty: ${dirty || "clean"}`);
+      }
+      const m = ctx.model;
+      lines.push(`  model: ${m ? `${m.provider}/${m.id}` : "none"}`);
+
+      ctx.ui.notify(lines.join("\n"), "info");
+    },
   });
 }

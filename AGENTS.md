@@ -3,6 +3,7 @@
 > 本仓库是 **pi**（coding agent harness，npm 包 `@earendil-works/pi-coding-agent`）的插件集合——所有 `@d3ara1n/pi-*` 插件都在此开发与发布。
 >
 > 调查某个 `pi-xxx` 插件时，判断流程：
+>
 > 1. **先到 `packages/` 目录确认**是否是本仓库开发的插件（本仓库插件均为 `@d3ara1n/pi-*`）
 > 2. 在 `packages/pi-xxx/` 找到 → 直接读源码，这是源头，联网搜只会绕路
 > 3. 没找到 → 是第三方插件，联网搜或读 `node_modules/`
@@ -55,6 +56,7 @@ docs(pi-context-include): 补充 README
 ### 版本发布
 
 push 到 main 后 GitHub Actions 自动发布，规则：
+
 - `feat` → minor
 - `fix` → patch
 - `!` 或 `BREAKING CHANGE` → major
@@ -129,6 +131,10 @@ const roles: ModelRolesAPI = getModelRolesAPI();  // 完整类型推导
 }
 ```
 
+**配置加载：project 替换 global，不做字段级 merge。** 读取顺序是全局 `~/.pi/agent/settings.json` + 项目 `.pi/settings.json`，**项目配置整块替换全局**（`projectRaw ?? globalRaw`），缺失字段由 `DEFAULT_CONFIG` 经 per-field `??` 兑底。这与 pi 自身及 `pi-access-denied`（测试已锁定该语义）一致。
+
+不要为加载逻辑写递归 `merge()`：绝大多数配置是扁平结构，整块替换语义清晰、无意外。仅当确有**跨文件部分覆盖某个 map**的需求时才作为例外保留深合并——当前只有 `pi-model-roles`（项目可只覆盖单个 role 的部分字段，如只改 `model` 保留 global 的 `provider`）。
+
 **命令注册**：pi 支持冒号命令名——`pi.registerCommand("scout:skill-router", { ... })` 注册后用户用 `/scout:skill-router on` 调用。不要用一个命令手动解析 args。
 
 ### README 与依赖文档规范
@@ -136,6 +142,7 @@ const roles: ModelRolesAPI = getModelRolesAPI();  // 完整类型推导
 **每个包 README 必须包含 `## Installation` 和 `## Dependencies`。** 即使是纯依赖库扩展（不注册 tool/command，只注册 hook），也要有 Install 段告诉用户如何安装。
 
 **Extension vs Library 判定：**
+
 - **Extension** — `package.json` 中有 `"pi": { "extensions": [...] }`，注册了 hook/tool/command。**必须**出现在用户 `settings.json` 的 `extensions` 数组里
 - **Library** — 无 `pi.extensions` 入口，仅导出类型/函数供其他插件 import（如 `pi-usage-block-core`）
 
@@ -158,12 +165,14 @@ const roles: ModelRolesAPI = getModelRolesAPI();  // 完整类型推导
 修改 `packages/*/src/**` 下的扩展源码，或改动了 `~/.pi/agent/settings.json` 的 `extensions`，都需要**用户手动重载** pi 才能生效——pi 在启动时加载扩展，运行中不会热更新。
 
 写完插件后**不要立刻测试**，要先提醒用户：
+
 - 用 `/reload` 重新加载扩展，或重启 pi
 - 等用户确认重载完成后再开始测试
 
 这一点对**需要 LLM 配合测试**的功能尤其重要（注册了 tool/command、改了 prompt 等）——这类功能刚写完时还没生效，此时马上测试，拿到的结果毫无意义，还会误导后续判断。
 
 agent 的边界：
+
 - ✅ 改源码、跑 `npm run typecheck`（`tsc --noEmit`）验证类型——这些在项目内，可自行完成
 - ✅ 改 `settings.json` 把扩展路径加进去（只读改这一个数组）
 - ❌ 不要自行 `pi --reload`、kill/restart pi 进程——重载由用户手动执行
@@ -203,6 +212,7 @@ pi-access-denied 拦截的是整个 `tool_call`。一条 bash 命令里若 token
 本项目的工具链结构决定了正确命令；本机工具链事实（node 版本、bun 未装、先探测别全盘 find）见全局 `~/.agents/node-development.md`。
 
 **项目结构：**
+
 - monorepo，`tsconfig.json` 只在**仓库根**，子包无独立 tsconfig（`include: ["packages/*/src/**/*.ts"]`）
 - 测试用 `node:test` + `node:assert`（Node 内置），无 bun/tsx/vitest
 
@@ -214,6 +224,7 @@ pi-access-denied 拦截的是整个 `tool_call`。一条 bash 命令里若 token
 | 跑单个测试 | `node --test packages/xxx/src/*.test.ts` | Node 原生跑 `.ts`，零依赖 |
 
 **反模式：**
+
 - ❌ 子包目录 `npm run typecheck` —— 子包 `package.json` 无此 script，npm workspace 报 `Missing script`（这正是常见的“目录错误”）
 - ❌ `cd 子包 && tsc src/index.ts --noEmit` —— 绕过 tsconfig，丢类型解析和路径映射
 
@@ -224,11 +235,13 @@ pi-access-denied 拦截的是整个 `tool_call`。一条 bash 命令里若 token
 场景：读 pi 的 `settings.json`、npm 的 `package.json` 等**标准 JSON** 文件时，agent 常写正则剥离注释（`content.replace(/\/\/.*$/gm, "")`）想"兼容 JSONC"。这是**无用且破坏性**的。
 
 **为什么剥离是错的：**
+
 - 标准文件禁止注释——有注释就是语法错误，`JSON.parse` 会抛，这才是正确信号，不需要预处理
 - 正则剥离会把**字符串字面量里的 `//`** 当注释删（如 URL `"https://example.com"` 被截成 `"https:`），留下未闭合字符串 → `JSON.parse` 抛错 → `catch` 静默吞掉 → 配置失效且**完全无感**
 - 正则剥永远不安全（处理不了字符串内、转义、嵌套等）；真要 JSONC 必须用专门库（`jsonc-parser` / `strip-json-comments`）
 
 **正确做法：**
+
 - 读标准 JSON → **直接 `JSON.parse`**，出错让错误抛（`catch` 里降级返回默认即可），**不要预处理**
 - 只有**明确声明支持注释的格式**才需要 JSONC 解析：`tsconfig.json`、`.vscode/*.json`、显式 `.jsonc`——这些有规范支持，且必须用专门库而非正则
 
@@ -246,9 +259,11 @@ export function posixUnder(posixTarget: string, posixRoot: string): boolean {
 ```
 
 **判断标准**：
+
 - 如果函数是纯工具函数、生产代码不直接用（或只作为内部实现细节），但需要单独测 → `@internal`
 - 如果函数本身就是公共 API、多个生产模块都会 import → 不需要 `@internal`
 
 **本仓库案例**：
+
 - `pi-access-denied` 的 `posixUnder` — `underRoot` 的内部实现，仅测试单独验证 → `@internal`
 - `pi-context-include` 的 `extractReferences` — 生产代码也调用，但消费者不应直接使用 → `@internal`

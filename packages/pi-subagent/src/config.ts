@@ -19,7 +19,6 @@ function getAgentDir(): string {
 
 function readSettingsFile(filePath: string): any {
   try {
-    if (!fs.existsSync(filePath)) return {};
     const content = fs.readFileSync(filePath, "utf-8");
     return JSON.parse(content);
   } catch {
@@ -27,26 +26,20 @@ function readSettingsFile(filePath: string): any {
   }
 }
 
-function merge(target: any, source: any): any {
-  if (!source || typeof source !== "object") return target;
-  if (!target || typeof target !== "object") return source;
-  const result = { ...target };
-  for (const key of Object.keys(source)) {
-    if (source[key] && typeof source[key] === "object" && !Array.isArray(source[key])) {
-      result[key] = merge(result[key], source[key]);
-    } else {
-      result[key] = source[key];
-    }
-  }
-  return result;
+/** Read the `subagent` block from a settings file. */
+function readSubagent(filePath: string): Record<string, any> | undefined {
+  const raw = readSettingsFile(filePath)?.subagent;
+  return raw && typeof raw === "object" ? raw : undefined;
 }
 
+/**
+ * Load subagent config. Project overrides global wholesale; per-field `??
+ * DEFAULT` fills any gap. (No field-level merge — project replaces global.)
+ */
 export function loadSubagentConfig(cwd?: string): SubagentConfig {
-  const globalSettings = readSettingsFile(path.join(getAgentDir(), "settings.json"));
-  const projectSettings = cwd ? readSettingsFile(path.join(cwd, ".pi", "settings.json")) : {};
-  const settings = merge(globalSettings, projectSettings);
-
-  const raw = settings?.subagent;
+  const globalRaw = readSubagent(path.join(getAgentDir(), "settings.json"));
+  const projectRaw = cwd ? readSubagent(path.join(cwd, ".pi", "settings.json")) : undefined;
+  const raw = projectRaw ?? globalRaw;
   if (!raw) return DEFAULT_CONFIG;
 
   const rawSummary = raw?.summary;

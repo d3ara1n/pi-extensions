@@ -15,9 +15,10 @@
  *   4. Confirm → git commit + tag + push → npm publish
  */
 
-const { execSync } = require("node:child_process");
-const fs = require("node:fs");
-const path = require("node:path");
+import { execSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import readline from "node:readline";
 
 // ── Helpers ─────────────────────────────────────────────
 
@@ -51,12 +52,12 @@ const bumpType = process.argv[3] || "patch";
 if (!pkgName) {
 	console.log("Usage: node publish.js <package-name> [patch|minor|major]");
 	console.log("\nAvailable packages:");
-	const dirs = fs.readdirSync(path.join(__dirname, "packages"), { withFileTypes: true });
+	const dirs = fs.readdirSync(path.join(import.meta.dirname, "packages"), { withFileTypes: true });
 	for (const d of dirs.filter((d) => d.isDirectory())) {
-		const pkgJson = path.join(__dirname, "packages", d.name, "package.json");
+		const pkgJson = path.join(import.meta.dirname, "packages", d.name, "package.json");
 		if (fs.existsSync(pkgJson)) {
-			const pkg = JSON.parse(fs.readFileSync(pkgJson, "utf-8"));
-			console.log(`  ${d.name.padEnd(24)} ${pkg.description || ""}`);
+			try { const pkg = JSON.parse(fs.readFileSync(pkgJson, "utf-8")); console.log(`  ${d.name.padEnd(24)} ${pkg.description || ""}`); }
+			catch { /* skip broken package.json */ }
 		}
 	}
 	process.exit(0);
@@ -64,11 +65,12 @@ if (!pkgName) {
 
 // ── Resolve package ─────────────────────────────────────
 
-const pkgDir = path.join(__dirname, "packages", pkgName);
+const pkgDir = path.join(import.meta.dirname, "packages", pkgName);
 if (!fs.existsSync(pkgDir)) die(`Package not found: ${pkgDir}`);
 
 const pkgJsonPath = path.join(pkgDir, "package.json");
-const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, "utf-8"));
+let pkg;
+try { pkg = JSON.parse(fs.readFileSync(pkgJsonPath, "utf-8")); } catch { die(`Failed to parse: ${pkgJsonPath}`); }
 const fullName = pkg.name;
 
 console.log("");
@@ -109,7 +111,6 @@ if (remoteVersion === "0.0.0") {
 
 // ── 3. Confirm ──────────────────────────────────────────
 
-const readline = require("node:readline");
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
 rl.question(`\n  Publish ${fullName}@${targetVersion}? [Y/n] `, (answer) => {

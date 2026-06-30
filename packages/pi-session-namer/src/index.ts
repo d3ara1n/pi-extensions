@@ -8,6 +8,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getModelRolesAPI } from "@d3ara1n/pi-model-roles";
+import type { ModelRolesAPI } from "@d3ara1n/pi-model-roles";
 import { DEFAULT_CONFIG } from "./types.ts";
 import type { SessionNamerConfig } from "./types.ts";
 import { loadNamerConfig } from "./config.ts";
@@ -20,6 +21,7 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
 
   // ── session_start: load config, reset flag ──────────────────────
   pi.on("session_start", async (_event, _ctx) => {
+    if (!_ctx.hasUI) return;
     config = loadNamerConfig(_ctx.cwd);
     hasNamed = false;
     lastPrompt = "";
@@ -33,6 +35,7 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
 
   // ── before_agent_start: auto-name on first prompt ───────────────
   pi.on("before_agent_start", async (event, ctx) => {
+    if (!ctx.hasUI) return;
     // Always cache the latest prompt for /namer:rename, even if auto-naming is done
     lastPrompt = event.prompt;
 
@@ -46,7 +49,7 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
 
     // Name asynchronously so we don't block the main agent startup
     (async () => {
-      let rolesApi;
+      let rolesApi: ModelRolesAPI;
       try {
         rolesApi = getModelRolesAPI();
       } catch {
@@ -113,7 +116,7 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
         return;
       }
 
-      let rolesApi;
+      let rolesApi: ModelRolesAPI;
       try {
         rolesApi = getModelRolesAPI();
       } catch {

@@ -4,17 +4,26 @@ A collapsible **ask-user** tool for [pi](https://github.com/earendil-works/pi).
 
 ## Why
 
-Most ask-user tools render a panel that covers the transcript, so you **can't
-scroll the conversation** to read the analysis that should inform your choice.
-You end up choosing blind.
+Most ask-user tools render the panel as a **screen overlay** that covers the
+transcript, so you can't read the analysis that should inform your choice —
+you choose blind.
 
-This tool fixes that by **not** using a screen overlay. The panel renders into
-pi's bottom `editorContainer` slot (the same path `ctx.ui.select()` /
-`ctx.ui.input()` take), so the transcript stays visible **above** the panel and
-remains scrollable via the terminal's native scrollback — mouse wheel,
-`Shift+PgUp`, `Cmd+↑`. This works because pi's TUI never enters alt-screen and
-never tracks the mouse, so every rendered chat line lives in the terminal
-buffer and can be scrolled back at any time, no focus gymnastics needed.
+This tool uses `overlay: false` instead. The panel renders into pi's bottom
+`editorContainer` slot (the same path `ctx.ui.select()` / `ctx.ui.input()`
+take), so the transcript stays visible **above** the panel while you decide.
+
+### Scrolling, and the `pi-powerline-footer` caveat
+
+Native pi writes every chat line to the terminal's normal scrollback (mouse
+wheel / `Shift+PgUp` / `Cmd+↑`), so the transcript above the panel is always
+scrollable.
+
+[`pi-powerline-footer`](https://github.com/nicobailon/pi-powerline-footer)
+changes that — once it's loaded the native scrollback stops working, so an
+**overlay**-type ask-user panel is a dead end: it covers a transcript you
+then can't scroll back through. This tool's `overlay: false` keeps the
+transcript in the content area, so it stays visible and usable even
+alongside `pi-powerline-footer` — exactly the case where overlay tools break.
 
 - **Collapse** (`Ctrl+\`) shrinks the panel to a single status row, leaving
   even more of the transcript on screen while you decide.
@@ -79,12 +88,12 @@ Moving `↑`/`↓` only moves the cursor; selection is committed separately.
 ### Custom input ("Type something.")
 
 Every question always shows a "Type something." row (this cannot be turned off),
-so the user is never locked into the provided options. Press `Enter` on it to
+so the user is never locked into the provided options. Press `Space` on it to
 open a text editor:
 
 - After submitting, the row displays the committed text with a filled glyph
   (`◉ ✎ your text`).
-- Press `Enter` again to re-edit it — the editor **prefills** the committed
+- Press `Space` again to re-edit it — the editor **prefills** the committed
   text so you can tweak it.
 - `Esc` discards the edit (the original answer is kept); `Enter` confirms the
   change (the answer is updated).
@@ -144,32 +153,31 @@ when too long; skipped questions show `(skipped)`). Each question entry spans
 two rows (header + answer), followed by a trailing **note entry**:
 
 ```
-▸ 1. Which layout?
-       Sidebar
-  2. Which database?
-       Postgres
+ ▸ 1. Which layout?
+      Sidebar
+   2. Which database?
+      Postgres
 
-  ✎  Note to assistant
-       (optional — Tab to add a note)
+   ✎  Note to assistant
+      (optional — Space to add a note)
 ```
 
-Each title carries a fixed-width marker (`1.`/`2.`… for questions, `✎ ` for
+Each title carries a fixed-width marker (`1.`/`2.`… for questions, `✎` for
 the note) so every title aligns; the body is indented one level deeper to keep
 header vs content visually distinct. An empty line sets the note apart from
 the Q&A list above it.
 
-Each title carries a fixed-width marker (`1.`/`2.`… for questions, `✎ ` for
-the note) so every title aligns; the body is indented one level deeper to keep
-header vs content visually distinct.
-
 - `↑`/`↓` — move the cursor between entries (questions + the note)
 - `PgUp`/`PgDn` — scroll by page (when there are more entries than rows)
-- `Tab` — edit the focused entry: a question (returns to review after) or the
-  note (opens a free-form editor)
+- `Space` — edit the focused entry: a question (jumps to its tab; returns to
+  review afterwards) or the note (opens a free-form editor)
+- `Tab`/`→` — advance to the next tab (cycles back to the first question after
+  the review); `Shift+Tab`/`←` go back
 - `Enter` — confirm and submit all answers. `Enter` is always "submit" on the
   review screen, never "edit" — this deliberately differs from the question
-  screens (where `Enter` edits/advances) so you can never submit by
-  double-tapping `Enter` while trying to edit something. Use `Tab` to edit.
+  screens (where `Space` edits and `Enter` confirms/advances) so you can never
+  submit by double-tapping `Enter` while trying to edit something. Use `Space`
+  to edit.
 - `Esc` — cancel
 
 ### Note to assistant
@@ -178,7 +186,7 @@ The review screen ends with a **note** entry — a free-form message the user
 can attach for the assistant, about anything *beyond* the specific questions
 (overall direction, pacing, priorities, a correction to the premise, …).
 
-- Move the cursor to the note row and press `Tab` to open the editor.
+- Move the cursor to the note row and press `Space` to open the editor.
 - `Enter` saves the note (empty = no note); `Esc` returns to the review without
   saving (the in-progress draft is kept).
 - The note is **out-of-band**: it is not part of `questions`/`options` and the
@@ -230,8 +238,8 @@ format, which could break when a custom answer contained a colon or newline.
 | Key | Action |
 |-----|--------|
 | `↑` `↓` / `PgUp` `PgDn` | Move cursor / scroll options |
-| `Space` | Commit selection (single: select-only; multi: toggle) |
-| `Enter` | Confirm & advance (single) / commit checked (multi) / enter custom input |
+| `Space` | The "interact" key: select (single) / toggle (multi) / **edit** (open custom input, edit the focused review entry, or open the note) |
+| `Enter` | Confirm & advance (single) / commit checked (multi). Never enters edit mode — that's `Space` |
 | `Tab` / `Shift+Tab` | Next / previous question, **cycling** (last → first). Option list only — not hijacked inside the editor |
 | `→` / `←` | Next / previous question, but **stop at the boundary** (no cycle) — safer than Tab when there are many questions |
 | `Esc` | Cancel (or exit custom-input editor without saving) |

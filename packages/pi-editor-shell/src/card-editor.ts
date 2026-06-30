@@ -26,9 +26,22 @@ const GLYPH = {
 /** Below this terminal width the frame hurts readability — fall back to default. */
 const MIN_WIDTH = 20;
 
-/** Braille spinner frames, advanced on a timer while the agent is working. */
-const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 const SPINNER_INTERVAL_MS = 80;
+
+/** Agent phase — each gets its own spinner animation. */
+export type SpinnerPhase = "thinking" | "outputting" | "toolcall" | "exec";
+
+/** Spinner frames keyed by agent phase, chosen for semantic fit:
+ *  thinking  — ●/○ pulse, doubled frames to halve the tempo
+ *  outputting — braille sand-pile (dots accumulate bottom-up, then clear)
+ *  toolcall  — ▓▒░ breathing light (single char, fades in/out)
+ *  exec      — ◜◝◞◟ arc rotation (tool spinning, mechanical) */
+const SPINNERS: Record<SpinnerPhase, readonly string[]> = {
+  thinking: ["●", "●", "○", "○"],
+  outputting: ["⡀", "⣀", "⣄", "⣤", "⣦", "⣶", "⣷", "⣿"],
+  toolcall: ["▓", "▒", "░", "░", "▒"],
+  exec: ["◜", "◝", "◞", "◟"],
+};
 
 const RESET = "\x1b[0m";
 
@@ -137,7 +150,7 @@ function fitFrameRow(
  */
 export class CardEditor extends CustomEditor {
   private readonly frameProvider?: FrameProvider;
-  private working = false;
+  private spinnerPhase: SpinnerPhase | null = null;
   private spinnerIdx = 0;
   private spinnerTimer?: ReturnType<typeof setInterval>;
 
@@ -151,18 +164,22 @@ export class CardEditor extends CustomEditor {
     this.frameProvider = frameProvider;
   }
 
-  /** Drive the working spinner from the agent_start/agent_end events.
-   *  When active, the current spinner frame replaces the model text in the
-   *  top border. */
-  setWorking(active: boolean): void {
-    if (active === this.working) return;
-    this.working = active;
-    if (active) {
+  /** Set the active spinner phase. `null` stops the spinner.
+   *  Same-phase calls are no-ops so rapid event streams don't reset the
+   *  animation index; phase transitions (thinking→outputting, etc.) do reset. */
+  setSpinner(phase: SpinnerPhase | null): void {
+    if (phase === this.spinnerPhase) return;
+    this.spinnerPhase = phase;
+    if (phase) {
       this.spinnerIdx = 0;
-      this.spinnerTimer = setInterval(() => {
-        this.spinnerIdx = (this.spinnerIdx + 1) % SPINNER_FRAMES.length;
-        this.tui.requestRender();
-      }, SPINNER_INTERVAL_MS);
+      if (!this.spinnerTimer) {
+        this.spinnerTimer = setInterval(() => {
+          const frames = this.spinnerPhase ? SPINNERS[this.spinnerPhase] : null;
+          if (!frames) return;
+          this.spinnerIdx = (this.spinnerIdx + 1) % frames.length;
+          this.tui.requestRender();
+        }, SPINNER_INTERVAL_MS);
+      }
     } else {
       if (this.spinnerTimer) clearInterval(this.spinnerTimer);
       this.spinnerTimer = undefined;
@@ -187,10 +204,11 @@ export class CardEditor extends CustomEditor {
     const frameObj = this.frameProvider?.() ?? EMPTY_FRAME;
     const border = frameObj.frame ?? this.borderColor;
     const seg = frameObj.segments;
-    // While working, the spinner frame takes over the top-left slot (it reads
-    // as "active" more strongly than a static model label).
-    const topLeft = this.working
-      ? `${RESET}${border(` ${SPINNER_FRAMES[this.spinnerIdx] ?? "⠋"} `)}${seg.topLeft.trimStart()}`
+    // While the agent is active, the current phase spinner replaces the
+    // model text in the top-left slot — a moving indicator reads as "busy"
+    // more strongly than a static label.
+    const topLeft = this.spinnerPhase
+      ? `${RESET}${border(` ${SPINNERS[this.spinnerPhase][this.spinnerIdx % SPINNERS[this.spinnerPhase].length]} `)}${seg.topLeft.trimStart()}`
       : seg.topLeft;
 
     // The default Editor appends autocomplete rows *after* the bottom border.

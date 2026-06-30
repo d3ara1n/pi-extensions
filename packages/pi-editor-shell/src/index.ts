@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { spawnSync } from "node:child_process";
-import { CardEditor, type FrameProvider } from "./card-editor";
+import { CardEditor, type FrameProvider, type SpinnerPhase } from "./card-editor";
 import { loadEditorShellConfig, type EditorShellConfig } from "./config";
 
 /**
@@ -144,10 +144,39 @@ export default function (pi: ExtensionAPI) {
   // CWD cached from session_start — used by turn_end to refresh git dirty.
   let _cwd = "";
 
-  pi.on("agent_start", () => editor?.setWorking(true));
-  pi.on("agent_end", () => editor?.setWorking(false));
+  // ── Phase-aware spinner ────────────────────────────────────────
+  // Track which sub-phase the agent is in so we can pick the right
+  // spinner animation: thinking (●/○), outputting (sand-pile),
+  // toolcall drafting (arc rotation), tool execution (progress bar).
+  let _phase: SpinnerPhase | null = null;
+
+  pi.on("turn_start", () => {
+    _phase = "thinking";
+    editor?.setSpinner("thinking");
+  });
+  pi.on("message_update", (event) => {
+    const t = event.assistantMessageEvent.type;
+    let next: SpinnerPhase;
+    if (t.startsWith("thinking_")) next = "thinking";
+    else if (t.startsWith("text_")) next = "outputting";
+    else if (t.startsWith("toolcall_")) next = "toolcall";
+    else return;
+    if (next !== _phase) {
+      _phase = next;
+      editor?.setSpinner(next);
+    }
+  });
+  pi.on("tool_execution_start", () => {
+    _phase = "exec";
+    editor?.setSpinner("exec");
+  });
+  pi.on("agent_end", () => {
+    _phase = null;
+    editor?.setSpinner(null);
+  });
   pi.on("session_shutdown", () => {
-    editor?.setWorking(false);
+    _phase = null;
+    editor?.setSpinner(null);
     editor = undefined;
   });
 

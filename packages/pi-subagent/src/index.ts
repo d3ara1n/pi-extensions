@@ -229,6 +229,46 @@ async function generateSummary(
   }
 }
 
+// ── Elapsed-time animation (render-side timer) ───────────────
+
+/**
+ * Per-row render state slot holding the elapsed-time animation timer.
+ * The handle lives in context.state so it is scoped to one tool row.
+ */
+interface DelegateRenderState {
+  elapsedTimer?: ReturnType<typeof setInterval>;
+}
+
+/**
+ * While a delegate is running, force a TUI repaint every second so the
+ * elapsed time ticks up even when the child process is idle. Uses
+ * context.invalidate() (pi's official re-render hook) rather than pushing
+ * data via onUpdate — the render recomputes elapsed time fresh from Date.now().
+ */
+function ensureElapsedTimer(context: {
+  state: Record<string, unknown>;
+  invalidate?: () => void;
+}): void {
+  const state = context.state as DelegateRenderState;
+  if (state.elapsedTimer) return;
+  if (typeof context.invalidate !== "function") return;
+  state.elapsedTimer = setInterval(() => {
+    try {
+      context.invalidate?.();
+    } catch {
+      /* ignore — invalidate must never break rendering */
+    }
+  }, 1000);
+}
+
+/** Stop the elapsed-time animation once the run reaches a terminal state. */
+function clearElapsedTimer(context: { state: Record<string, unknown> }): void {
+  const state = context.state as DelegateRenderState;
+  if (!state.elapsedTimer) return;
+  clearInterval(state.elapsedTimer);
+  state.elapsedTimer = undefined;
+}
+
 // ── Extension entry ────────────────────────────────────────────────
 
 export default function subagentExtension(pi: ExtensionAPI) {
@@ -736,15 +776,28 @@ export default function subagentExtension(pi: ExtensionAPI) {
 
     // ── renderResult: TUI display when the tool finishes ────────
 
-    renderResult(result, { expanded }, theme, _context) {
+    renderResult(result, { expanded }, theme, context) {
       const details = result.details as SubagentDetails | undefined;
+      const isRunning = !!details?.results[0] && details.results[0].exitCode === -1;
+
+      // Tick elapsed time every second while running; stop once terminal.
+      // Placed BEFORE the empty-results early return so every terminal path
+      // (abort, model-resolution failure, catch) still clears the timer —
+      // otherwise the interval leaks a permanent 1 Hz re-render per aborted run.
+      // The timer calls context.invalidate() so the render recomputes elapsed
+      // time fresh from Date.now() without dirtying the data layer.
+      if (isRunning) {
+        ensureElapsedTimer(context);
+      } else {
+        clearElapsedTimer(context);
+      }
+
       if (!details || details.results.length === 0) {
         const text = result.content[0];
         return new Text(text?.type === "text" ? text.text : "(no output)", 0, 0);
       }
 
       const r = details.results[0];
-      const isRunning = r.exitCode === -1;
       const isError = !isRunning && isFailedResult(r);
       const isTimeout = !isRunning && r.stopReason === "timeout";
       const isBudget = !isRunning && r.stopReason === "budget_exceeded";

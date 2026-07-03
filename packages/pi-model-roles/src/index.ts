@@ -6,6 +6,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { initModelRolesAPI, getModelRolesAPI, updateCurrentModel } from "./api.ts";
 
 export { getModelRolesAPI } from "./api.ts";
@@ -24,6 +25,21 @@ export default function registerModelRolesExtension(pi: ExtensionAPI): void {
 
   pi.on("model_select", async (event) => {
     updateCurrentModel(event.model);
+  });
+
+  pi.registerTool({
+    name: "list_models",
+    label: "List available models",
+    description: "List all available models from pi's model registry. Returns provider/model-id strings (e.g. 'anthropic/claude-sonnet-4'). Useful for confirming model IDs before referencing a model by name.",
+    parameters: Type.Object({}),
+    async execute() {
+      const api = getModelRolesAPI();
+      const models = api.listModels();
+      return {
+        content: [{ type: "text", text: models.join("\n") }],
+        details: undefined as any,
+      };
+    },
   });
 
   pi.registerCommand("roles", {

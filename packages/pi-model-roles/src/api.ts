@@ -141,6 +141,12 @@ export function initModelRolesAPI(
       const nullRole = Object.entries(roles).find(([, c]) => !c.model)?.[0];
       return nullRole;
     },
+
+    listModels(): string[] {
+      return state.modelRegistry
+        .getAvailable()
+        .map((m: { provider: string; id: string }) => `${m.provider}/${m.id}`);
+    },
   };
 
   // Store on globalThis — survives module identity mismatches

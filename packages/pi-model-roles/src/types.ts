@@ -95,4 +95,6 @@ export interface ModelRolesAPI {
    * Returns undefined only if no role matches by any rule.
    */
   getCurrentRole(modelId: string): string | undefined;
+  /** List all available models from pi's model registry. Returns provider/id strings (e.g. "anthropic/claude-sonnet-4"). */
+  listModels(): string[];
 }

@@ -342,6 +342,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
       "For multiple independent substantial tasks, emit multiple delegate calls in one turn — they run in parallel.",
       "Include ALL necessary context — subagents have no access to this conversation.",
       'Pass reference files via the `files` parameter (e.g. files: ["src/auth.ts"]) instead of pasting their contents into `context` — the subagent reads them directly without consuming your context window.',
+      'Override the model per-call with the `model` parameter for one-off vision or model-specific jobs.',
     );
   }
 
@@ -428,6 +429,12 @@ export default function subagentExtension(pi: ExtensionAPI) {
         }),
       ),
       cwd: Type.Optional(Type.String({ description: "Working directory (defaults to current)" })),
+      model: Type.Optional(
+        Type.String({
+          description:
+            "Override the model for this call. Format: 'provider/model-id' (e.g. 'anthropic/claude-sonnet-4'). When set, bypasses the role's configured model — useful for one-off vision tasks or model-specific jobs without creating a permanent role.",
+        }),
+      ),
     }),
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
@@ -540,20 +547,24 @@ export default function subagentExtension(pi: ExtensionAPI) {
           };
         }
 
-        const resolved = await rolesApi.resolveRoleAsync(roleDef.role);
-        if (!resolved.model) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Role "${roleDef.role}" could not be resolved. Model not available.`,
-              },
-            ],
-            details: undefined as any,
-          };
+        let modelRef: string;
+        if (params.model) {
+          modelRef = params.model;
+        } else {
+          const resolved = await rolesApi.resolveRoleAsync(roleDef.role);
+          if (!resolved.model) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Role "${roleDef.role}" could not be resolved. Model not available.`,
+                },
+              ],
+              details: undefined as any,
+            };
+          }
+          modelRef = `${resolved.model.provider}/${resolved.model.id}`;
         }
-
-        const modelRef = `${resolved.model.provider}/${resolved.model.id}`;
         const startTime = Date.now();
 
         // Throttled progress: coalesces bursty thinking/tool events so the TUI

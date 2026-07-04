@@ -45,7 +45,8 @@ function fmtCountdown(ms: number): string {
 function fmtWindow(w: UsageWindow, theme: Theme): string {
   const ratio = w.limit > 0 && Number.isFinite(w.used) ? w.used / w.limit : 0;
   const level = ratio >= 0.9 ? "error" : ratio >= 0.7 ? "warning" : "success";
-  let text = `${theme.fg(level, "\uf111")}${theme.fg("dim", fmtPct(w.used, w.limit))}`;
+  const icon = w.used === 0 ? "\ueabc" : "\uf111";
+  let text = `${theme.fg(level, icon)}${theme.fg("dim", fmtPct(w.used, w.limit))}`;
   if (w.resetAt) text += theme.fg("dim", ` ↺${fmtCountdown(w.resetAt.getTime() - Date.now())}`);
   return text;
 }

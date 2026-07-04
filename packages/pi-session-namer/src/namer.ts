@@ -1,11 +1,11 @@
 /**
  * Side agent invocation for session naming.
  *
- * Calls the side agent model using pi-ai's complete() function
+ * Calls the side agent via model-roles' complete() (auth resolved internally)
  * and returns a cleaned session name string.
  */
 
-import { complete } from "@earendil-works/pi-ai";
+import type { ModelRolesAPI } from "@d3ara1n/pi-model-roles";
 import type { SessionNamerConfig } from "./types.ts";
 
 /**
@@ -29,9 +29,8 @@ export function buildNamerSystemPrompt(maxLength: number): string {
  * Call the side agent to generate a session name.
  */
 export async function generateSessionName(
-  sideModel: any,
-  apiKey: string | undefined,
-  headers: Record<string, string> | undefined,
+  rolesApi: ModelRolesAPI,
+  roleName: string,
   config: SessionNamerConfig,
   userPrompt: string,
 ): Promise<string> {
@@ -40,21 +39,14 @@ export async function generateSessionName(
   // Truncate very long prompts to avoid wasting tokens
   const truncatedPrompt = userPrompt.length > 2000 ? userPrompt.slice(0, 2000) + "..." : userPrompt;
 
-  const options: Record<string, any> = {
-    maxTokens: 64,
-  };
-
-  if (apiKey) options.apiKey = apiKey;
-  if (headers) options.headers = headers;
-
   try {
-    const result = await complete(
-      sideModel,
+    const result = await rolesApi.complete(
+      roleName,
       {
         systemPrompt,
         messages: [{ role: "user", content: truncatedPrompt, timestamp: Date.now() }],
       },
-      options,
+      { maxTokens: 64 },
     );
 
     const raw =

@@ -57,8 +57,7 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
         return;
       }
 
-      const resolved = await rolesApi.resolveRoleAsync(config.sideAgentRole);
-      if (!resolved.model) {
+      if (!rolesApi.resolveRole(config.sideAgentRole).model) {
         console.warn(
           `[pi-session-namer] Side agent role "${config.sideAgentRole}" not available — skipping`,
         );
@@ -66,9 +65,8 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
       }
 
       const name = await generateSessionName(
-        resolved.model,
-        resolved.apiKey,
-        resolved.headers,
+        rolesApi,
+        config.sideAgentRole,
         config,
         event.prompt,
       );
@@ -124,8 +122,7 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
         return;
       }
 
-      const resolved = await rolesApi.resolveRoleAsync(config.sideAgentRole);
-      if (!resolved.model) {
+      if (!rolesApi.resolveRole(config.sideAgentRole).model) {
         ctx.ui.notify(
           `Side agent role "${config.sideAgentRole}" not available. Cannot rename.`,
           "error",
@@ -134,9 +131,8 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
       }
 
       const name = await generateSessionName(
-        resolved.model,
-        resolved.apiKey,
-        resolved.headers,
+        rolesApi,
+        config.sideAgentRole,
         config,
         lastPrompt,
       );

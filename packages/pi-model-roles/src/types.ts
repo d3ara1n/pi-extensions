@@ -2,6 +2,16 @@
  * Shared types for pi-model-roles.
  */
 
+import type {
+  Api,
+  AssistantMessage,
+  AssistantMessageEventStream,
+  Context,
+  Model,
+  ProviderStreamOptions,
+  SimpleStreamOptions,
+} from "@earendil-works/pi-ai";
+
 /** Thinking level configuration for a role. */
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
@@ -97,4 +107,46 @@ export interface ModelRolesAPI {
   getCurrentRole(modelId: string): string | undefined;
   /** List all available models from pi's model registry. Returns provider/id strings (e.g. "anthropic/claude-sonnet-4"). */
   listModels(): string[];
+
+  /**
+   * Call pi-ai's complete() with auth resolved internally from the role's model.
+   *
+   * Auth (including OAuth token refresh) is resolved for the model actually
+   * used, so callers never handle API keys or headers. The underlying call is
+   * pi-ai's complete() verbatim — no fallback, no retry, no error swallowing;
+   * throws if the role has no available model or auth resolution fails.
+   *
+   * @param roleName - Role whose model + auth to use
+   * @param context - Conversation context (systemPrompt + messages)
+   * @param options - Stream options forwarded to pi-ai's complete(). Pass
+   *   `model` to override the role's model (auth is then resolved for that
+   *   model); all other fields pass through unchanged.
+   */
+  complete<TApi extends Api = Api>(
+    roleName: string,
+    context: Context,
+    options?: ProviderStreamOptions & { model?: Model<TApi> },
+  ): Promise<AssistantMessage>;
+
+  /**
+   * Call pi-ai's streamSimple() with auth resolved internally from the role's model.
+   *
+   * Streaming counterpart to {@link complete}. Same auth resolution (including
+   * OAuth token refresh) and same error semantics (throws on no model / auth
+   * failure). Returns the pi-ai event stream verbatim — iterate it for events,
+   * call `.result()` for the final AssistantMessage.
+   *
+   * Note: unlike pi-ai's synchronous `streamSimple`, this is async because auth
+   * resolution (OAuth token refresh) must complete before the stream starts.
+   *
+   * @param roleName - Role whose model + auth to use
+   * @param context - Conversation context (systemPrompt + messages)
+   * @param options - Stream options forwarded to pi-ai's streamSimple(). Pass
+   *   `model` to override the role's model; all other fields pass through.
+   */
+  streamWithRole<TApi extends Api = Api>(
+    roleName: string,
+    context: Context,
+    options?: SimpleStreamOptions & { model?: Model<TApi> },
+  ): Promise<AssistantMessageEventStream>;
 }

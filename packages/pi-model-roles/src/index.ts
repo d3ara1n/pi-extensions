@@ -17,6 +17,16 @@ export type {
   ModelRolesConfig,
   ThinkingLevel,
 } from "./types.ts";
+// Re-export pi-ai types so consumers depend on model-roles alone, not pi-ai.
+export type {
+  Api,
+  AssistantMessage,
+  AssistantMessageEventStream,
+  Context,
+  Model,
+  ProviderStreamOptions,
+  SimpleStreamOptions,
+} from "@earendil-works/pi-ai";
 
 export default function registerModelRolesExtension(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {

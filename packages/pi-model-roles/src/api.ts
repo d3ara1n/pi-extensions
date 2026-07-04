@@ -6,6 +6,7 @@
  * Exported functions provide type-safe access — consumers never touch globalThis.
  */
 
+import { complete as piAiComplete, streamSimple as piAiStreamSimple } from "@earendil-works/pi-ai";
 import type { ModelRolesAPI, ModelRolesConfig, RoleConfig, ResolvedRole } from "./types.ts";
 import { loadRolesConfig } from "./config.ts";
 import { resolveModelForRole, resolveModelForRoleAsync } from "./resolver.ts";
@@ -146,6 +147,48 @@ export function initModelRolesAPI(
       return state.modelRegistry
         .getAvailable()
         .map((m: { provider: string; id: string }) => `${m.provider}/${m.id}`);
+    },
+
+    async complete(roleName: string, context: any, options?: any): Promise<any> {
+      // Resolve model: explicit override wins, else the role's declared model
+      // (model=null transparently uses pi's current model).
+      const roleConfig = getConfig().roles[roleName] ?? { model: null };
+      const model =
+        options?.model ??
+        resolveModelForRole(roleConfig, state.modelRegistry, state.currentModel).model;
+      if (!model) {
+        throw new Error(`complete: role "${roleName}" has no available model`);
+      }
+      // Resolve auth for the model actually used (refreshes OAuth tokens).
+      const auth = await state.modelRegistry.getApiKeyAndHeaders(model);
+      if (!auth.ok) {
+        throw new Error(`complete: auth failed for ${model.provider}/${model.id}: ${auth.error}`);
+      }
+      // Forward everything except `model` to pi-ai's complete().
+      const { model: _omitModel, ...streamOptions } = options ?? {};
+      if (auth.apiKey) streamOptions.apiKey = auth.apiKey;
+      if (auth.headers) streamOptions.headers = auth.headers;
+      return piAiComplete(model, context, streamOptions);
+    },
+
+    async streamWithRole(roleName: string, context: any, options?: any): Promise<any> {
+      const roleConfig = getConfig().roles[roleName] ?? { model: null };
+      const model =
+        options?.model ??
+        resolveModelForRole(roleConfig, state.modelRegistry, state.currentModel).model;
+      if (!model) {
+        throw new Error(`streamWithRole: role "${roleName}" has no available model`);
+      }
+      const auth = await state.modelRegistry.getApiKeyAndHeaders(model);
+      if (!auth.ok) {
+        throw new Error(
+          `streamWithRole: auth failed for ${model.provider}/${model.id}: ${auth.error}`,
+        );
+      }
+      const { model: _omitModel, ...streamOptions } = options ?? {};
+      if (auth.apiKey) streamOptions.apiKey = auth.apiKey;
+      if (auth.headers) streamOptions.headers = auth.headers;
+      return piAiStreamSimple(model, context, streamOptions);
     },
   };
 

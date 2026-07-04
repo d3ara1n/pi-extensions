@@ -7,7 +7,6 @@
  * nothing is persisted, no session file is touched.
  */
 
-import { streamSimple } from "@earendil-works/pi-ai";
 import { getModelRolesAPI } from "@d3ara1n/pi-model-roles";
 import type { InvestigateOptions, InvestigateResult } from "./types.ts";
 
@@ -38,7 +37,8 @@ export async function investigateWithReference(
 ): Promise<InvestigateResult> {
   const rolesApi = getModelRolesAPI();
   const roleName = opts.role ?? "utility";
-  const resolved = await rolesApi.resolveRoleAsync(roleName);
+  // 同步取 model 信息（可用性检查 + InvestigateResult 显示）；auth 由 streamWithRole 内部解析
+  const resolved = rolesApi.resolveRole(roleName);
   if (!resolved.model) {
     throw new Error(
       "peek: utility model unavailable. Configure the `utility` role in pi-model-roles.",
@@ -47,18 +47,8 @@ export async function investigateWithReference(
 
   opts.onStage?.("investigating");
 
-  const options: Record<string, any> = {
-    maxTokens: 2048,
-    // referenceText 整个 session 序列化通常远超 Anthropic 1024-token 缓存门槛，
-    // 同 session 多次 peek 时 system prompt 整体不变 → 命中 prompt cache。
-    cacheRetention: "short",
-    apiKey: resolved.apiKey,
-    headers: resolved.headers,
-  };
-  if (opts.signal) options.signal = opts.signal;
-
-  const stream = streamSimple(
-    resolved.model,
+  const stream = await rolesApi.streamWithRole(
+    roleName,
     {
       // The record is BACKGROUND CONTEXT (not a message to the model).
       // Putting it in the system prompt — wrapped in a tag — keeps the user
@@ -73,7 +63,13 @@ export async function investigateWithReference(
         },
       ],
     },
-    options,
+    {
+      maxTokens: 2048,
+      // referenceText 整个 session 序列化通常远超 Anthropic 1024-token 缓存门槛，
+      // 同 session 多次 peek 时 system prompt 整体不变 → 命中 prompt cache。
+      cacheRetention: "short",
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    },
   );
 
   let answer = "";
@@ -96,7 +92,7 @@ export async function investigateWithReference(
   return {
     answer: answer.trim() || "(no answer)",
     referenceLength: referenceText.length,
-    model: resolved.model ? `${resolved.model.provider}/${resolved.model.id}` : undefined,
+    model: `${resolved.model.provider}/${resolved.model.id}`,
     usage: usage
       ? {
           input: usage.input ?? 0,

@@ -19,6 +19,19 @@ import { usageRegistry, parseHeaderUsage, type UsageWindow } from "@d3ara1n/pi-u
 
 const STATUS_KEY = "usage-block";
 
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+/** Race a promise against a timeout (ms). */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const id = setTimeout(() => reject(new Error("timeout")), ms);
+    p.then(
+      (v) => { clearTimeout(id); resolve(v); },
+      (e) => { clearTimeout(id); reject(e); },
+    );
+  });
+}
+
 // Nerd Font nf-fa-circle (U+F111) — single glyph, colored per severity via theme.
 type Theme = { fg(color: string, text: string): string };
 
@@ -40,6 +53,15 @@ function fmtCountdown(ms: number): string {
   const d = Math.floor(h / 24),
     rh = h % 24;
   return rh ? `${d}d${rh}h` : `${d}d`;
+}
+
+/** Plain-text formatter for /usage command output (emoji instead of Nerd Font + theme). */
+function fmtWindowPlain(w: UsageWindow): string {
+  const ratio = w.limit > 0 && Number.isFinite(w.used) ? w.used / w.limit : 0;
+  const icon = ratio >= 0.9 ? "🔴" : ratio >= 0.7 ? "🟡" : "🟢";
+  let text = `${icon} ${fmtPct(w.used, w.limit)}`;
+  if (w.resetAt) text += ` ↺${fmtCountdown(w.resetAt.getTime() - Date.now())}`;
+  return text;
 }
 
 function fmtWindow(w: UsageWindow, theme: Theme): string {
@@ -64,8 +86,8 @@ export default function (pi: ExtensionAPI) {
   let timer: ReturnType<typeof setInterval> | undefined;
   let alive = false;
   let activeProviderId: string | undefined;
-  /** Cached windows from the latest headers-based response. */
-  let headerWindows: UsageWindow[] | undefined;
+  /** Cached windows per provider id (api: timer writes; headers: event writes). */
+  const lastWindows = new Map<string, UsageWindow[]>();
 
   // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -74,13 +96,11 @@ export default function (pi: ExtensionAPI) {
     return usageRegistry.get(activeProviderId);
   }
 
-  /** Render windows to the status bar. */
-  function render(windows: UsageWindow[] | undefined) {
-    if (!ctx || !alive) return;
-    if (!windows?.length) {
-      clear();
-      return;
-    }
+  /** Render the active provider's cached windows to the status bar. */
+  function render() {
+    if (!ctx || !alive || !activeProviderId) { clear(); return; }
+    const windows = lastWindows.get(activeProviderId);
+    if (!windows?.length) { clear(); return; }
     const provider = getActiveUsageProvider();
     const name = provider?.name ?? activeProviderId ?? "usage";
     ctx.ui.setStatus(STATUS_KEY, fmtProvider(name, windows, ctx.ui.theme));
@@ -101,7 +121,8 @@ export default function (pi: ExtensionAPI) {
       if (!provider || provider.source !== "api" || !provider.fetchUsage) return;
       const windows = await provider.fetchUsage();
       if (!ctx || !alive) return;
-      render(windows);
+      if (windows.length) lastWindows.set(provider.id, windows);
+      render();
     } catch {
       // fetch failed silently — keep previous data if any
     }
@@ -115,8 +136,8 @@ export default function (pi: ExtensionAPI) {
     if (!provider || provider.source !== "headers" || !provider.headerMapping) return;
     const w = parseHeaderUsage(event.headers, provider.headerMapping);
     if (w) {
-      headerWindows = [w];
-      render([w]);
+      lastWindows.set(provider.id, [w]);
+      render();
     }
   });
 
@@ -124,7 +145,6 @@ export default function (pi: ExtensionAPI) {
 
   function setActive(id: string | undefined) {
     activeProviderId = id;
-    headerWindows = undefined;
     const provider = getActiveUsageProvider();
     if (!provider) {
       clear();
@@ -141,6 +161,55 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("model_select", (event) => {
     setActive(event.model.provider);
+  });
+
+  // ── /usage command ─────────────────────────────────────────────────────
+
+  pi.registerCommand("usage", {
+    description: "Show usage for all registered usage providers",
+    handler: async (_args, cmdCtx) => {
+      const providers = usageRegistry.getAll();
+      if (!providers.length) {
+        cmdCtx.ui.notify("No usage providers registered.", "info");
+        return;
+      }
+
+      const activeId = activeProviderId;
+
+      // Fetch fresh data from all api-source providers in parallel.
+      const fetched = new Map<string, UsageWindow[]>();
+      const fetches = providers
+        .filter((p) => p.source === "api" && p.fetchUsage)
+        .map(async (p) => {
+          try {
+            const windows = await withTimeout(p.fetchUsage!(), 5_000);
+            fetched.set(p.id, windows);
+            lastWindows.set(p.id, windows);
+          } catch {
+            // timeout or fetch error — fall back to cached
+          }
+        });
+
+      await Promise.allSettled(fetches);
+
+      // Build output
+      const lines: string[] = ["**Usage — all providers**", ""];
+      for (const p of providers) {
+        const tag = p.id === activeId ? " *(active)*" : "";
+        const sourceTag = ` (${p.source})`;
+        const windows = fetched.get(p.id) ?? lastWindows.get(p.id);
+
+        if (!windows?.length) {
+          lines.push(`${p.name}${tag}${sourceTag}  —`);
+          continue;
+        }
+
+        const parts = windows.map((w) => fmtWindowPlain(w));
+        lines.push(`${p.name}${tag}${sourceTag}  ${parts.join(" ")}`);
+      }
+
+      cmdCtx.ui.notify(lines.join("\n"), "info");
+    },
   });
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
@@ -162,6 +231,6 @@ export default function (pi: ExtensionAPI) {
     timer = undefined;
     ctx = undefined;
     activeProviderId = undefined;
-    headerWindows = undefined;
+    lastWindows.clear();
   });
 }

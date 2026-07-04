@@ -71,6 +71,23 @@ Multiple quota windows from the same provider are shown side by side.
    - **headers**: event-driven via `after_provider_response` + `headerMapping`
 4. If no matching usage provider exists, the status bar is cleared
 
+## `/usage` command
+
+The `/usage` slash command shows quota for **all** registered usage providers in one view.
+
+- **api-source** providers: calls `fetchUsage()` on demand (5-second timeout per provider)
+- **headers-source** providers: shows the last known value from API response headers, or `—` if no data is available yet
+
+The active provider is marked with `*(active)*`.
+
+```
+**Usage — all providers**
+
+Zhipu Coding Plan *(active)* (api)   🟢 43% ↺3h34m
+OpenAI (api)                          🔴 89% ↺1h
+Anthropic (headers)                   —
+```
+
 ---
 
 ## Building a Usage Provider

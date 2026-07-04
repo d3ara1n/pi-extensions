@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-usage-block",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "type": "module",
   "description": "Usage quota status bar block for pi — polls registered UsageProviders and displays in powerline",
   "keywords": [

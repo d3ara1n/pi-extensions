@@ -1,11 +1,11 @@
 /**
  * Side agent invocation logic.
  *
- * Calls the side agent model using pi-ai's complete() function
+ * Calls the side agent via model-roles' complete() (auth resolved internally)
  * and parses the JSON decision response.
  */
 
-import { complete } from "@earendil-works/pi-ai";
+import type { ModelRolesAPI } from "@d3ara1n/pi-model-roles";
 import type { ScoutDecision } from "./types.ts";
 
 /** Minimal type for side agent context — matches pi-ai's Context interface. */
@@ -17,17 +17,15 @@ interface SideAgentContext {
 /**
  * Call the side agent and return its decision.
  *
- * @param sideModel - The Model instance to use (from pi-model-roles "side" role)
- * @param apiKey - API key for the side model
- * @param headers - Custom headers for the side model
+ * @param rolesApi - ModelRolesAPI (provides complete() with auth resolved internally)
+ * @param roleName - Role name whose model + auth to use (from scout config)
  * @param systemPrompt - Scout system prompt (includes skills/roles for cache friendliness)
  * @param userMessage - Fully assembled user message (includes context, current role, user prompt)
  * @returns Parsed ScoutDecision, or a safe fallback on error
  */
 export async function callSideAgent(
-  sideModel: any,
-  apiKey: string | undefined,
-  headers: Record<string, string> | undefined,
+  rolesApi: ModelRolesAPI,
+  roleName: string,
   systemPrompt: string,
   userMessage: string,
 ): Promise<ScoutDecision> {
@@ -49,16 +47,11 @@ export async function callSideAgent(
     ],
   };
 
-  const options: Record<string, any> = {
-    maxTokens: 256,
-    cacheRetention: "short",
-  };
-
-  if (apiKey) options.apiKey = apiKey;
-  if (headers) options.headers = headers;
-
   try {
-    const result = await complete(sideModel, context, options);
+    const result = await rolesApi.complete(roleName, context, {
+      maxTokens: 256,
+      cacheRetention: "short",
+    });
     const text =
       result.content
         ?.filter((block: any) => block.type === "text")

@@ -77,7 +77,6 @@ export default function scoutExtension(pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       const rolesApi = tryGetRolesApi(ctx);
       const sideRole = rolesApi?.getRole(config.sideAgentRole);
-      const theme = ctx.ui.theme;
       const lines = [
         `Scout: ${config.enabled ? "enabled" : "disabled"}`,
         `Side agent role: ${config.sideAgentRole} (${sideRole?.model ?? "current model"})`,
@@ -272,8 +271,8 @@ export default function scoutExtension(pi: ExtensionAPI) {
     // Show "Scouting..." indicator
     ctx.ui.setStatus(STATUS_KEY, theme.fg("accent", "◎") + theme.fg("dim", " Scouting..."));
 
-    // Resolve side agent model
-    const sideResolved = await rolesApi.resolveRoleAsync(config.sideAgentRole);
+    // Resolve side agent model (sync — auth is resolved inside complete())
+    const sideResolved = rolesApi.resolveRole(config.sideAgentRole);
     if (!sideResolved.model) {
       ctx.ui.setStatus(STATUS_KEY, theme.fg("warning", "◎ scout: side model unavailable"));
       console.warn(`[pi-scout] Side agent role "${config.sideAgentRole}" not available — skipping`);
@@ -321,9 +320,8 @@ export default function scoutExtension(pi: ExtensionAPI) {
     // 5. Call side agent
     const scoutSystemPrompt = buildScoutSystemPrompt(config, skillsList, rolesList);
     const decision = await callSideAgent(
-      sideResolved.model,
-      sideResolved.apiKey,
-      sideResolved.headers,
+      rolesApi,
+      config.sideAgentRole,
       scoutSystemPrompt,
       userMessage,
     );
@@ -337,7 +335,6 @@ export default function scoutExtension(pi: ExtensionAPI) {
     lastDecision = decision;
 
     let systemPrompt = event.systemPrompt;
-    let switchedRole: string | undefined;
 
     // 6. skill-router: filter skills XML to only selected ones
     if (config.modules.skillRouter) {
@@ -348,7 +345,6 @@ export default function scoutExtension(pi: ExtensionAPI) {
     if (config.modules.modelRouter && decision.role && decision.role !== currentRole) {
       const switched = await switchToRole(pi, decision.role, rolesApi);
       if (switched) {
-        switchedRole = decision.role;
         const newModel = await rolesApi.resolveRoleAsync(decision.role);
         if (newModel?.model) {
           systemPrompt += `\n\n<current_model>${newModel.model.provider}/${newModel.model.id} (role: ${decision.role})</current_model>`;

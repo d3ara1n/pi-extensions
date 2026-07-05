@@ -860,6 +860,19 @@ class AskUserPanel implements Component, Focusable {
     }
   }
 
+  /** Build a bordered content row that ALWAYS fits innerW: truncateToWidth
+   *  is the hard safety net (any content — LLM-generated headers, user-typed
+   *  custom answers, tab names — is clamped so the TUI render can never crash
+   *  on an over-wide line), padRight then fills short content to keep the
+   *  right border aligned. Shared by every bordered screen so the width
+   *  invariant holds uniformly. */
+  private makeRow(th: Theme, borderColor: ThemeColor, innerW: number) {
+    return (content: string) => {
+      const fitted = truncateToWidth(content, innerW);
+      return th.fg(borderColor, "│") + padRight(fitted, innerW) + th.fg(borderColor, "│");
+    };
+  }
+
   // ── render ──
 
   render(width: number): string[] {
@@ -933,8 +946,7 @@ class AskUserPanel implements Component, Focusable {
     const th = this.theme;
     const innerW = Math.max(20, width - 2);
     const lines: string[] = [];
-    const row = (content: string) =>
-      th.fg("border", "│") + padRight(content, innerW) + th.fg("border", "│");
+    const row = this.makeRow(th, "border", innerW);
 
     if (this.messageEditing) {
       return this.renderMessageEditor(width, innerW, th);
@@ -1053,7 +1065,7 @@ class AskUserPanel implements Component, Focusable {
     // unmistakable as the review/confirm screen — not another question. The
     // question screen keeps the default "border" color.
     const bc: import("@earendil-works/pi-coding-agent").ThemeColor = "success";
-    const row = (content: string) => th.fg(bc, "│") + padRight(content, innerW) + th.fg(bc, "│");
+    const row = this.makeRow(th, bc, innerW);
     lines.push(th.fg(bc, `╭${"─".repeat(innerW)}╮`));
     lines.push(row(this.renderTabBarContent(th)));
     lines.push(row(""));
@@ -1128,7 +1140,7 @@ class AskUserPanel implements Component, Focusable {
   private renderMessageEditor(_width: number, innerW: number, th: Theme): string[] {
     const lines: string[] = [];
     const bc: import("@earendil-works/pi-coding-agent").ThemeColor = "success";
-    const row = (content: string) => th.fg(bc, "│") + padRight(content, innerW) + th.fg(bc, "│");
+    const row = this.makeRow(th, bc, innerW);
     lines.push(th.fg(bc, `╭${"─".repeat(innerW)}╮`));
     lines.push(row(` ${th.fg("accent", th.bold(`${ICON_OTHER} Note to assistant`))}`));
     lines.push(th.fg(bc, `├${"─".repeat(innerW)}┤`));
@@ -1164,7 +1176,13 @@ class AskUserPanel implements Component, Focusable {
       const customAnswered = !!committedCustom;
       const glyph = this.optionGlyph(opt, i, st, multi, th, isCursor, customAnswered);
       // For "Type something.", show the committed text instead of the placeholder.
-      const displayLabel = opt.isOther && customAnswered ? committedCustom! : opt.label;
+      // Custom text is arbitrary-length user input — truncate to the label
+      // column (the full text appears on the review screen and result card,
+      // both of which wrap). Without this a long custom answer makes the row
+      // exceed the terminal width and crashes the TUI render.
+      const labelMaxW = Math.max(0, innerW - 5); // 1 lead + 2 prefix + 1 glyph + 1 space
+      const displayLabel =
+        opt.isOther && customAnswered ? truncForDisplay(committedCustom!, labelMaxW) : opt.label;
       const labelColor = isCursor
         ? "accent"
         : opt.isOther
@@ -1400,7 +1418,7 @@ class AskUserResultView implements Component {
     };
     for (const q of this.questions) {
       const ans = this.result.answers.find((a) => a.tab === q.tab);
-      lines.push(th.fg("muted", q.header));
+      lines.push(truncateToWidth(th.fg("muted", q.header), width));
       if (!ans) {
         lines.push(`${indent}${th.fg("dim", "(no answer)")}`);
       } else if (ans.kind === "skipped") {

@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-model-roles",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "description": "Model role configuration library for pi extensions — defines named model roles and resolves them to Model instances",
   "main": "src/index.ts",

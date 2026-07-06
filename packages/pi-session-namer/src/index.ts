@@ -17,14 +17,12 @@ import { generateSessionName } from "./namer.ts";
 export default function sessionNamerExtension(pi: ExtensionAPI) {
   let config: SessionNamerConfig = DEFAULT_CONFIG;
   let hasNamed = false;
-  let lastPrompt = "";
 
   // ── session_start: load config, reset flag ──────────────────────
   pi.on("session_start", async (_event, _ctx) => {
     if (!_ctx.hasUI) return;
     config = loadNamerConfig(_ctx.cwd);
     hasNamed = false;
-    lastPrompt = "";
 
     // If the session already has a name (resume/fork/user-set), don't auto-name
     const existingName = pi.getSessionName();
@@ -36,8 +34,6 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
   // ── before_agent_start: auto-name on first prompt ───────────────
   pi.on("before_agent_start", async (event, ctx) => {
     if (!ctx.hasUI) return;
-    // Always cache the latest prompt for /namer:rename, even if auto-naming is done
-    lastPrompt = event.prompt;
 
     if (!config.enabled || hasNamed) return;
 
@@ -109,7 +105,8 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
   pi.registerCommand("namer:rename", {
     description: "Regenerate session name from the last user prompt",
     handler: async (_args, ctx) => {
-      if (!lastPrompt?.trim()) {
+      const lastUserPrompt = getLastUserPrompt(ctx.sessionManager.getEntries());
+      if (!lastUserPrompt?.trim()) {
         ctx.ui.notify("No user prompt available to generate a name from.", "warning");
         return;
       }
@@ -134,11 +131,41 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
         rolesApi,
         config.sideAgentRole,
         config,
-        lastPrompt,
+        lastUserPrompt,
       );
 
       pi.setSessionName(name);
       ctx.ui.notify(`Session renamed: ${name}`, "info");
     },
   });
+}
+
+/**
+ * Extract the most recent user message text from session entries.
+ *
+ * Read live from the session manager rather than a cached variable, so it
+ * survives extension reloads (which reset closure state).
+ */
+function getLastUserPrompt(entries: unknown[]): string | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i] as any;
+    if (entry?.type !== "message") continue;
+    const msg = entry.message;
+    if (msg?.role !== "user") continue;
+    const text = extractEntryText(msg.content);
+    if (text.trim()) return text;
+  }
+  return undefined;
+}
+
+/** Pull text out of a content field that may be a string or a ContentBlock[]. */
+function extractEntryText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((b: any) => b?.type === "text" && typeof b.text === "string")
+      .map((b: any) => b.text)
+      .join("");
+  }
+  return "";
 }

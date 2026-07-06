@@ -46,7 +46,9 @@ export async function generateSessionName(
         systemPrompt,
         messages: [{ role: "user", content: truncatedPrompt, timestamp: Date.now() }],
       },
-      { maxTokens: 64 },
+      // No maxTokens: cost is controlled by the role's thinking level.
+      // The namer side-agent role (utility, thinking:off) skips reasoning,
+      // so a short title needs only ~dozens of tokens.
     );
 
     const raw =

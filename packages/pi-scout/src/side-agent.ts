@@ -8,6 +8,15 @@
 import type { ModelRolesAPI } from "@d3ara1n/pi-model-roles";
 import type { ScoutDecision } from "./types.ts";
 
+/**
+ * Hard timeout (ms) for every side-agent call. Scout runs before each
+ * main-model turn, so a hung side model would block the whole conversation.
+ * 15s is ample for skill/model routing on any reasonable model; if it
+ * elapses the request is aborted and scout falls back to a safe no-op
+ * decision (no skills, no model switch) so the main turn still proceeds.
+ */
+const SIDE_AGENT_TIMEOUT_MS = 15_000;
+
 /** Minimal type for side agent context — matches pi-ai's Context interface. */
 interface SideAgentContext {
   systemPrompt?: string;
@@ -47,9 +56,13 @@ export async function callSideAgent(
     ],
   };
 
+  // Self-managing 15s abort: pi-ai forwards `signal` to the underlying fetch,
+  // so a timeout actually cancels the HTTP request instead of orphaning it.
+  const signal = AbortSignal.timeout(SIDE_AGENT_TIMEOUT_MS);
   try {
     const result = await rolesApi.complete(roleName, context, {
       cacheRetention: "short",
+      signal,
     });
     const text =
       result.content
@@ -59,7 +72,15 @@ export async function callSideAgent(
 
     return parseDecision(text);
   } catch (err) {
-    console.warn("[pi-scout] Side agent call failed:", err);
+    // Distinguish a timeout from other failures purely for diagnosis; the
+    // fallback is identical either way.
+    if (signal.aborted) {
+      console.warn(
+        `[pi-scout] Side agent timed out after ${SIDE_AGENT_TIMEOUT_MS}ms — falling back`,
+      );
+    } else {
+      console.warn("[pi-scout] Side agent call failed:", err);
+    }
     return fallback;
   }
 }

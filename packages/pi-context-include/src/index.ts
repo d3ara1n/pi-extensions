@@ -363,15 +363,17 @@ export default function contextIncludeExtension(pi: ExtensionAPI) {
     }
 
     // Size limits were already enforced during resolution; here we just render.
-    const sections = state.results.map((inc) => {
-      const relativePath = path.relative(process.cwd(), inc.path) || inc.path;
-      return `--- Begin included: ${relativePath} ---\n${inc.content}\n--- End included: ${relativePath} ---`;
-    });
+    // Reuse pi's <project_instructions> tag (with absolute path) so injected
+    // content reads as structured project context — same envelope pi uses for
+    // AGENTS.md — instead of an ad-hoc text delimiter.
+    const sections = state.results.map(
+      (inc) => `<project_instructions path="${inc.path}">\n${inc.content}\n</project_instructions>`,
+    );
 
     diag.totalBytes = state.accumulatedBytes;
     _lastScan = diag;
 
-    const injected = `\n\n## Included Files (via @-syntax)\n\n${sections.join("\n\n")}\n`;
+    const injected = `\n\nAdditional files included via @-syntax references in the project instructions:\n\n${sections.join("\n\n")}\n`;
 
     return {
       systemPrompt: (systemPrompt ?? "") + injected,

@@ -550,11 +550,25 @@ export default function subagentExtension(pi: ExtensionAPI) {
           modelRef = `${resolved.model.provider}/${resolved.model.id}`;
         }
         const startTime = Date.now();
+        // Total active-time budget for this run (ms). The clock pauses while the
+        // child delegates, so this caps *active* time, not wall time.
+        const timeoutBudgetMs = effectiveTimeout(roleDef, config.timeout) * 1000;
 
         // Throttled progress: coalesces bursty thinking/tool events so the TUI
         // repaints at most ~every PROGRESS_THROTTLE_MS, always keeping the latest state.
         const renderProgress = (partial: Partial<SubagentResult>) => {
-          const elapsed = Math.round((Date.now() - startTime) / 1000);
+          // Wall-clock elapsed (always ticking, even during delegate pauses).
+          const realElapsed = Math.round((Date.now() - startTime) / 1000);
+          const budgetSec = Math.round(timeoutBudgetMs / 1000);
+          const graceMs =
+            (partial.graceMs ?? 0) + (partial.pauseStart ? Date.now() - partial.pauseStart : 0);
+          const graceSec = Math.round(graceMs / 1000);
+          const timeText =
+            budgetSec > 0
+              ? graceSec > 0
+                ? `${realElapsed}s/${budgetSec}s(+${graceSec}s)`
+                : `${realElapsed}s/${budgetSec}s`
+              : `${realElapsed}s`;
           const liveResult: SubagentResult = {
             role: params.role,
             task: params.task,
@@ -575,10 +589,13 @@ export default function subagentExtension(pi: ExtensionAPI) {
             stopReason: partial.stopReason,
             activityLog: partial.activityLog ?? [],
             startTime,
+            budgetMs: timeoutBudgetMs,
+            graceMs: partial.graceMs,
+            pauseStart: partial.pauseStart,
             files: params.files,
             context: params.context,
           };
-          const statusText = `${params.role}  ${elapsed}s  ${liveResult.usage.turns} turn${liveResult.usage.turns !== 1 ? "s" : ""}`;
+          const statusText = `${params.role}  ${timeText}  ${liveResult.usage.turns} turn${liveResult.usage.turns !== 1 ? "s" : ""}`;
           onUpdate!({
             content: [{ type: "text", text: statusText }],
             details: { mode: "single", results: [liveResult] },
@@ -632,7 +649,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
           context: params.context,
           contextFiles: params.files,
           subagentRoles: roleDef.subagentRoles,
-          timeoutMs: effectiveTimeout(roleDef, config.timeout) * 1000,
+          timeoutMs: timeoutBudgetMs,
           maxTurns: roleDef.maxTurns ?? config.maxTurns,
           maxCost: roleDef.maxCost ?? config.maxCost,
           depth: CURRENT_DEPTH + 1,
@@ -658,7 +675,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
               context: params.context,
               contextFiles: params.files,
               subagentRoles: roleDef.subagentRoles,
-              timeoutMs: effectiveTimeout(roleDef, config.timeout) * 1000,
+              timeoutMs: timeoutBudgetMs,
               maxTurns: roleDef.maxTurns ?? config.maxTurns,
               maxCost: roleDef.maxCost ?? config.maxCost,
               depth: CURRENT_DEPTH + 1,
@@ -828,10 +845,22 @@ export default function subagentExtension(pi: ExtensionAPI) {
         taskline = theme.fg("text", taskPreview);
       }
 
-      // usage line: elapsed/live prefix + existing stats.
+      // usage line: elapsed/budget(+grace) prefix + existing stats.
       const secs = elapsedSeconds(r);
       const stats = formatUsageStats(r.usage, r.model);
-      const usageLine = [secs != null ? `${secs}s` : null, stats].filter(Boolean).join(" \u00b7 ");
+      const budgetSec = r.budgetMs ? Math.round(r.budgetMs / 1000) : 0;
+      const liveGraceMs = (r.graceMs ?? 0) + (r.pauseStart ? Date.now() - r.pauseStart : 0);
+      const graceSec = Math.round(liveGraceMs / 1000);
+      let timePart: string | null = null;
+      if (secs != null) {
+        timePart =
+          budgetSec > 0
+            ? graceSec > 0
+              ? `${secs}s/${budgetSec}s(+${graceSec}s)`
+              : `${secs}s/${budgetSec}s`
+            : `${secs}s`;
+      }
+      const usageLine = [timePart, stats].filter(Boolean).join(" \u00b7 ");
 
       // resultline: fixed line on terminal frames — `<icon> <content>` colored by outcome.
       // success → AI summary, else first line of output (truncated), else a placeholder — never blank.

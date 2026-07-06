@@ -201,7 +201,7 @@ describe("previewArgs", () => {
   });
 });
 
-// ── effectiveTimeout: guards delegate-role auto-widening (seconds) ──
+// ── effectiveTimeout: per-role timeout resolution (seconds) ──
 describe("effectiveTimeout", () => {
   const role = (tools: string[], timeout?: number): SubagentRole =>
     ({
@@ -217,8 +217,8 @@ describe("effectiveTimeout", () => {
   test("non-delegate role uses base timeout", () => {
     assert.equal(effectiveTimeout(role(["read", "grep"]), 600), 600);
   });
-  test("delegate role doubles base when no explicit timeout", () => {
-    assert.equal(effectiveTimeout(role(["read", "delegate"]), 600), 1200);
+  test("delegate role uses base timeout (no widening — active-time clock pauses for nested delegate)", () => {
+    assert.equal(effectiveTimeout(role(["read", "delegate"]), 600), 600);
   });
   test("explicit roleDef.timeout is always honored (no widening)", () => {
     assert.equal(effectiveTimeout(role(["read", "delegate"], 300), 600), 300);

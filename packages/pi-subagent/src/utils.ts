@@ -273,16 +273,12 @@ export class AsyncSemaphore {
 // ── Timeout policy ────────────────────────────────────────
 
 /**
- * Effective per-role timeout. Roles that can `delegate` need headroom for
- * nested runs to complete, so when no explicit per-role timeout is set we
- * double the base. An explicit roleDef.timeout (seconds) is always honored as-is.
- * All inputs/outputs are in SECONDS — convert to ms at the spawn boundary.
+ * Effective per-role timeout in SECONDS (convert to ms at the spawn boundary).
+ * No widening for delegate-capable roles: the parent's active-time clock
+ * pauses while the child is inside a nested `delegate` call, so the base
+ * budget is already enough. An explicit roleDef.timeout always wins.
  */
 export function effectiveTimeout(roleDef: SubagentRole, baseTimeoutSec: number): number {
-  const canDelegate = (roleDef.tools ?? []).includes("delegate");
-  if (canDelegate && roleDef.timeout == null) {
-    return baseTimeoutSec * 2;
-  }
   return roleDef.timeout ?? baseTimeoutSec;
 }
 

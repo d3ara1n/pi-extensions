@@ -157,6 +157,21 @@ export async function spawnSubagent(
     activityLog: [],
   };
 
+  // ── Active-time timeout accounting ──
+  // The parent's timeout clock PAUSES while the child is inside a nested
+  // `delegate` tool call, so each nested subagent gets its own full timeout
+  // budget instead of racing the parent's wall clock. `graceMs` is the
+  // accumulated paused time — display only; the verdict is always
+  // "active elapsed >= budget" (pausing grants no extra active time).
+  const budgetMs = options.timeoutMs ?? 0;
+  let activeElapsedAccum = 0; // settled active ms (excludes suspended spans)
+  let segmentStart = 0; // wall-clock start of the current active segment; 0 = no active segment
+  let isSuspended = false; // true while a child `delegate` call is in flight
+  let pauseStart = 0; // wall-clock mark when the current suspend began
+  let graceMs = 0; // accumulated suspended ms (display only)
+  /** toolCallIds of in-flight `delegate` calls — end events lack toolName, so we pair by id. */
+  const delegateCallIds = new Set<string>();
+
   let tmpDir: string | null = null;
 
   try {
@@ -248,6 +263,8 @@ export async function spawnSubagent(
         model: result.model,
         stopReason: result.stopReason,
         activityLog: result.activityLog.map((a) => ({ ...a })),
+        graceMs,
+        pauseStart: isSuspended ? pauseStart : 0,
       });
     };
 
@@ -323,10 +340,23 @@ export async function spawnSubagent(
           toolName: event.toolName,
           args: event.args ?? {},
         });
+        // Pause the parent timeout clock while the child delegates — nested
+        // subagents get their own full budget instead of racing this clock.
+        // Ref-counted: concurrent delegate calls pause once and resume only when
+        // the last in-flight delegate returns.
+        if (event.toolName === "delegate") {
+          const first = delegateCallIds.size === 0;
+          delegateCallIds.add(event.toolCallId);
+          if (first) suspendTimeout();
+        }
         emitProgress();
       } else if (event.type === "tool_execution_end" && event.toolCallId) {
         const idx = toolCallIndex.get(event.toolCallId);
         if (idx !== undefined) result.activityLog[idx].status = event.isError ? "failed" : "done";
+        // Resume the parent timeout clock only when the last in-flight delegate returns.
+        if (delegateCallIds.delete(event.toolCallId) && delegateCallIds.size === 0) {
+          resumeTimeout();
+        }
         emitProgress();
       }
 
@@ -411,6 +441,36 @@ export async function spawnSubagent(
       );
     };
 
+    /** Pause the active-time clock (called on child `delegate` start). */
+    const suspendTimeout = () => {
+      if (isSuspended) return;
+      if (segmentStart > 0) {
+        activeElapsedAccum += Date.now() - segmentStart;
+        segmentStart = 0;
+      }
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = undefined;
+      }
+      pauseStart = Date.now();
+      isSuspended = true;
+    };
+    /** Resume the active-time clock (called on child `delegate` end). */
+    const resumeTimeout = () => {
+      if (!isSuspended) return;
+      graceMs += Date.now() - pauseStart;
+      isSuspended = false;
+      segmentStart = Date.now();
+      if (budgetMs > 0) {
+        const remaining = budgetMs - activeElapsedAccum;
+        if (remaining > 0) {
+          timeoutHandle = setTimeout(() => killProc("timeout"), remaining);
+        } else {
+          killProc("timeout"); // active budget already exhausted while paused
+        }
+      }
+    };
+
     const exitCode = await new Promise<number>((resolve) => {
       // Register abort BEFORE spawning to close the (tiny) registration window
       let onAbort: (() => void) | undefined;
@@ -472,9 +532,13 @@ export async function spawnSubagent(
         resolve(1);
       });
 
-      // Handle timeout
-      if (options.timeoutMs && options.timeoutMs > 0) {
-        timeoutHandle = setTimeout(() => killProc("timeout"), options.timeoutMs);
+      // Start the active-time clock. segmentStart marks the first active span;
+      // it pauses/resumes around child `delegate` calls (see suspend/resumeTimeout).
+      // No wall-clock fallback needed: each nested subagent has its own timeout,
+      // so a stuck inner run is killed by its own clock and this layer resumes.
+      segmentStart = Date.now();
+      if (budgetMs > 0) {
+        timeoutHandle = setTimeout(() => killProc("timeout"), budgetMs);
       }
     });
 

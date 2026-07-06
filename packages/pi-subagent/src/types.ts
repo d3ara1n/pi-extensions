@@ -4,7 +4,7 @@
 
 /** Configuration for the subagent extension. */
 export interface SubagentConfig {
-  /** Per-subagent timeout in seconds. Roles that can `delegate` get 2× automatically when no per-role timeout is set. */
+  /** Per-subagent timeout in seconds of active time. The clock pauses while the child is inside a nested `delegate` call, so no widening is needed for delegate-capable roles. */
   timeout: number;
   /** Max number of subagents allowed to run concurrently. Extras queue with a TUI hint. */
   maxConcurrency: number;
@@ -156,6 +156,12 @@ export interface SubagentResult {
   startTime?: number;
   /** Total elapsed time (ms) for terminal frames, written by execute when the run ends; spans the whole delegate interval (incl. fallback retries). */
   elapsedMs?: number;
+  /** Active-time timeout budget (ms) for this run; present on running frames so the TUI can show "elapsed/budget". */
+  budgetMs?: number;
+  /** Accumulated ms the child spent inside nested `delegate` calls (display only; never changes the timeout verdict). Shown as "+Ns" in the TUI. */
+  graceMs?: number;
+  /** Wall-clock start (ms) of the currently-open delegate suspend; 0/absent when not suspended. The TUI adds (now - pauseStart) to graceMs for a live +Ns counter (same render path as elapsed seconds). */
+  pauseStart?: number;
   /** Reference file paths passed to delegate (params.files); used by the expanded view. */
   files?: string[];
   /** Extra context passed to delegate (params.context); used by the expanded view. */

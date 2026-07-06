@@ -168,6 +168,10 @@ export function initModelRolesAPI(
       const { model: _omitModel, ...streamOptions } = options ?? {};
       if (auth.apiKey) streamOptions.apiKey = auth.apiKey;
       if (auth.headers) streamOptions.headers = auth.headers;
+      // Apply the role's thinking level unless the caller explicitly overrides it.
+      if (roleConfig.thinking && streamOptions.reasoningEffort === undefined) {
+        streamOptions.reasoningEffort = roleConfig.thinking;
+      }
       return piAiComplete(model, context, streamOptions);
     },
 
@@ -188,6 +192,10 @@ export function initModelRolesAPI(
       const { model: _omitModel, ...streamOptions } = options ?? {};
       if (auth.apiKey) streamOptions.apiKey = auth.apiKey;
       if (auth.headers) streamOptions.headers = auth.headers;
+      // Apply the role's thinking level unless the caller explicitly overrides it.
+      if (roleConfig.thinking && streamOptions.reasoning === undefined) {
+        streamOptions.reasoning = roleConfig.thinking;
+      }
       return piAiStreamSimple(model, context, streamOptions);
     },
   };

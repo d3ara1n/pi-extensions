@@ -49,7 +49,6 @@ export async function callSideAgent(
 
   try {
     const result = await rolesApi.complete(roleName, context, {
-      maxTokens: 256,
       cacheRetention: "short",
     });
     const text =

@@ -53,14 +53,20 @@ const ICON = {
   thinking: "\uf400", //   oct-light-bulb
   context: "\uf49b", //   oct-cache
   cache: "\u26a1", // ⚡  oct-zap
+  hitRate: "\uf140", //   fa-bullseye（靶心，缓存命中率）
   folder: "\uf07c", //   fa-folder
 } as const;
 
 /** Minimal inline types to read cache-read totals without importing the
  *  full pi-ai message union tree. */
+interface UsageSnap {
+  input?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+}
 interface MsgSnap {
   role: string;
-  usage?: { cacheRead?: number };
+  usage?: UsageSnap;
 }
 interface EntrySnap {
   type: string;
@@ -77,6 +83,28 @@ function sumCacheRead(ctx: { sessionManager: { getEntries(): unknown[] } }): num
     total += e.message.usage.cacheRead ?? 0;
   }
   return total;
+}
+
+/** Usage of the most recent assistant message — drives the per-turn
+ *  cacheRead and the hit rate, matching pi's footer (last entry wins). */
+function latestAssistantUsage(ctx: { sessionManager: { getEntries(): unknown[] } }): UsageSnap | undefined {
+  let latest: UsageSnap | undefined;
+  for (const entry of ctx.sessionManager.getEntries()) {
+    const e = entry as EntrySnap;
+    if (e.type !== "message" || e.message?.role !== "assistant" || !e.message.usage) continue;
+    latest = e.message.usage;
+  }
+  return latest;
+}
+
+/** Cache hit rate for a single turn: cacheRead / (input + cacheRead +
+ *  cacheWrite) × 100 — same formula pi's footer uses for "CHxx%".
+ *  Returns undefined when there's no usage or no prompt tokens. */
+function cacheHitRate(u: UsageSnap | undefined): number | undefined {
+  if (!u) return undefined;
+  const prompt = (u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
+  if (prompt <= 0) return undefined;
+  return ((u.cacheRead ?? 0) / prompt) * 100;
 }
 
 /** Format a token count for display: 14000000 → "14.0M", 132000 → "132.0k". */
@@ -170,9 +198,11 @@ export default function (pi: ExtensionAPI) {
   let footerSnap: FooterSnap | undefined;
   // CWD cached from session_start — used by turn_end to refresh git dirty.
   let _cwd = "";
-  // cacheRead total, refreshed at session_start + agent_end. The render
-  // provider reads this instead of re-scanning entries every frame.
+  // cacheRead total + latest-turn usage, refreshed at session_start +
+  // agent_end. The render provider reads these instead of re-scanning
+  // entries every frame.
   let _cacheTotal = 0;
+  let _latestUsage: UsageSnap | undefined;
 
   // ── Phase-aware spinner + lifecycle ────────────────────────────
   // Each event asks the editor for a phase; CardEditor.setSpinner is itself
@@ -189,9 +219,10 @@ export default function (pi: ExtensionAPI) {
   });
   pi.on("tool_execution_start", () => editor?.setSpinner("exec"));
   pi.on("agent_end", (_event, ctx) => {
-    // cacheRead totals are stable once a turn finishes — recompute here
-    // instead of on every render frame.
+    // cacheRead totals + latest usage are stable once a turn finishes —
+    // recompute here instead of on every render frame.
     _cacheTotal = sumCacheRead(ctx);
+    _latestUsage = latestAssistantUsage(ctx);
     editor?.setSpinner(null);
   });
   pi.on("session_shutdown", () => {
@@ -211,6 +242,7 @@ export default function (pi: ExtensionAPI) {
     _cwd = ctx.cwd;
     config = loadEditorShellConfig(ctx.cwd);
     _cacheTotal = sumCacheRead(ctx);
+    _latestUsage = latestAssistantUsage(ctx);
     refreshGitDirty(ctx.cwd, () => editor?.requestRender());
 
     // Fresh segments on every render — reads live ctx state, so thinking /
@@ -241,15 +273,17 @@ export default function (pi: ExtensionAPI) {
       const ctxWindow = usage?.contextWindow ?? ctx.model?.contextWindow;
       const ctxText =
         pct != null && ctxWindow
-          ? `${Math.round(pct)}%/${(ctxWindow / 1000).toFixed(0)}k`
+          ? `${pct.toFixed(1)}%/${(ctxWindow / 1000).toFixed(0)}k`
           : "?/??k";
 
-      // Cache-read token total — refreshed at agent_end (same data source
-      // pi's own footer uses for "R14M"); read from cache off the hot path.
-      const cacheTokens = _cacheTotal;
+      // Cache-read tokens — per-turn figure first, session total in parens,
+      // then hit rate (pi's "CHxx%" formula). All refreshed at agent_end and
+      // read from cache off the hot path.
+      const cacheReadNow = _latestUsage?.cacheRead ?? 0;
+      const hitRate = cacheHitRate(_latestUsage);
       const cachePart =
-        cacheTokens > 0
-          ? `${theme.fg("dim", " · ")}${theme.fg("warning", `${ICON.cache} ${formatTokens(cacheTokens)}`)}`
+        _cacheTotal > 0
+          ? `${theme.fg("dim", " · ")}${theme.fg("warning", `${ICON.cache} ${formatTokens(cacheReadNow)} (${formatTokens(_cacheTotal)})${hitRate != null ? ` ${ICON.hitRate} ${hitRate.toFixed(1)}%` : ""}`)}`
           : "";
 
       // Git branch + dirty state — pi's format: ~/Projects (main).
@@ -333,7 +367,11 @@ export default function (pi: ExtensionAPI) {
         } else {
           const pinned = new Set(config.pinnedStatus);
           for (const [key, text] of entries.sort(([a], [b]) => a.localeCompare(b))) {
-            const mark = pinned.has(key) ? " ← pinned" : "";
+            // The pin marker sits after status text, whose embedded reset
+            // would wash it to default white — re-wrap it in dim so it stays
+            // consistent with the surrounding text. (status text itself
+            // keeps its original color by design.)
+            const mark = pinned.has(key) ? ctx.ui.theme.fg("dim", " ← pinned") : "";
             lines.push(`  ${key}: ${text}${mark}`);
           }
         }
@@ -344,7 +382,12 @@ export default function (pi: ExtensionAPI) {
       lines.push("");
       lines.push("[cache totals]");
       const tokens = sumCacheRead(ctx);
-      lines.push(`  cacheRead: ${tokens > 0 ? formatTokens(tokens) : "0"}`);
+      lines.push(`  cacheRead (session): ${tokens > 0 ? formatTokens(tokens) : "0"}`);
+      const latest = latestAssistantUsage(ctx);
+      const now = latest?.cacheRead ?? 0;
+      lines.push(`  cacheRead (this turn): ${formatTokens(now)}`);
+      const hr = cacheHitRate(latest);
+      lines.push(`  hit rate: ${hr != null ? `${hr.toFixed(1)}%` : "n/a"}`);
 
       lines.push("");
       lines.push(`[context] cwd: ${ctx.cwd}`);
@@ -355,9 +398,17 @@ export default function (pi: ExtensionAPI) {
         lines.push(`  git dirty: ${dirty || "clean"}`);
       }
       const m = ctx.model;
-      lines.push(`  model: ${m ? `${m.provider}/${m.id}` : "none"}`);
+      lines.push(`  model: ${m ? `${m.provider}/${m.id}:${pi.getThinkingLevel()}` : "none"}`);
 
-      ctx.ui.notify(lines.join("\n"), "info");
+      // Wrap each line in dim explicitly. notify adds its own outer dim
+      // layer, but extension status text carries its own color codes that
+      // reset the foreground mid-message. Per-line wrapping re-asserts dim
+      // at the start of every line, so a status row's reset can't bleed past
+      // it: status stays in its original color, everything else reads dim.
+      ctx.ui.notify(
+        lines.map((l) => ctx.ui.theme.fg("dim", l)).join("\n"),
+        "info",
+      );
     },
   });
 }

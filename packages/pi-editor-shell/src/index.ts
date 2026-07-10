@@ -310,6 +310,10 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.setWorkingVisible(false);
 
     ctx.ui.setEditorComponent((tui, theme, keybindings) => {
+      // pi may rebuild the editor mid-session (model switch, reload). Stop the
+      // previous editor's spinner timer so it can't keep firing requestRender()
+      // on a stale tui handle.
+      editor?.setSpinner(null);
       editor = new CardEditor(tui, theme, keybindings, provider);
       return editor;
     });

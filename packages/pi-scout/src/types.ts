@@ -50,8 +50,9 @@ export interface ScoutDecision {
   role: string | null;
   /** Brief reasoning */
   reasoning: string;
-  /** Where the decision came from — controls status-bar presentation */
-  source?: "side-agent" | "short-circuit";
+  /** Where the decision came from — controls status-bar presentation.
+   *  "error" renders as a warning (✗) in the status bar instead of polluting the terminal. */
+  source?: "side-agent" | "short-circuit" | "error";
 }
 
 export const DEFAULT_CONFIG: ScoutConfig = {

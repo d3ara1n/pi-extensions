@@ -7,31 +7,36 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ModelRolesAPI } from "@d3ara1n/pi-model-roles";
 
+/** Result of a model-role switch attempt. */
+export interface SwitchResult {
+  ok: boolean;
+  /** Failure reason when ok is false (shown in the status bar). */
+  reason?: string;
+}
+
 /**
  * Switch the active model to the given role.
- * @returns true if the switch was successful
+ * @returns SwitchResult — check `.ok`; on failure `.reason` explains why.
  */
 export async function switchToRole(
   pi: ExtensionAPI,
   roleName: string,
   rolesApi: ModelRolesAPI,
-): Promise<boolean> {
+): Promise<SwitchResult> {
   const resolved = await rolesApi.resolveRoleAsync(roleName);
 
   if (!resolved.model) {
-    console.warn(`[pi-scout] Role "${roleName}" could not be resolved — model not available`);
-    return false;
+    return { ok: false, reason: `role "${roleName}" model unavailable` };
   }
 
   const success = await pi.setModel(resolved.model);
   if (!success) {
-    console.warn(`[pi-scout] setModel() returned false for role "${roleName}" — no API key?`);
-    return false;
+    return { ok: false, reason: `no API key for role "${roleName}"` };
   }
 
   if (resolved.config.thinking) {
     pi.setThinkingLevel(resolved.config.thinking);
   }
 
-  return true;
+  return { ok: true };
 }

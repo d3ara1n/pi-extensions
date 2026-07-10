@@ -23,6 +23,12 @@ interface SideAgentContext {
   messages: Array<{ role: "user"; content: string; timestamp: number }>;
 }
 
+/** Short, status-bar-friendly message extracted from an unknown error. */
+function shortError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.length > 80 ? msg.slice(0, 77) + "..." : msg;
+}
+
 /**
  * Call the side agent and return its decision.
  *
@@ -38,13 +44,6 @@ export async function callSideAgent(
   systemPrompt: string,
   userMessage: string,
 ): Promise<ScoutDecision> {
-  const fallback: ScoutDecision = {
-    skills: [],
-    role: null,
-    reasoning: "side agent error",
-    source: "side-agent",
-  };
-
   const context: SideAgentContext = {
     systemPrompt,
     messages: [
@@ -72,16 +71,12 @@ export async function callSideAgent(
 
     return parseDecision(text);
   } catch (err) {
-    // Distinguish a timeout from other failures purely for diagnosis; the
-    // fallback is identical either way.
-    if (signal.aborted) {
-      console.warn(
-        `[pi-scout] Side agent timed out after ${SIDE_AGENT_TIMEOUT_MS}ms — falling back`,
-      );
-    } else {
-      console.warn("[pi-scout] Side agent call failed:", err);
-    }
-    return fallback;
+    // Surface the failure category in the status bar; scout falls back to a
+    // safe no-op decision either way.
+    const reasoning = signal.aborted
+      ? `timed out (${SIDE_AGENT_TIMEOUT_MS / 1000}s)`
+      : `failed: ${shortError(err)}`;
+    return { skills: [], role: null, reasoning, source: "error" };
   }
 }
 
@@ -93,8 +88,8 @@ function parseDecision(raw: string): ScoutDecision {
   const fallback: ScoutDecision = {
     skills: [],
     role: null,
-    reasoning: "parse error",
-    source: "side-agent",
+    reasoning: "unparseable response",
+    source: "error",
   };
 
   // Strip markdown code fences if present
@@ -115,7 +110,6 @@ function parseDecision(raw: string): ScoutDecision {
       source: "side-agent",
     };
   } catch {
-    console.warn("[pi-scout] Failed to parse side agent response:", raw.slice(0, 200));
     return fallback;
   }
 }

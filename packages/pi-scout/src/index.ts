@@ -24,12 +24,19 @@ import { evaluateShortCircuit } from "./short-circuit.ts";
 
 const STATUS_KEY = "scout";
 
+/** Status-bar prefix: icon in its state color, the "scout:" label always dim. */
+function scoutPrefix(icon: string, color: string, theme: any): string {
+  return theme.fg(color, icon) + theme.fg("dim", " scout:") + " ";
+}
+
 /** Build a one-line status summary from a scout decision. */
 function formatDecisionStatus(decision: ScoutDecision, theme: any): string {
+  if (decision.source === "error") {
+    return scoutPrefix("✗", "warning", theme) + theme.fg("warning", decision.reasoning);
+  }
+
   if (decision.source === "short-circuit") {
-    return (
-      theme.fg("success", "✓ scout:") + " " + theme.fg("dim", `(skipped) ${decision.reasoning}`)
-    );
+    return scoutPrefix("✓", "success", theme) + theme.fg("dim", `(skipped) ${decision.reasoning}`);
   }
 
   const parts: string[] = [];
@@ -39,17 +46,17 @@ function formatDecisionStatus(decision: ScoutDecision, theme: any): string {
       decision.skills.length <= 3
         ? decision.skills.join(", ")
         : `${decision.skills.slice(0, 2).join(", ")} +${decision.skills.length - 2}`;
-    parts.push(theme.fg("accent", `skills: ${names}`));
+    parts.push(theme.fg("dim", "skills: ") + theme.fg("accent", names));
   }
   if (decision.role) {
-    parts.push(theme.fg("warning", `→ ${decision.role}`));
+    parts.push(theme.fg("dim", "→ ") + theme.fg("warning", decision.role));
   }
 
   if (parts.length === 0) {
-    return theme.fg("dim", "✓ scout: no changes");
+    return scoutPrefix("✓", "success", theme) + theme.fg("dim", "no changes");
   }
 
-  return theme.fg("success", "✓ scout:") + " " + parts.join(" | ");
+  return scoutPrefix("✓", "success", theme) + parts.join(theme.fg("dim", " | "));
 }
 
 export default function scoutExtension(pi: ExtensionAPI) {
@@ -216,7 +223,11 @@ export default function scoutExtension(pi: ExtensionAPI) {
     try {
       rolesApi = getModelRolesAPI();
     } catch {
-      console.warn("[pi-scout] pi-model-roles not initialized — skipping scout");
+      ctx.ui.setStatus(
+        STATUS_KEY,
+        scoutPrefix("✗", "warning", ctx.ui.theme) +
+          ctx.ui.theme.fg("warning", "model-roles missing"),
+      );
       return;
     }
 
@@ -268,22 +279,26 @@ export default function scoutExtension(pi: ExtensionAPI) {
       }
     }
 
-    // Show "Scouting..." indicator
-    ctx.ui.setStatus(STATUS_KEY, theme.fg("accent", "◎") + theme.fg("dim", " Scouting..."));
+    // Show in-progress indicator
+    ctx.ui.setStatus(STATUS_KEY, scoutPrefix("◎", "accent", theme) + theme.fg("dim", "scouting..."));
 
     // Resolve side agent model (sync — auth is resolved inside complete())
     const sideResolved = rolesApi.resolveRole(config.sideAgentRole);
     if (!sideResolved.model) {
-      ctx.ui.setStatus(STATUS_KEY, theme.fg("warning", "◎ scout: side model unavailable"));
-      console.warn(`[pi-scout] Side agent role "${config.sideAgentRole}" not available — skipping`);
+      ctx.ui.setStatus(
+        STATUS_KEY,
+        scoutPrefix("✗", "warning", theme) + theme.fg("warning", "side model unavailable"),
+      );
       return;
     }
 
     // Update status: resolving
     ctx.ui.setStatus(
       STATUS_KEY,
-      theme.fg("accent", "◎") +
-        theme.fg("dim", ` Scouting via ${sideResolved.model.provider}/${sideResolved.model.id}...`),
+      scoutPrefix("◎", "accent", theme) +
+        theme.fg("dim", "via ") +
+        theme.fg("accent", `${sideResolved.model.provider}/${sideResolved.model.id}`) +
+        theme.fg("dim", "..."),
     );
 
     // 1. Build the skills list for the side agent prompt
@@ -344,11 +359,16 @@ export default function scoutExtension(pi: ExtensionAPI) {
     // 7. model-router: switch model if side agent recommends a different role
     if (config.modules.modelRouter && decision.role && decision.role !== currentRole) {
       const switched = await switchToRole(pi, decision.role, rolesApi);
-      if (switched) {
+      if (switched.ok) {
         const newModel = await rolesApi.resolveRoleAsync(decision.role);
         if (newModel?.model) {
           systemPrompt += `\n\n<current_model>${newModel.model.provider}/${newModel.model.id} (role: ${decision.role})</current_model>`;
         }
+      } else {
+        // Switch failed — reflect it in the status instead of the terminal.
+        decision.role = null;
+        decision.source = "error";
+        decision.reasoning = switched.reason ?? "model switch failed";
       }
     }
 

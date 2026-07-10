@@ -1,0 +1,25 @@
+{
+  "name": "@d3ara1n/pi-provider-agnes",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Agnes AI provider for pi — registers agnes (token billing) and agnes-plan (subscription) providers with text models",
+  "keywords": [
+    "pi-package",
+    "pi"
+  ],
+  "main": "src/index.ts",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/d3ara1n/pi-extensions",
+    "directory": "packages/pi-provider-agnes"
+  }
+}

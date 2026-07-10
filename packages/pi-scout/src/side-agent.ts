@@ -82,7 +82,16 @@ export async function callSideAgent(
 
 /**
  * Parse the side agent's JSON response into a ScoutDecision.
- * Tolerant of markdown wrapping, extra whitespace, etc.
+ *
+ * Two-stage extraction:
+ * 1. Primary: extract from <decision>...</decision> XML tags (the
+ *    prompt instructs the model to use this format). Tag extraction
+ *    is precise — surrounding prose, markdown fences, and noise are
+ *    all ignored as long as the tags exist.
+ * 2. Fallback: scan for the first {} JSON object boundaries when
+ *    the model ignores the tag instruction. This is heuristic last
+ *    resort — strips markdown fences first, then greedily matches {}
+ *    from outside in.
  */
 function parseDecision(raw: string): ScoutDecision {
   const fallback: ScoutDecision = {
@@ -92,24 +101,56 @@ function parseDecision(raw: string): ScoutDecision {
     source: "error",
   };
 
-  // Strip markdown code fences if present
-  let text = raw.trim();
-  if (text.startsWith("```")) {
-    text = text.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+  const text = raw.trim();
+  if (!text) return fallback;
+
+  // ── Stage 1: XML tag extraction ──────────────────────────
+  const tagMatch = text.match(/<decision>([\s\S]*?)<\/decision>/);
+  if (tagMatch) {
+    const inner = tagMatch[1].trim();
+    const parsed = tryParseJson(inner);
+    if (parsed) return buildDecision(parsed);
   }
 
+  // ── Stage 2: JSON boundary scan (fallback) ───────────────
+  // Strip all markdown code fence markers regardless of position.
+  const stripped = text.replace(/```(?:json)?\s*/g, "").replace(/```/g, "").trim();
+
+  const firstBrace = stripped.indexOf("{");
+  if (firstBrace === -1) return fallback;
+
+  // Greedy from rightmost '}': try the longest substring first.
+  let lastBrace = stripped.lastIndexOf("}");
+  while (lastBrace > firstBrace) {
+    const parsed = tryParseJson(stripped.slice(firstBrace, lastBrace + 1));
+    if (parsed) return buildDecision(parsed);
+    lastBrace = stripped.lastIndexOf("}", lastBrace - 1);
+  }
+
+  return fallback;
+}
+
+/** Try JSON.parse, return the parsed object or null on any failure. */
+function tryParseJson(raw: string): Record<string, unknown> | null {
   try {
-    const parsed = JSON.parse(text);
-
-    return {
-      skills: Array.isArray(parsed.skills)
-        ? parsed.skills.filter((s: any) => typeof s === "string")
-        : [],
-      role: typeof parsed.role === "string" && parsed.role !== "null" ? parsed.role : null,
-      reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "no reasoning provided",
-      source: "side-agent",
-    };
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
   } catch {
-    return fallback;
+    return null;
   }
+}
+
+/** Build a ScoutDecision from a parsed JSON object. */
+function buildDecision(parsed: Record<string, unknown>): ScoutDecision {
+  return {
+    skills: Array.isArray(parsed.skills)
+      ? parsed.skills.filter((s: unknown) => typeof s === "string")
+      : [],
+    role:
+      typeof parsed.role === "string" && parsed.role !== "null" ? parsed.role : null,
+    reasoning:
+      typeof parsed.reasoning === "string" ? parsed.reasoning : "no reasoning provided",
+    source: "side-agent",
+  };
 }

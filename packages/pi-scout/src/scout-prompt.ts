@@ -63,12 +63,15 @@ export function buildScoutSystemPrompt(
   );
   parts.push(``);
   parts.push(`## Response Format`);
-  parts.push(`Respond with ONLY a JSON object, no markdown, no explanation outside the JSON:`);
+  parts.push(`Wrap your decision in <decision> tags. Inside, put a JSON object.`);
+  parts.push(`Nothing outside the tags — no markdown, no explanation.`);
+  parts.push(`<decision>`);
   parts.push(`{`);
   parts.push(`  "skills": ["skill-name-1", "skill-name-2"],`);
   parts.push(`  "role": "role-name-or-null",`);
   parts.push(`  "reasoning": "one sentence explanation"`);
   parts.push(`}`);
+  parts.push(`</decision>`);
   parts.push(``);
   parts.push(`## Rules`);
   parts.push(`- Select at most ${config.maxSelectedSkills} skills. Select 0 if none are relevant.`);

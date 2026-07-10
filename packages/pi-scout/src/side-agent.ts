@@ -1,8 +1,8 @@
 /**
  * Side agent invocation logic.
  *
- * Calls the side agent via model-roles' complete() (auth resolved internally)
- * and parses the JSON decision response.
+ * Calls the side agent via model-roles' completeWithRole() (auth resolved
+ * internally) and parses the <decision> response (line-based key: value).
  */
 
 import type { ModelRolesAPI } from "@d3ara1n/pi-model-roles";
@@ -32,7 +32,7 @@ function shortError(err: unknown): string {
 /**
  * Call the side agent and return its decision.
  *
- * @param rolesApi - ModelRolesAPI (provides complete() with auth resolved internally)
+ * @param rolesApi - ModelRolesAPI (provides completeWithRole() with auth resolved internally)
  * @param roleName - Role name whose model + auth to use (from scout config)
  * @param systemPrompt - Scout system prompt (includes skills/roles for cache friendliness)
  * @param userMessage - Fully assembled user message (includes context, current role, user prompt)

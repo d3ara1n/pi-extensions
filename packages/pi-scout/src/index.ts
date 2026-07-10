@@ -185,6 +185,7 @@ export default function scoutExtension(pi: ExtensionAPI) {
     config = loadScoutConfig(ctx.cwd);
     resetSkillCache();
     prevTurn = undefined;
+    cachedAllSkills = [];
   });
 
   // ── turn_end: cache assistant response for next turn's context ──
@@ -282,7 +283,7 @@ export default function scoutExtension(pi: ExtensionAPI) {
     // Show in-progress indicator
     ctx.ui.setStatus(STATUS_KEY, scoutPrefix("◎", "accent", theme) + theme.fg("dim", "scouting..."));
 
-    // Resolve side agent model (sync — auth is resolved inside complete())
+    // Resolve side agent model (sync — auth is resolved inside completeWithRole())
     const sideResolved = rolesApi.resolveRole(config.sideAgentRole);
     if (!sideResolved.model) {
       ctx.ui.setStatus(

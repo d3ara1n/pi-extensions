@@ -133,7 +133,7 @@ function parseTextFields(block: string): ScoutDecision | null {
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    // Match "key: value" or "key value" (model may forget the colon)
+    // Match "key: value" (supports both ASCII and full-width colon)
     const match = trimmed.match(/^(skills?|role|reasoning)\s*[:：]\s*(.*)$/i);
     if (match) {
       const key = match[1].toLowerCase();

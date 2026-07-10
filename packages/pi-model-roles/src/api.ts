@@ -160,12 +160,12 @@ export function initModelRolesAPI(
         options?.model ??
         resolveModelForRole(roleConfig, state.modelRegistry, state.currentModel).model;
       if (!model) {
-        throw new Error(`complete: role "${roleName}" has no available model`);
+        throw new Error(`completeWithRole: role "${roleName}" has no available model`);
       }
       // Resolve auth for the model actually used (refreshes OAuth tokens).
       const auth = await state.modelRegistry.getApiKeyAndHeaders(model);
       if (!auth.ok) {
-        throw new Error(`complete: auth failed for ${model.provider}/${model.id}: ${auth.error}`);
+        throw new Error(`completeWithRole: auth failed for ${model.provider}/${model.id}: ${auth.error}`);
       }
       // Forward everything except `model` to pi-ai's completeSimple().
       // completeSimple goes through streamSimpleOpenAICompletions which

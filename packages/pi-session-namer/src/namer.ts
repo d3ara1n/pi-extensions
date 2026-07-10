@@ -1,7 +1,7 @@
 /**
  * Side agent invocation for session naming.
  *
- * Calls the side agent via model-roles' complete() (auth resolved internally)
+ * Calls the side agent via model-roles' completeWithRole() (auth resolved internally)
  * and returns a cleaned session name string.
  */
 

@@ -70,7 +70,7 @@ export function buildScoutSystemPrompt(
   parts.push(`reasoning: one sentence explanation`);
   parts.push(`</decision>`);
   parts.push(``);
-  parts.push(`Rules:`);
+  parts.push(`## Response Rules`);
   parts.push(`- skills: comma-separated skill names, or "none" if no skills needed`);
   parts.push(`- role: role name from the available list, or "null" to keep current`);
   parts.push(`- reasoning: one short sentence`);

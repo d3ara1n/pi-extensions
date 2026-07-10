@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-peek",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "type": "module",
   "description": "Consult core for pi — serialize the current session and ask questions about it via the utility model (read-after-burn). Pure library: no tools, no commands.",
   "main": "src/index.ts",

@@ -1,11 +1,9 @@
 # @d3ara1n/pi-provider-zhipu-coding-plan
 
-Zhipu AI Coding Plan provider for [Pi Coding Agent](https://pi.dev) — auto-discovers models and reports usage quota.
+Zhipu AI Coding Plan provider for [Pi Coding Agent](https://pi.dev) — ships a static GLM model list and reports usage quota.
 
 ## Features
 
-- **Dynamic model discovery** — fetches available models from Zhipu's `/models` endpoint at startup
-- **Fallback model list** — ships with known GLM model metadata when API is unreachable
 - **Usage quota reporting** — displays token usage percentage and reset countdown in the status bar
 - **No manual config** — reads API key from `~/.pi/agent/auth.json` (set via `/login`)
 
@@ -37,7 +35,7 @@ Or manually add to `~/.pi/agent/auth.json`:
 
 ## Models
 
-Supported models include GLM-4.5 through GLM-5.1 series, with vision variants (suffix `v`). Model metadata (context window, max tokens, compatibility flags) is maintained in `KNOWN_MODELS` and updated alongside dynamic discovery.
+Supported models span the GLM-4.5 through GLM-5.2 series (text only). Model metadata (context window, max tokens, compatibility flags) is maintained statically in `KNOWN_MODELS`.
 
 ## Usage Display
 

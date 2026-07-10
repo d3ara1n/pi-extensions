@@ -7,6 +7,7 @@
  * Auth: API key resolved via modelRegistry.getApiKeyForProvider.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { OpenAICompletionsCompat } from "@earendil-works/pi-ai";
 import { usageRegistry } from "@d3ara1n/pi-usage-block-core";
 import type { QuotaProvider, QuotaWindow } from "@d3ara1n/pi-usage-block-core";
 
@@ -25,15 +26,12 @@ interface ModelMeta {
   maxTokens: number;
   reasoning: boolean;
   input: ("text" | "image")[];
-  compat: Record<string, unknown>;
+  compat: OpenAICompletionsCompat;
 }
 
 interface QuotaLimitItem {
   type: "TOKENS_LIMIT" | "TIME_LIMIT";
   percentage?: number;
-  usage?: number;
-  currentValue?: number;
-  remaining?: number;
   nextResetTime?: number;
   /** Window duration count (e.g. 5) paired with unit */
   number?: number;
@@ -67,11 +65,12 @@ const KNOWN_MODELS: Record<string, Partial<ModelMeta>> = {
   "glm-4.5": { contextWindow: 131_072, maxTokens: 98_304 },
   "glm-4.5-air": { contextWindow: 131_072, maxTokens: 98_304 },
   "glm-4.6": { contextWindow: 200_000, maxTokens: 131_072 },
-  "glm-4.7": { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
+  "glm-4.7": { contextWindow: 204_800, maxTokens: 131_072, compat: ZAI_STREAM },
   "glm-5": { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
   "glm-5-turbo": { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
   "glm-5.1": { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM },
-  "glm-5.2": { contextWindow: 1_000_000, maxTokens: 131_072, compat: ZAI_STREAM },
+  "glm-5.2": { contextWindow: 1_024_000, maxTokens: 131_072, compat: ZAI_STREAM },
+  "glm-5v-turbo": { contextWindow: 200_000, maxTokens: 131_072, compat: ZAI_STREAM, input: ["text", "image"] },
 };
 
 // ── API helpers ───────────────────────────────────────────────────────────

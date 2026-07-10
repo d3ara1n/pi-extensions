@@ -213,7 +213,7 @@ export default function (pi: ExtensionAPI) {
   async function refresh() {
     if (!ctx || !alive) return;
     const provider = getActiveUsageProvider();
-    if (!provider || provider.source !== "api") return; // headers source靠事件
+    if (!provider || provider.source !== "api") return; // headers source is event-driven
     render(); // show cached state immediately (e.g. right after a model switch)
     try {
       if (provider.kind === "balance") {

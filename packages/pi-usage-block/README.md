@@ -34,6 +34,7 @@ The following pi providers are supported out of the box — no extra plugin need
 | Together | quota % | `x-tokenlimit-*` response headers |
 | OpenRouter | balance $ | `GET openrouter.ai/api/v1/credits` |
 | DeepSeek | balance $ | `GET api.deepseek.com/user/balance` |
+| OpenCode Go | dollar quota % | `GET opencode.ai/zen/go/v1/usage` |
 
 > **Not supported:** Google Gemini and Mistral don't surface response headers in pi's call path. Groq's rate-limit headers are undocumented/unstable, and Fireworks only exposes limit (no remaining/reset).
 

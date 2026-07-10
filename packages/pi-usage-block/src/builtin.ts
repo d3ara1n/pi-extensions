@@ -192,6 +192,28 @@ async function deepseekBalance(apiKey: string): Promise<BalanceInfo> {
   return { amount, currency };
 }
 
+/** OpenCode Go: GET /zen/go/v1/usage → rolling5h + weekly + monthly quota windows (dollars). */
+async function opencodeGoUsage(apiKey: string): Promise<QuotaWindow[]> {
+  const data = await fetchJson("https://opencode.ai/zen/go/v1/usage", apiKey);
+  const windows: QuotaWindow[] = [];
+  for (const [key, label] of [["rolling5h", "5h"], ["weekly", "weekly"], ["monthly", "monthly"]] as const) {
+    const w = data?.[key];
+    if (!w) continue;
+    const used = Number(w.usageDollars);
+    const limit = Number(w.limitDollars);
+    if (!Number.isFinite(used) || !Number.isFinite(limit)) continue;
+    const resetInSec = Number(w.resetInSec);
+    windows.push({
+      period: label,
+      used,
+      limit,
+      unit: "dollars",
+      resetAt: Number.isFinite(resetInSec) && resetInSec > 0 ? new Date(Date.now() + resetInSec * 1000) : undefined,
+    });
+  }
+  return windows;
+}
+
 // ── Registry of built-in definitions ──────────────────────────────────────
 
 export interface BuiltinContext {
@@ -253,6 +275,13 @@ export const BUILTIN_PROVIDERS: BuiltinDef[] = [
     build: ({ apiKey }) => ({
       kind: "balance", id: "deepseek", name: "DeepSeek", source: "api",
       fetchBalance: () => deepseekBalance(apiKey),
+    }),
+  },
+  {
+    id: "opencode-go",
+    build: ({ apiKey }) => ({
+      kind: "quota", id: "opencode-go", name: "OpenCode Go", source: "api",
+      fetchUsage: () => opencodeGoUsage(apiKey),
     }),
   },
 ];

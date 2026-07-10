@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-ask-user",
-  "version": "2.1.3",
+  "version": "2.1.4",
   "type": "module",
   "description": "Ask-user tool for pi — renders in the bottom editor slot (not a screen overlay), so the transcript stays visible and scrollable above the panel while you decide",
   "main": "src/index.ts",

@@ -49,26 +49,33 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
       try {
         rolesApi = getModelRolesAPI();
       } catch {
-        console.warn("[pi-session-namer] pi-model-roles not initialized — skipping");
+        // model-roles missing is a config error scout will flag — skip silently
         return;
       }
 
       if (!rolesApi.resolveRole(config.sideAgentRole).model) {
-        console.warn(
-          `[pi-session-namer] Side agent role "${config.sideAgentRole}" not available — skipping`,
-        );
         return;
       }
 
-      const name = await generateSessionName(
-        rolesApi,
-        config.sideAgentRole,
-        config,
-        event.prompt,
-      );
+      try {
+        const name = await generateSessionName(
+          rolesApi,
+          config.sideAgentRole,
+          config,
+          event.prompt,
+        );
 
-      pi.setSessionName(name);
-    })().catch((err) => console.warn("[pi-session-namer] naming failed:", err));
+        pi.setSessionName(name);
+      } catch {
+        // Side agent failed (often a timeout on the cheap utility model) —
+        // fall back to a truncated prompt title and surface it in the TUI.
+        const fallback = event.prompt.slice(0, config.maxLength).replace(/\n/g, " ").trim();
+        pi.setSessionName(fallback || "New session");
+        ctx.ui.notify("Session naming failed — using fallback title.", "warning");
+      }
+    })().catch(() => {
+      ctx.ui.notify("Session naming encountered an error.", "warning");
+    });
   });
 
   // ── /namer — show status ────────────────────────────────────────

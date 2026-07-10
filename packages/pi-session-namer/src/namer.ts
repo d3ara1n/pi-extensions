@@ -39,31 +39,25 @@ export async function generateSessionName(
   // Truncate very long prompts to avoid wasting tokens
   const truncatedPrompt = userPrompt.length > 2000 ? userPrompt.slice(0, 2000) + "..." : userPrompt;
 
-  try {
-    const result = await rolesApi.complete(
-      roleName,
-      {
-        systemPrompt,
-        messages: [{ role: "user", content: truncatedPrompt, timestamp: Date.now() }],
-      },
-      // No maxTokens: cost is controlled by the role's thinking level.
-      // The namer side-agent role (utility, thinking:off) skips reasoning,
-      // so a short title needs only ~dozens of tokens.
-    );
+  const result = await rolesApi.complete(
+    roleName,
+    {
+      systemPrompt,
+      messages: [{ role: "user", content: truncatedPrompt, timestamp: Date.now() }],
+    },
+    // No maxTokens: cost is controlled by the role's thinking level.
+    // The namer side-agent role (utility, thinking:off) skips reasoning,
+    // so a short title needs only ~dozens of tokens.
+  );
 
-    const raw =
-      result.content
-        ?.filter((block: any) => block.type === "text")
-        ?.map((block: any) => block.text)
-        ?.join("")
-        ?.trim() ?? "";
+  const raw =
+    result.content
+      ?.filter((block: any) => block.type === "text")
+      ?.map((block: any) => block.text)
+      ?.join("")
+      ?.trim() ?? "";
 
-    return cleanSessionName(raw, config.maxLength);
-  } catch (err) {
-    console.warn("[pi-session-namer] Side agent call failed:", err);
-    // Fallback: truncate user prompt as name
-    return userPrompt.slice(0, config.maxLength).replace(/\n/g, " ").trim();
-  }
+  return cleanSessionName(raw, config.maxLength);
 }
 
 /**

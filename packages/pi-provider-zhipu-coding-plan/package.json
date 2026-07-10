@@ -9,7 +9,7 @@
   ],
   "main": "src/index.ts",
   "dependencies": {
-    "@d3ara1n/pi-usage-block-core": "^2.0.0"
+    "@d3ara1n/pi-usage-block-core": "^3.0.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"

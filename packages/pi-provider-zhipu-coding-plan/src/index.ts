@@ -4,14 +4,11 @@
  * Registers "zhipu-coding" provider with static model list
  * and usage quota reporting via the shared UsageRegistry.
  *
- * Auth: API key stored in ~/.pi/agent/auth.json under "zhipu-coding"
+ * Auth: API key resolved via modelRegistry.getApiKeyForProvider.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { usageRegistry } from "@d3ara1n/pi-usage-block-core";
-import type { UsageProvider, UsageWindow } from "@d3ara1n/pi-usage-block-core";
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
+import type { QuotaProvider, QuotaWindow } from "@d3ara1n/pi-usage-block-core";
 
 // ── Config ────────────────────────────────────────────────────────────────
 
@@ -79,18 +76,6 @@ const KNOWN_MODELS: Record<string, Partial<ModelMeta>> = {
 
 // ── API helpers ───────────────────────────────────────────────────────────
 
-function resolveApiKey(): string | undefined {
-  try {
-    const piHome = process.env.PI_HOME ?? path.join(os.homedir(), ".pi");
-    const authPath = path.join(piHome, "agent", "auth.json");
-    if (!fs.existsSync(authPath)) return undefined;
-    const auth = JSON.parse(fs.readFileSync(authPath, "utf8"));
-    return auth[PROVIDER_ID]?.apiKey ?? auth[PROVIDER_ID]?.key;
-  } catch {
-    return undefined;
-  }
-}
-
 async function fetchQuota(apiKey: string): Promise<QuotaResponse | null> {
   try {
     const res = await fetch(QUOTA_API_URL, {
@@ -129,13 +114,19 @@ const MODELS = Object.keys(KNOWN_MODELS).map(buildModelConfig);
 
 // ── Usage provider ────────────────────────────────────────────────────────
 
-function createUsageProvider(): UsageProvider {
+/** Resolved on session_start; getApiKeyForProvider reads auth.json/env/models.json. */
+let modelRegistry: any;
+
+function createUsageProvider(): QuotaProvider {
   return {
+    kind: "quota",
     id: PROVIDER_ID,
     name: "Zhipu Coding",
     source: "api",
-    async fetchUsage(): Promise<UsageWindow[]> {
-      const apiKey = resolveApiKey();
+    async fetchUsage(): Promise<QuotaWindow[]> {
+      if (!modelRegistry) return [];
+      let apiKey: string | undefined;
+      try { apiKey = await modelRegistry.getApiKeyForProvider(PROVIDER_ID); } catch { /* not configured */ }
       if (!apiKey) return [];
 
       const quota = await fetchQuota(apiKey);
@@ -177,4 +168,8 @@ export default async function (pi: ExtensionAPI) {
   });
 
   usageRegistry.register(createUsageProvider());
+
+  pi.on("session_start", (_e, c) => {
+    modelRegistry = (c as any).modelRegistry;
+  });
 }

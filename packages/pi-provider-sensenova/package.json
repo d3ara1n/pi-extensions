@@ -1,0 +1,25 @@
+{
+  "name": "@d3ara1n/pi-provider-sensenova",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "SenseNova (商汤日日新) provider for pi — registers sensenova-6.7-flash-lite model via OpenAI-compatible API",
+  "keywords": [
+    "pi-package",
+    "pi"
+  ],
+  "main": "src/index.ts",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/d3ara1n/pi-extensions",
+    "directory": "packages/pi-provider-sensenova"
+  }
+}

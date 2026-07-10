@@ -18,9 +18,11 @@ pi install npm:@d3ara1n/pi-command-palette
 
 Or add to `~/.pi/agent/settings.json`:
 
-```json
+```jsonc
 {
-  "extensions": ["/path/to/pi-command-palette"]
+  "extensions": [
+    "/absolute/path/to/pi-extensions/packages/pi-command-palette"
+  ]
 }
 ```
 

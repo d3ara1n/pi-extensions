@@ -54,7 +54,19 @@ This means:
 ## Installation
 
 ```bash
-pi install @d3ara1n/pi-subagent
+pi install npm:@d3ara1n/pi-model-roles
+pi install npm:@d3ara1n/pi-subagent
+```
+
+Or add to `~/.pi/agent/settings.json`:
+
+```jsonc
+{
+  "extensions": [
+    "/absolute/path/to/pi-extensions/packages/pi-model-roles",
+    "/absolute/path/to/pi-extensions/packages/pi-subagent"
+  ]
+}
 ```
 
 ## Configuration

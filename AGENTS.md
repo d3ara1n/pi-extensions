@@ -160,6 +160,30 @@ const roles: ModelRolesAPI = getModelRolesAPI();  // 完整类型推导
 
 只列 pi 插件依赖，不列框架级依赖（`pi-ai`、`pi-coding-agent`、`pi-tui` 等随 pi 附带的包）。
 
+**Installation 章节格式固定：**
+
+```markdown
+## Installation
+
+```bash
+pi install npm:@d3ara1n/pi-xxx
+```
+
+Or add to `~/.pi/agent/settings.json`:
+
+```jsonc
+{
+  "extensions": [
+    "/absolute/path/to/pi-extensions/packages/pi-xxx"
+  ]
+}
+```
+```
+
+- **依赖插件必须显式列出所有依赖的安装命令**：`pi install` 不会自动安装依赖。如果插件 A 依赖插件 B，README 的 Installation 里必须同时列出 A 和 B 的安装命令。如果 B 还依赖了 C，那么 C 的安装命令也需要包含。此时 A 的安装命令就包含了 C/B/A。
+- **纯库**：README 里写自己的安装命令，但依赖它的插件必须显式声明先装依赖库
+- **可选依赖**：如果依赖是可选的，主包安装命令只写自己，可选依赖单独用文字说明
+
 ### Provider 开发
 
 写新的 pi provider（`pi-provider-xxx`）时，遵循 PROVIDER.md 的验证方法论——不盲写配置，每个 compat 维度必须实测确认。

@@ -17,6 +17,16 @@ None.
 pi install npm:@d3ara1n/pi-provider-zhipu-coding-plan
 ```
 
+Or add to `~/.pi/agent/settings.json`:
+
+```jsonc
+{
+  "extensions": [
+    "/absolute/path/to/pi-extensions/packages/pi-provider-zhipu-coding-plan"
+  ]
+}
+```
+
 Also install the status bar display if you want quota visibility:
 
 ```bash

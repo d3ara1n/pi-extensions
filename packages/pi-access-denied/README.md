@@ -37,17 +37,21 @@ None.
 
 ## Installation
 
-Add the package path to the `extensions` array in `~/.pi/agent/settings.json`:
+```bash
+pi install npm:@d3ara1n/pi-access-denied
+```
+
+Or add to `~/.pi/agent/settings.json`:
 
 ```jsonc
 {
   "extensions": [
-    "/absolute/path/to/pi-access-denied"
+    "/absolute/path/to/pi-extensions/packages/pi-access-denied"
   ]
 }
 ```
 
-Then `/reload` (or restart pi). The status bar will show something like `🔐 access:prompt`.
+Then `/reload` (or restart pi).
 
 ## Configuration
 

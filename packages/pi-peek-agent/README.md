@@ -29,10 +29,22 @@ Ask another instance a question without disturbing its main conversation.
 ## Installation
 
 ```bash
+pi install npm:@d3ara1n/pi-model-roles
+pi install npm:@d3ara1n/pi-peek
 pi install npm:@d3ara1n/pi-peek-agent
 ```
 
-Requires [`@d3ara1n/pi-peek`](../pi-peek) (consult core) to be installed alongside.
+Or add to `~/.pi/agent/settings.json`:
+
+```jsonc
+{
+  "extensions": [
+    "/absolute/path/to/pi-extensions/packages/pi-model-roles",
+    "/absolute/path/to/pi-extensions/packages/pi-peek",
+    "/absolute/path/to/pi-extensions/packages/pi-peek-agent"
+  ]
+}
+```
 
 ## Dependencies
 

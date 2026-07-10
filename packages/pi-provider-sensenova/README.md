@@ -23,12 +23,16 @@ SenseNova (商汤日日新) provider for [Pi Coding Agent](https://pi.dev) — r
 
 ## Installation
 
-Add the extension path to `~/.pi/agent/settings.json`:
+```bash
+pi install npm:@d3ara1n/pi-provider-sensenova
+```
+
+Or add to `~/.pi/agent/settings.json`:
 
 ```jsonc
 {
   "extensions": [
-    "/path/to/pi-extensions/packages/pi-provider-sensenova"
+    "/absolute/path/to/pi-extensions/packages/pi-provider-sensenova"
   ]
 }
 ```

@@ -33,8 +33,21 @@ Opens a centered overlay that serializes the current conversation and streams an
 ## Installation
 
 ```bash
-pi install npm:@d3ara1n/pi-peek           # consult core
-pi install npm:@d3ara1n/pi-peek-user      # local /peek overlay
+pi install npm:@d3ara1n/pi-model-roles
+pi install npm:@d3ara1n/pi-peek
+pi install npm:@d3ara1n/pi-peek-user
+```
+
+Or add to `~/.pi/agent/settings.json`:
+
+```jsonc
+{
+  "extensions": [
+    "/absolute/path/to/pi-extensions/packages/pi-model-roles",
+    "/absolute/path/to/pi-extensions/packages/pi-peek",
+    "/absolute/path/to/pi-extensions/packages/pi-peek-user"
+  ]
+}
 ```
 
 ## Dependencies

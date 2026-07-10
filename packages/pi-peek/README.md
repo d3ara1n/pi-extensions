@@ -13,11 +13,8 @@ Core capability library for [pi](https://github.com/earendil-works/pi) — seria
 
 ## Installation
 
-Install alongside the consumer that needs it:
-
 ```bash
-pi install npm:@d3ara1n/pi-peek-user    # local /peek overlay
-pi install npm:@d3ara1n/pi-peek-agent    # cross-instance peek
+pi install npm:@d3ara1n/pi-peek
 ```
 
 ## Dependencies

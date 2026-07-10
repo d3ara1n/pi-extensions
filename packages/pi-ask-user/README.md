@@ -251,12 +251,16 @@ None.
 
 ## Installation
 
-Add to `~/.pi/agent/settings.json`:
+```bash
+pi install npm:@d3ara1n/pi-ask-user
+```
+
+Or add to `~/.pi/agent/settings.json`:
 
 ```jsonc
 {
   "extensions": [
-    "/path/to/pi-extensions/packages/pi-ask-user"
+    "/absolute/path/to/pi-extensions/packages/pi-ask-user"
   ]
 }
 ```

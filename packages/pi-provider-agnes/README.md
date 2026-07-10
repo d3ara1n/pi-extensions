@@ -28,12 +28,16 @@ Both providers export the same text models:
 
 ## Installation
 
-Add the extension path to `~/.pi/agent/settings.json`:
+```bash
+pi install npm:@d3ara1n/pi-provider-agnes
+```
+
+Or add to `~/.pi/agent/settings.json`:
 
 ```jsonc
 {
   "extensions": [
-    "/path/to/pi-extensions/packages/pi-provider-agnes"
+    "/absolute/path/to/pi-extensions/packages/pi-provider-agnes"
   ]
 }
 ```

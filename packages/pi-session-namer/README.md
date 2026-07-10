@@ -51,12 +51,18 @@ Project-level `.pi/settings.json` overrides global settings.
 
 ## Installation
 
-Add to `~/.pi/agent/settings.json`:
+```bash
+pi install npm:@d3ara1n/pi-model-roles
+pi install npm:@d3ara1n/pi-session-namer
+```
+
+Or add to `~/.pi/agent/settings.json`:
 
 ```jsonc
 {
   "extensions": [
-    "/path/to/pi-extensions/packages/pi-session-namer"
+    "/absolute/path/to/pi-extensions/packages/pi-model-roles",
+    "/absolute/path/to/pi-extensions/packages/pi-session-namer"
   ]
 }
 ```

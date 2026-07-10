@@ -20,6 +20,16 @@ Only shows usage when the active model's provider has a matching usage provider 
 pi install npm:@d3ara1n/pi-usage-block
 ```
 
+Or add to `~/.pi/agent/settings.json`:
+
+```jsonc
+{
+  "extensions": [
+    "/absolute/path/to/pi-extensions/packages/pi-usage-block"
+  ]
+}
+```
+
 Works out of the box for the bundled providers below. For other providers, install a matching usage provider plugin (e.g. `@d3ara1n/pi-provider-zhipu-coding-plan`).
 
 ## Bundled providers

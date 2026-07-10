@@ -37,7 +37,11 @@ The default pi editor only draws a horizontal line above and below the input are
 
 ## Installation
 
-Add the package directory to the `extensions` array in `~/.pi/agent/settings.json`:
+```bash
+pi install npm:@d3ara1n/pi-editor-shell
+```
+
+Or add to `~/.pi/agent/settings.json`:
 
 ```jsonc
 {
@@ -46,8 +50,6 @@ Add the package directory to the `extensions` array in `~/.pi/agent/settings.jso
   ]
 }
 ```
-
-Then run `/reload` or restart pi.
 
 ## Caveats
 

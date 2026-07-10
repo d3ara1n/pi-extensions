@@ -69,7 +69,19 @@ before_agent_start hook fires
 ## Installation
 
 ```bash
-pi extension add @d3ara1n/pi-scout
+pi install npm:@d3ara1n/pi-model-roles
+pi install npm:@d3ara1n/pi-scout
+```
+
+Or add to `~/.pi/agent/settings.json`:
+
+```jsonc
+{
+  "extensions": [
+    "/absolute/path/to/pi-extensions/packages/pi-model-roles",
+    "/absolute/path/to/pi-extensions/packages/pi-scout"
+  ]
+}
 ```
 
 ## Configuration

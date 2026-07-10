@@ -18,7 +18,17 @@ None.
 ## Installation
 
 ```bash
-pi extension add @d3ara1n/pi-model-roles
+pi install npm:@d3ara1n/pi-model-roles
+```
+
+Or add to `~/.pi/agent/settings.json`:
+
+```jsonc
+{
+  "extensions": [
+    "/absolute/path/to/pi-extensions/packages/pi-model-roles"
+  ]
+}
 ```
 
 ## Default Roles

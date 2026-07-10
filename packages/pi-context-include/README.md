@@ -19,6 +19,16 @@
 pi install npm:@d3ara1n/pi-context-include
 ```
 
+Or add to `~/.pi/agent/settings.json`:
+
+```jsonc
+{
+  "extensions": [
+    "/absolute/path/to/pi-extensions/packages/pi-context-include"
+  ]
+}
+```
+
 ## Dependencies
 
 None.

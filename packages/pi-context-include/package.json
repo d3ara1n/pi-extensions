@@ -5,7 +5,8 @@
   "description": "@path syntax for AGENTS.md — include files by reference with recursive resolution",
   "keywords": [
     "pi-package",
-    "pi"
+    "pi",
+    "pi-extension"
   ],
   "main": "src/index.ts",
   "peerDependencies": {

@@ -5,7 +5,8 @@
   "description": "Replaces pi's default editor and status bar with a unified rounded-corner shell — no Nerd Font required",
   "keywords": [
     "pi-package",
-    "pi"
+    "pi",
+    "pi-extension"
   ],
   "main": "src/index.ts",
   "peerDependencies": {

@@ -6,7 +6,8 @@
   "main": "src/index.ts",
   "keywords": [
     "pi-package",
-    "pi"
+    "pi",
+    "pi-extension"
   ],
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

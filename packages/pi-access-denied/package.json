@@ -5,7 +5,8 @@
   "description": "Sandbox write/edit/bash to the project dir — prompt / deny / allow modes, configurable deny-with-redirect rules, per-session allow-deny memory",
   "keywords": [
     "pi-package",
-    "pi"
+    "pi",
+    "pi-extension"
   ],
   "main": "src/index.ts",
   "scripts": {

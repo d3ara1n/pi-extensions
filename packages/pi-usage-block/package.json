@@ -5,7 +5,8 @@
   "description": "Usage quota status bar block for pi — polls registered UsageProviders and displays in powerline",
   "keywords": [
     "pi-package",
-    "pi"
+    "pi",
+    "pi-extension"
   ],
   "main": "src/index.ts",
   "dependencies": {

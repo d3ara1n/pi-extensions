@@ -5,7 +5,8 @@
   "description": "Agnes AI provider for pi — registers agnes (token billing) and agnes-plan (subscription) providers with text models",
   "keywords": [
     "pi-package",
-    "pi"
+    "pi",
+    "pi-extension"
   ],
   "main": "src/index.ts",
   "peerDependencies": {

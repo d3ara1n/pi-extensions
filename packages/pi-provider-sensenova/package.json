@@ -5,7 +5,8 @@
   "description": "SenseNova (商汤日日新) provider for pi — registers sensenova-6.7-flash-lite model via OpenAI-compatible API",
   "keywords": [
     "pi-package",
-    "pi"
+    "pi",
+    "pi-extension"
   ],
   "main": "src/index.ts",
   "peerDependencies": {

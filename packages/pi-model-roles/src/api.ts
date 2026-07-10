@@ -209,6 +209,7 @@ export function initModelRolesAPI(
 
   // Store on globalThis — survives module identity mismatches
   (globalThis as any)[GLOBAL_KEY] = api;
+  (api as any).__state = state;
   return api;
 }
 

@@ -27,6 +27,4 @@ jobs:
       - name: Detect changes and publish
         run: node .github/scripts/auto-publish.mjs
 
-      - name: Push tags and version commits
-        run: git push && git push --tags
-        if: always()
+

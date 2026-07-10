@@ -53,6 +53,62 @@ function parseCommit(message) {
   };
 }
 
+// ── Spinlock ──────────────────────────────────────────
+
+/**
+ * Block until no other publish workflow is in progress.
+ * Uses the GitHub Actions API to avoid concurrent runs clashing.
+ */
+async function waitForOtherPublishRuns() {
+  const token = process.env.GITHUB_TOKEN;
+  const repo = process.env.GITHUB_REPOSITORY;
+  const runId = process.env.GITHUB_RUN_ID;
+
+  if (!token || !repo || !runId) {
+    log("⚠ Skipping spinlock — missing GITHUB_* env vars");
+    return;
+  }
+
+  const apiUrl = `https://api.github.com/repos/${repo}/actions/runs?status=in_progress&per_page=100`;
+  const MAX_WAIT_MS = 5 * 60 * 1000; // 5 minutes
+  const POLL_INTERVAL_MS = 5000;
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < MAX_WAIT_MS) {
+    const response = await fetch(apiUrl, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    });
+
+    if (!response.ok) {
+      log(`⚠ Spinlock API error ${response.status}, proceeding`);
+      return;
+    }
+
+    const data = await response.json();
+    const thisWorkflow = process.env.GITHUB_WORKFLOW || "Publish";
+    const others = data.workflow_runs.filter(
+      r =>
+        r.id !== Number(runId) &&
+        r.status === "in_progress" &&
+        r.name === thisWorkflow
+    );
+
+    if (others.length === 0) {
+      log("🔓 No other publish runs, proceeding");
+      return;
+    }
+
+    log(`🔒 ${others.length} other publish run(s) active, waiting ${POLL_INTERVAL_MS / 1000}s...`);
+    await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+  }
+
+  log("⚠ Spinlock timeout, proceeding");
+}
+
 // ── Discover packages ───────────────────────────────────
 
 const rootDir = resolve(import.meta.dirname, "../..");
@@ -60,6 +116,8 @@ const packagesDir = join(rootDir, "packages");
 const packageDirs = readdirSync(packagesDir, { withFileTypes: true })
   .filter(d => d.isDirectory())
   .map(d => d.name);
+
+await waitForOtherPublishRuns();
 
 console.log(`Scanning ${packageDirs.length} package(s)...\n`);
 
@@ -202,6 +260,9 @@ if (failed > 0) {
 }
 
 if (published > 0) {
+  // Fetch + rebase to avoid rejected push when remote moved ahead.
+  run("git fetch origin main");
+  run("git rebase origin/main");
   // Push version bump commits + all tags (lightweight tags aren't picked up by --follow-tags)
   run("git push");
   run("git push --tags");

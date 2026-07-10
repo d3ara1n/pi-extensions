@@ -1,7 +1,36 @@
 /**
- * A single usage window (e.g. 5h quota, weekly quota).
+ * Shared data model + registry for usage/quota/balance providers.
+ *
+ * A provider registers as one of two kinds, discriminated by `kind`:
+ * - **quota**:   usage consumed within a time window (e.g. 5h tokens quota).
+ *                Returns one {@link QuotaWindow} per window; has a natural
+ *                denominator (limit) so the display shows a percentage.
+ * - **balance**: absolute remaining amount on an account (e.g. prepaid $32.50).
+ *                No window, no reset — just an amount + currency.
+ *
+ * Each kind obtains its data one of two ways, set by `source` (orthogonal to
+ * `kind` — any combination is valid):
+ * - **api**:     `fetchUsage()` / `fetchBalance()` is polled periodically.
+ * - **headers**: `parseHeaders()` is called on every provider response.
+ *
+ * Both kinds share an `id` that must match the pi provider key, so the status
+ * bar can look up the right data for the currently active provider.
  */
-export interface UsageWindow {
+
+/** Unit of measurement, shared by quota windows and balances. */
+export type UsageUnit = "requests" | "tokens" | "dollars";
+
+/** Response headers passed to `parseHeaders` (names are lower-cased). */
+export type Headers = Record<string, string>;
+
+/**
+ * A single quota window (e.g. 5h tokens quota, weekly quota).
+ *
+ * Used by {@link QuotaProvider} of kind `"quota"`. `used` is always the
+ * **consumed** amount — if a data source reports remaining, the provider
+ * converts it (e.g. `used = limit - remaining`) before returning.
+ */
+export interface QuotaWindow {
   /** Time window label */
   period: string;
   /** Amount consumed (or percentage if limit=100) */
@@ -9,63 +38,78 @@ export interface UsageWindow {
   /** Maximum allowed (use 100 for percentage-only data) */
   limit: number;
   /** Unit of measurement */
-  unit: "requests" | "tokens" | "dollars";
+  unit: UsageUnit;
   /** When the quota resets; omit if unknown */
   resetAt?: Date;
 }
 
 /**
- * Header mapping for reading usage from response headers (source: "headers").
- * Maps header name → UsageWindow field.
+ * A prepaid balance on an account — an absolute remaining amount with no
+ * time window and no automatic reset (it only changes when consumed or
+ * topped up).
  *
- * Supported field keys: "used", "limit", "period", "unit", "resetAt"
- * - "used" and "limit" are parsed as numbers
- * - "unit" should be "requests" | "tokens" | "dollars"
- * - "resetAt" is parsed as epoch-seconds or ISO 8601
- * - "period" is a free-text label
- *
- * Example:
- *   { "x-ratelimit-remaining-tokens": "used",
- *     "x-ratelimit-limit-tokens": "limit",
- *     "x-ratelimit-reset-requests": "resetAt" }
+ * Used by {@link BalanceProvider} of kind `"balance"`.
  */
-export interface HeaderMapping {
-  [headerName: string]: "used" | "limit" | "period" | "unit" | "resetAt";
+export interface BalanceInfo {
+  /** Remaining amount (e.g. 32.5) */
+  amount: number;
+  /** ISO 4217 currency code, e.g. "USD", "CNY". Drives symbol + thresholds in the display. */
+  currency: string;
 }
 
 /**
- * A usage provider registered by a provider plugin.
- *
- * Two modes are supported:
- * - **api**: `fetchUsage()` is called periodically by pi-usage-block.
- * - **headers**: usage is extracted from HTTP response headers.
- *   pi-usage-block listens to `after_provider_response` and applies `headerMapping`.
- *   No code required — just declare the mapping.
+ * A quota provider — usage consumed within time windows.
  */
-export interface UsageProvider {
+export interface QuotaProvider {
+  /** Discriminator — always `"quota"`. */
+  kind: "quota";
   /** Unique identifier — must match the pi provider key, e.g. "zhipu-coding" */
   id: string;
   /** Display name, e.g. "Zhipu Coding Plan" */
   name: string;
-  /**
-   * Data source type.
-   * - "api": fetch usage via an external API (requires `fetchUsage`)
-   * - "headers": read usage from per-response HTTP headers (requires `headerMapping`)
-   */
+  /** How usage is obtained. */
   source: "api" | "headers";
   /**
-   * [source="api"] Fetch current usage windows.
-   * Called periodically by pi-usage-block.
-   * Return empty array if unavailable (provider is treated as offline).
+   * [source="api"] Fetch current quota windows. Called periodically by
+   * pi-usage-block. Return empty array if unavailable (treated as offline).
    */
-  fetchUsage?(): Promise<UsageWindow[]>;
+  fetchUsage?(): Promise<QuotaWindow[]>;
   /**
-   * [source="headers"] Map response header names to UsageWindow fields.
-   * pi-usage-block reads `after_provider_response` event headers,
-   * builds a single UsageWindow from the mapping.
+   * [source="headers"] Parse quota windows from a provider response's headers.
+   * Called by pi-usage-block on every `after_provider_response`. Return null
+   * when the response carries no usable data (the previous value is kept).
+   * Header names are lower-cased.
    */
-  headerMapping?: HeaderMapping;
+  parseHeaders?(headers: Headers): QuotaWindow[] | null;
 }
+
+/**
+ * A balance provider — an absolute prepaid balance.
+ */
+export interface BalanceProvider {
+  /** Discriminator — always `"balance"`. */
+  kind: "balance";
+  /** Unique identifier — must match the pi provider key */
+  id: string;
+  /** Display name */
+  name: string;
+  /** How the balance is obtained. */
+  source: "api" | "headers";
+  /**
+   * [source="api"] Fetch the current balance. Called periodically by
+   * pi-usage-block. Throw if unavailable (treated as offline; last value kept).
+   */
+  fetchBalance?(): Promise<BalanceInfo>;
+  /**
+   * [source="headers"] Parse the balance from a provider response's headers.
+   * Called by pi-usage-block on every `after_provider_response`. Return null
+   * when the response carries no usable data. Header names are lower-cased.
+   */
+  parseHeaders?(headers: Headers): BalanceInfo | null;
+}
+
+/** Any usage provider — discriminated by `kind`. */
+export type UsageProvider = QuotaProvider | BalanceProvider;
 
 /**
  * Global singleton registry for usage providers.
@@ -101,46 +145,6 @@ export class UsageRegistry {
   get size(): number {
     return this.providers.size;
   }
-}
-
-/** Helper: parse a UsageWindow from response headers using a HeaderMapping. */
-export function parseHeaderUsage(
-  headers: Record<string, string>,
-  mapping: HeaderMapping,
-): UsageWindow | null {
-  const fields: Partial<UsageWindow> = {};
-  for (const [headerName, fieldKey] of Object.entries(mapping)) {
-    const value = headers[headerName] ?? headers[headerName.toLowerCase()];
-    if (value === undefined) continue;
-    switch (fieldKey) {
-      case "used":
-      case "limit":
-        fields[fieldKey] = Number(value);
-        break;
-      case "period":
-        fields.period = value;
-        break;
-      case "unit":
-        if (value === "requests" || value === "tokens" || value === "dollars") {
-          fields.unit = value;
-        }
-        break;
-      case "resetAt": {
-        const n = Number(value);
-        fields.resetAt = new Date(Number.isFinite(n) && n > 1e12 ? n : n * 1000);
-        break;
-      }
-    }
-  }
-  // Must have at least used and limit, or percentage
-  if (fields.used === undefined && fields.limit === undefined) return null;
-  return {
-    period: fields.period ?? "",
-    used: fields.used ?? 0,
-    limit: fields.limit ?? 100,
-    unit: fields.unit ?? "tokens",
-    resetAt: fields.resetAt,
-  };
 }
 
 /** Module-level singleton — shared via globalThis to survive jiti module dedup issues. */

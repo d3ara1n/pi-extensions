@@ -1,6 +1,6 @@
 # @d3ara1n/pi-usage-block
 
-Usage status bar block for [Pi Coding Agent](https://pi.dev) — displays usage for the **currently active** pi provider in the powerline.
+Usage status bar block for [Pi Coding Agent](https://pi.dev) — displays usage for the **currently active** pi provider in the [powerline-footer](https://pi.dev/packages/pi-powerline-footer) custom items system.
 
 Supports two provider kinds (see [`@d3ara1n/pi-usage-block-core`](../pi-usage-block-core)):
 
@@ -42,7 +42,7 @@ The following pi providers are supported out of the box — no extra plugin need
 
 ### Powerline item
 
-Add to your `settings.json` under `powerline.customItems`:
+Add to your `settings.json` under `powerline.customItems` (see [`pi-powerline-footer`](https://pi.dev/packages/pi-powerline-footer) for the full custom item schema):
 
 ```json
 {
@@ -57,6 +57,20 @@ Add to your `settings.json` under `powerline.customItems`:
   }
 }
 ```
+
+### Editor Shell integration
+
+If you use [`pi-editor-shell`](https://pi.dev/packages/@d3ara1n/pi-editor-shell) to replace the default editor frame, you can pin the usage status to the shell's top-right corner via `editorShell.pinnedStatus`:
+
+```json
+{
+  "editorShell": {
+    "pinnedStatus": ["usage-block"]
+  }
+}
+```
+
+Pinned status keys are read from the shell's top-right corner on every paint, so usage updates appear in real-time alongside other pinned extensions.
 
 ### Refresh interval (polled providers only)
 

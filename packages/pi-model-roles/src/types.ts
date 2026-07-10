@@ -109,22 +109,23 @@ export interface ModelRolesAPI {
   listModels(): string[];
 
   /**
-   * Call pi-ai's complete() with auth resolved internally from the role's model.
+   * Call pi-ai's completeSimple() with auth and thinking resolved from the role.
    *
-   * Auth (including OAuth token refresh) is resolved for the model actually
-   * used, so callers never handle API keys or headers. The role's
-   * {@link RoleConfig.thinking} level is applied as `reasoningEffort` unless
-   * the caller sets it explicitly. No fallback, no retry, no error swallowing;
-   * throws if the role has no available model or auth resolution fails.
+   * Convenience: same as streamWithRole().result(). Auth (including OAuth
+   * token refresh) is resolved for the model actually used, so callers never
+   * handle API keys or headers. The role's {@link RoleConfig.thinking} level
+   * is applied as `reasoning` unless the caller sets it explicitly.
+   * No fallback, no retry, no error swallowing; throws if the role has no
+   * available model or auth resolution fails.
    *
    * @param roleName - Role whose model + auth + thinking to use
    * @param context - Conversation context (systemPrompt + messages)
-   * @param options - Stream options forwarded to pi-ai's complete(). Pass
-   *   `model` to override the role's model (auth is then resolved for that
-   *   model); pass `reasoningEffort` to override the role's thinking level;
+   * @param options - Stream options forwarded to pi-ai's completeSimple().
+   *   Pass `model` to override the role's model (auth is then resolved for
+   *   that model); pass `reasoning` to override the role's thinking level;
    *   all other fields pass through unchanged.
    */
-  complete<TApi extends Api = Api>(
+  completeWithRole<TApi extends Api = Api>(
     roleName: string,
     context: Context,
     options?: ProviderStreamOptions & { model?: Model<TApi> },
@@ -133,7 +134,7 @@ export interface ModelRolesAPI {
   /**
    * Call pi-ai's streamSimple() with auth resolved internally from the role's model.
    *
-   * Streaming counterpart to {@link complete}. Same auth resolution (including
+   * Streaming counterpart to {@link completeWithRole}. Same auth resolution (including
    * OAuth token refresh), same thinking-level application (role's
    * {@link RoleConfig.thinking} → `reasoning` unless overridden), and same
    * error semantics (throws on no model / auth failure). Returns the pi-ai

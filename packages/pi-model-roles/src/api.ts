@@ -6,7 +6,10 @@
  * Exported functions provide type-safe access — consumers never touch globalThis.
  */
 
-import { complete as piAiComplete, streamSimple as piAiStreamSimple } from "@earendil-works/pi-ai";
+import {
+  completeSimple as piAiCompleteSimple,
+  streamSimple as piAiStreamSimple,
+} from "@earendil-works/pi-ai";
 import type { ModelRolesAPI, ModelRolesConfig, RoleConfig, ResolvedRole } from "./types.ts";
 import { loadRolesConfig } from "./config.ts";
 import { resolveModelForRole, resolveModelForRoleAsync } from "./resolver.ts";
@@ -149,7 +152,7 @@ export function initModelRolesAPI(
         .map((m: { provider: string; id: string }) => `${m.provider}/${m.id}`);
     },
 
-    async complete(roleName: string, context: any, options?: any): Promise<any> {
+    async completeWithRole(roleName: string, context: any, options?: any): Promise<any> {
       // Resolve model: explicit override wins, else the role's declared model
       // (model=null transparently uses pi's current model).
       const roleConfig = getConfig().roles[roleName] ?? { model: null };
@@ -164,15 +167,17 @@ export function initModelRolesAPI(
       if (!auth.ok) {
         throw new Error(`complete: auth failed for ${model.provider}/${model.id}: ${auth.error}`);
       }
-      // Forward everything except `model` to pi-ai's complete().
+      // Forward everything except `model` to pi-ai's completeSimple().
+      // completeSimple goes through streamSimpleOpenAICompletions which
+      // properly clamps thinking levels ("off" → undefined → disabled).
       const { model: _omitModel, ...streamOptions } = options ?? {};
       if (auth.apiKey) streamOptions.apiKey = auth.apiKey;
       if (auth.headers) streamOptions.headers = auth.headers;
-      // Apply the role's thinking level unless the caller explicitly overrides it.
-      if (roleConfig.thinking && streamOptions.reasoningEffort === undefined) {
-        streamOptions.reasoningEffort = roleConfig.thinking;
+      // Map role.thinking → options.reasoning (streamSimple field name).
+      if (roleConfig.thinking && streamOptions.reasoning === undefined) {
+        streamOptions.reasoning = roleConfig.thinking;
       }
-      return piAiComplete(model, context, streamOptions);
+      return piAiCompleteSimple(model, context, streamOptions);
     },
 
     async streamWithRole(roleName: string, context: any, options?: any): Promise<any> {
@@ -193,6 +198,8 @@ export function initModelRolesAPI(
       if (auth.apiKey) streamOptions.apiKey = auth.apiKey;
       if (auth.headers) streamOptions.headers = auth.headers;
       // Apply the role's thinking level unless the caller explicitly overrides it.
+      // streamSimpleOpenAICompletions handles "off" correctly (converts to
+      // undefined → disabled), so all levels pass through as-is.
       if (roleConfig.thinking && streamOptions.reasoning === undefined) {
         streamOptions.reasoning = roleConfig.thinking;
       }

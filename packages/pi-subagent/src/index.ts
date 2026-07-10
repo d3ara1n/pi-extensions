@@ -124,7 +124,7 @@ async function compressOutput(
         input.slice(-half);
     }
 
-    const result = await rolesApi.complete(
+    const result = await rolesApi.completeWithRole(
       summaryConfig.role,
       {
         systemPrompt:
@@ -186,7 +186,7 @@ async function generateSummary(
         summaryInput.slice(-half);
     }
 
-    const result = await rolesApi.complete(
+    const result = await rolesApi.completeWithRole(
       summaryConfig.role,
       {
         systemPrompt:

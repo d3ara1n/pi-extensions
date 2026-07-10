@@ -59,7 +59,7 @@ export async function callSideAgent(
   // so a timeout actually cancels the HTTP request instead of orphaning it.
   const signal = AbortSignal.timeout(SIDE_AGENT_TIMEOUT_MS);
   try {
-    const result = await rolesApi.complete(roleName, context, {
+    const result = await rolesApi.completeWithRole(roleName, context, {
       cacheRetention: "short",
       signal,
     });
@@ -81,17 +81,18 @@ export async function callSideAgent(
 }
 
 /**
- * Parse the side agent's JSON response into a ScoutDecision.
+ * Parse the side agent's text response into a ScoutDecision.
  *
- * Two-stage extraction:
- * 1. Primary: extract from <decision>...</decision> XML tags (the
- *    prompt instructs the model to use this format). Tag extraction
- *    is precise — surrounding prose, markdown fences, and noise are
- *    all ignored as long as the tags exist.
- * 2. Fallback: scan for the first {} JSON object boundaries when
- *    the model ignores the tag instruction. This is heuristic last
- *    resort — strips markdown fences first, then greedily matches {}
- *    from outside in.
+ * The prompt instructs the model to use a line-based format inside
+ * <decision> tags (no JSON). This parser:
+ *
+ * 1. Extracts from <decision>...</decision> tags — precise, ignores
+ *    any surrounding prose or markdown noise.
+ * 2. Falls back to scanning the entire raw text for "skills:",
+ *    "role:", "reasoning:" lines — handles models that ignore both
+ *    the tag and JSON instructions.
+ * 3. Returns "unparseable response" only when neither approach
+ *    finds any decision fields.
  */
 function parseDecision(raw: string): ScoutDecision {
   const fallback: ScoutDecision = {
@@ -104,53 +105,71 @@ function parseDecision(raw: string): ScoutDecision {
   const text = raw.trim();
   if (!text) return fallback;
 
-  // ── Stage 1: XML tag extraction ──────────────────────────
+  // ── Stage 1: <decision> tag extraction ─────────────────
   const tagMatch = text.match(/<decision>([\s\S]*?)<\/decision>/);
   if (tagMatch) {
-    const inner = tagMatch[1].trim();
-    const parsed = tryParseJson(inner);
-    if (parsed) return buildDecision(parsed);
+    const decision = parseTextFields(tagMatch[1]);
+    if (decision) return decision;
   }
 
-  // ── Stage 2: JSON boundary scan (fallback) ───────────────
-  // Strip all markdown code fence markers regardless of position.
-  const stripped = text.replace(/```(?:json)?\s*/g, "").replace(/```/g, "").trim();
-
-  const firstBrace = stripped.indexOf("{");
-  if (firstBrace === -1) return fallback;
-
-  // Greedy from rightmost '}': try the longest substring first.
-  let lastBrace = stripped.lastIndexOf("}");
-  while (lastBrace > firstBrace) {
-    const parsed = tryParseJson(stripped.slice(firstBrace, lastBrace + 1));
-    if (parsed) return buildDecision(parsed);
-    lastBrace = stripped.lastIndexOf("}", lastBrace - 1);
-  }
+  // ── Stage 2: scan entire text for field lines ───────────
+  const fromFull = parseTextFields(text);
+  if (fromFull) return fromFull;
 
   return fallback;
 }
 
-/** Try JSON.parse, return the parsed object or null on any failure. */
-function tryParseJson(raw: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-    return parsed as Record<string, unknown>;
-  } catch {
-    return null;
+/**
+ * Parse "key: value" lines from a text block into a ScoutDecision.
+ * Returns null if no recognized fields are found.
+ */
+function parseTextFields(block: string): ScoutDecision | null {
+  const lines = block.split("\n");
+  let skillsRaw = "";
+  let roleRaw = "";
+  let reasoningRaw = "";
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // Match "key: value" or "key value" (model may forget the colon)
+    const match = trimmed.match(/^(skills?|role|reasoning)\s*[:：]\s*(.*)$/i);
+    if (match) {
+      const key = match[1].toLowerCase();
+      const value = match[2].trim();
+      if (key.startsWith("skill")) skillsRaw = skillsRaw || value;
+      else if (key === "role") roleRaw = roleRaw || value;
+      else if (key === "reasoning") reasoningRaw = reasoningRaw || value;
+    }
   }
+
+  // At least one field recognized — build decision
+  if (skillsRaw || roleRaw || reasoningRaw) {
+    const skills = parseSkillsField(skillsRaw);
+    const role = parseRoleField(roleRaw);
+    const reasoning = reasoningRaw || "no reasoning provided";
+    return { skills, role, reasoning, source: "side-agent" };
+  }
+
+  return null;
 }
 
-/** Build a ScoutDecision from a parsed JSON object. */
-function buildDecision(parsed: Record<string, unknown>): ScoutDecision {
-  return {
-    skills: Array.isArray(parsed.skills)
-      ? parsed.skills.filter((s: unknown) => typeof s === "string")
-      : [],
-    role:
-      typeof parsed.role === "string" && parsed.role !== "null" ? parsed.role : null,
-    reasoning:
-      typeof parsed.reasoning === "string" ? parsed.reasoning : "no reasoning provided",
-    source: "side-agent",
-  };
+/** Parse the skills field: comma-separated names, "none" → empty. */
+function parseSkillsField(raw: string): string[] {
+  if (!raw || raw.toLowerCase() === "none") return [];
+  return raw
+    .split(/[,，、]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/** Parse the role field: "null" / "none" / "current" → null, otherwise the role name. */
+function parseRoleField(raw: string): string | null {
+  if (!raw) return null;
+  const lower = raw.toLowerCase().trim();
+  if (lower === "null" || lower === "none" || lower === "current" || lower === "keep") {
+    return null;
+  }
+  return raw.trim() || null;
 }

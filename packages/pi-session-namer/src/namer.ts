@@ -8,6 +8,9 @@
 import type { ModelRolesAPI } from "@d3ara1n/pi-model-roles";
 import type { SessionNamerConfig } from "./types.ts";
 
+/** Hard timeout for the naming side agent (ms). A short title needs ~dozens of tokens. */
+const NAMER_TIMEOUT_MS = 10_000;
+
 /**
  * Build the system prompt for the naming side agent.
  */
@@ -39,15 +42,14 @@ export async function generateSessionName(
   // Truncate very long prompts to avoid wasting tokens
   const truncatedPrompt = userPrompt.length > 2000 ? userPrompt.slice(0, 2000) + "..." : userPrompt;
 
-  const result = await rolesApi.complete(
+  const signal = AbortSignal.timeout(NAMER_TIMEOUT_MS);
+  const result = await rolesApi.completeWithRole(
     roleName,
     {
       systemPrompt,
       messages: [{ role: "user", content: truncatedPrompt, timestamp: Date.now() }],
     },
-    // No maxTokens: cost is controlled by the role's thinking level.
-    // The namer side-agent role (utility, thinking:off) skips reasoning,
-    // so a short title needs only ~dozens of tokens.
+    { signal },
   );
 
   const raw =
@@ -62,9 +64,16 @@ export async function generateSessionName(
 
 /**
  * Clean and truncate the generated name.
+ * Strips common model prefixes ("Here is a title:", "Title:", etc.)
+ * so the output can be used directly.
  */
 function cleanSessionName(raw: string, maxLength: number): string {
   let name = raw.trim();
+  if (!name) return "New session";
+
+  // Strip common model prefixes that slip through
+  name = name.replace(/^(here is (a |the )?(title|name)[：:]\s*)/i, "");
+  name = name.replace(/^(title|name|session)[：:]\s*/i, "");
 
   // Strip surrounding quotes if present
   if (

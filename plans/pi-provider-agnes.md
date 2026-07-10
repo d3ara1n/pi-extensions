@@ -128,13 +128,10 @@ pi.on("session_start", (_e, c) => {
 
 ## Cost Values
 
-When Agnes introduces official token pricing, update `agnes` provider cost:
+Agnes has not published official token pricing, so the `agnes` provider uses cost 0 (no cost shown). When Agnes publishes pricing, update to the **non-discounted regular-period** price (see `PROVIDER.md`):
 
 ```typescript
-// Current placeholder (legacy pricing)
-cost: { input: 0.03, output: 0.15, cacheRead: 0, cacheWrite: 0 }
-
-// Update to actual pricing when available
+cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
 ```
 
 ## Notes

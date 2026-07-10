@@ -6,12 +6,12 @@ Agnes AI provider for pi — registers two providers sharing the same text model
 
 | Provider ID | Name | Billing | API Key Env |
 |---|---|---|---|
-| `agnes` | Agnes AI | Token billing (placeholder) | `$AGNES_API_KEY` |
+| `agnes` | Agnes AI | Token billing | `$AGNES_API_KEY` |
 | `agnes-plan` | Agnes AI (Token Plan) | Subscription plan | `$AGNES_PLAN_API_KEY` |
 
 ### `agnes`
 
-Token-based billing provider. Cost values use Agnes AI's legacy per-token pricing ($0.03/1M input, $0.15/1M output) as placeholders — Agnes has not yet published official token pricing. Update when they do.
+Token-based billing provider. Agnes has not published official token pricing, so cost values are 0 (no cost shown). Update when Agnes publishes pricing — use the non-discounted regular-period price (see [PROVIDER.md](../../PROVIDER.md)).
 
 ### `agnes-plan`
 

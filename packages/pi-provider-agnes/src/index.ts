@@ -2,7 +2,7 @@
  * pi-provider-agnes
  *
  * Registers two Agnes AI providers:
- * - `agnes`      — token billing (future); cost uses legacy per-token pricing as placeholder
+ * - `agnes`      — token billing (pricing unpublished → cost 0)
  * - `agnes-plan` — subscription plan; cost = 0
  *
  * Both share the same base URL and model list (text models only).
@@ -47,8 +47,8 @@ const TEXT_MODELS: TextModelDef[] = [
 // ── Entry point ───────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
-  // Token billing provider — cost uses legacy per-token pricing as placeholder.
-  // Update when Agnes introduces official token pricing.
+  // Token billing provider — pricing unpublished, so cost is 0.
+  // Update when Agnes publishes official token pricing.
   pi.registerProvider("agnes", {
     name: "Agnes AI",
     baseUrl: BASE_URL,
@@ -57,9 +57,9 @@ export default function (pi: ExtensionAPI) {
     models: TEXT_MODELS.map((m) => ({
       ...m,
       input: ["text", "image"] as const,
-      cost: { input: 0.03, output: 0.15, cacheRead: 0, cacheWrite: 0 },
-      // Agnes uses chat_template_kwargs.enable_thinking (OpenAI-compat),
-      // not reasoning_effort. Override the auto-detected "openai" format.
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      // Agnes enables thinking via chat_template_kwargs.enable_thinking
+      // (Qwen-style), so use the qwen-chat-template format.
       ...(m.reasoning ? { compat: { thinkingFormat: "qwen-chat-template" as const } } : {}),
     })),
   });

@@ -8,8 +8,9 @@ A collection of small extensions for [Pi Coding Agent](https://pi.dev).
 |---------|-------------|
 | [`pi-ask-user`](./packages/pi-ask-user) | Collapsible ask-user tool — panel renders in the bottom editor slot (not a screen overlay), so the transcript stays visible and scrollable above it |
 | [`pi-context-include`](./packages/pi-context-include) | `@path` syntax for AGENTS.md — include files by reference |
+| [`pi-provider-agnes`](./packages/pi-provider-agnes) | Agnes AI provider — token-billing + token-plan variants sharing the same text models |
 | [`pi-provider-sensenova`](./packages/pi-provider-sensenova) | SenseNova (商汤日日新) provider — sensenova-6.7-flash-lite via OpenAI-compatible API |
-| [`pi-provider-zhipu-coding-plan`](./packages/pi-provider-zhipu-coding-plan) | Zhipu AI Coding Plan provider — auto-discover models, report usage |
+| [`pi-provider-zhipu-coding-plan`](./packages/pi-provider-zhipu-coding-plan) | Zhipu AI Coding Plan provider — static GLM model list, report usage quota |
 | [`pi-usage-block`](./packages/pi-usage-block) | Usage quota status bar block for powerline |
 | [`pi-scout`](./packages/pi-scout) <sup>†</sup> | Per-turn side agent — lazy skill injection, automatic model routing, and trivial-ack short-circuit (skips the side model on `好的`/`ok`/`はい`) |
 | [`pi-subagent`](./packages/pi-subagent) <sup>†</sup> | Role-based subagent orchestration — delegates tasks to specialized pi child processes with real-time TUI progress |

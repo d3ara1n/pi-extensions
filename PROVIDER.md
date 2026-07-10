@@ -1,63 +1,43 @@
-# Provider Plugin Conventions
+# Provider 开发方法论
 
-> Provider plugins register LLM API providers with pi's model registry. They are thin wrappers — no hooks, no UI panels, no commands.
+> 写给 agent 的指南——agent 知道怎么写代码和发测试请求，缺的是判断框架：哪些东西不能靠文档猜、必须实测验证。
 
-## Naming
+## 核心原则
 
-- **Package name**: `pi-provider-<service>` (e.g. `pi-provider-zhipu-coding-plan`)
-- **npm scope**: `@d3ara1n/pi-provider-<service>`
-- **Commit scope**: `(pi-provider-<service>)`
+**文档是线索，API 响应是真相。** 写 provider 就是填静态配置，但配置的每一项值必须来自实际 API 行为，不能来自文档假设。"OpenAI 兼容"≠ 完全兼容，一定有某个维度不兼容——找到它。
 
-## Provider Registration
+## 必须实测验证的维度
 
-A provider plugin registers one or more providers via `pi.registerProvider()`.
+以下每个维度，文档说了不算，必须发请求确认。验证方法：用该 provider 的 API 发一个请求，看响应结构。
 
-### Subscription vs. Pay-per-Use
+| 维度 | 为什么不信任文档 | 验证方式 |
+|------|-----------------|---------|
+| **thinking 参数格式** | 每种"兼容"格式的参数名和层级都不一样；pi 支持 10 种格式，错了不会报错但 reasoning 静默失效 | 开关 thinking 各发一次请求，看 API 接受哪种参数格式 |
+| **system prompt role** | 部分服务只接受 `system` 不接受 `developer`，反之亦然 | 引用现有模型的 compat 看哪个不 400 |
+| **tool call 流式 delta 格式** | "OpenAI 兼容"在这里偷工减料最常见——delta 路径、字段名常有细微差异 | 发一个带 tool 的请求，确认流式返回结构 |
+| **usage 是否在流中返回** | 很多兼容实现流式末尾不发 usage，pi 按配置决定怎么取 | 看 streaming 最后有没有 usage 字段 |
+| **max_tokens 字段名** | OpenAI 自己都用两套：`max_tokens` vs `max_completion_tokens` | 测试确认 |
+| **context overflow 错误消息** | 每个 provider 的错误消息格式不同；pi 靠模式匹配触发自动 compact，不认识的格式 compact 不生效 | 故意发一个超 context window 的请求，看错误消息；如果不匹配 pi 已知模式，需要 `message_end` hook 改写 |
 
-If a provider offers both a subscription plan and pay-per-use billing, register **separate providers** for each:
+## 可以引用文档但建议交叉验证的维度
 
-| Provider ID | Display Name | Billing | Cost |
-|---|---|---|---|
-| `<service>` | `<Service Name>` | Pay-per-use | Actual per-token costs |
-| `<service>-plan` | `<Service Name> (<OfficialPlanName>)` | Subscription | All zeros |
+这些通常从文档/模型卡片获取，但与 API 实际返回冲突时以实际为准：
 
-- Subscription provider IDs end with `-plan`
-- Subscription provider `name` includes `(Plan)` suffix
-- Subscription models have `cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }`
+- 模型 ID 列表 → 调 `/v1/models`（如果有）交叉验证
+- context window 大小
+- 最大输出 token 数
+- 是否支持图片输入
+- 是否支持 reasoning（注意：有的模型文档说支持，但只能开不能关，此时需 `thinkingLevelMap: { off: null }`）
+- 定价
 
-### Model Configuration
+## 常见误判
 
-- **Static model list** — hardcode models in the plugin. No dynamic discovery.
-- Maintain the list as models change; update the plugin when new models are released.
+- **"这是 OpenAI 格式，默认 compat 就行"** → 每个 compat flag 都是因为有某个 provider 在某处不符合 OpenAI 标准才产生的。不测就设默认值，等于猜。
+- **"文档没提，说明不支持"** → 反过来也成立：文档没提不代表不支持。比如很多模型实际支持图片输入但文档没写。
+- **"和其他 provider 差不多，复用 compat"** → 不同 provider 的"兼容"偏差各不相同，不能套用。
+- **"thinking 格式用最常见的就行"** → thinking 是 API 调用层面的事，格式错 reasoning 静默不工作，无报错、无提示，排查极其困难。
 
-### Authentication
+## 参考
 
-Two auth modes:
-
-1. **`/login` flow** — provider uses pi's built-in OAuth/login. No env var needed.
-2. **Environment variable** — set `apiKey: "$VAR_NAME"` in provider config.
-
-Env var naming:
-
-- If the provider has an official env var convention, use it
-- Otherwise use `<SERVICE>_API_KEY` (e.g. `ZHIPUAI_API_KEY`, `SENSENOVA_API_KEY`)
-
-## Usage Reporting
-
-### Rule: Report only if the provider officially exposes a quota/balance API
-
-- If the provider has a documented usage/quota/balance endpoint → integrate via `@d3ara1n/pi-usage-block-core`
-- If not → skip it. Don't implement fake or reverse-engineered reporting. Wait until the provider officially releases the API.
-
-### Usage provider `id` must match the pi provider key
-
-The usage provider's `id` must be identical to the first argument of `pi.registerProvider()`. This is the sole link between the pi provider and its usage data.
-
-### API key resolution for usage
-
-Usage providers need the API key to call the provider's quota API. Resolve it at runtime from `modelRegistry` (captured via `session_start` event), not from environment variables directly.
-
-## Dependencies
-
-- **`@d3ara1n/pi-usage-block-core`** — only in `dependencies` if reporting usage
-- **No other pi extension dependencies** — provider plugins are standalone
+- pi provider API 文档：`@earendil-works/pi-coding-agent` 的 `docs/custom-provider.md`
+- 本仓库现有 provider：`packages/pi-provider-agnes`（简单）、`packages/pi-provider-zhipu-coding-plan`（含 compat + 配额上报）、`packages/pi-provider-sensenova`（最简）

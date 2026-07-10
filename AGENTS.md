@@ -160,6 +160,10 @@ const roles: ModelRolesAPI = getModelRolesAPI();  // 完整类型推导
 
 只列 pi 插件依赖，不列框架级依赖（`pi-ai`、`pi-coding-agent`、`pi-tui` 等随 pi 附带的包）。
 
+### Provider 开发
+
+写新的 pi provider（`pi-provider-xxx`）时，遵循 PROVIDER.md 的验证方法论——不盲写配置，每个 compat 维度必须实测确认。
+
 ### 改动后的测试与重载
 
 修改 `packages/*/src/**` 下的扩展源码，或改动了 `~/.pi/agent/settings.json` 的 `extensions`，都需要**用户手动重载** pi 才能生效——pi 在启动时加载扩展，运行中不会热更新。

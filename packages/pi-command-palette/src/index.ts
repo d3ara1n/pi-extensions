@@ -199,6 +199,9 @@ async function showModelSelector(pi: ExtensionAPI, ctx: ExtensionContext): Promi
               (item: SelectItem) => `${item.label} ${item.description ?? ""}`,
             )
           : items;
+        // FRAGILE: SelectList has no public filter/setItems API, so we poke its
+        // private filteredItems directly. If pi-tui renames it, filtering breaks
+        // silently with no compile error.
         (selectList as any).filteredItems = filtered;
         selectList.setSelectedIndex(0);
         queryText.setText(theme.fg("accent", `> ${query}▎`));
@@ -302,6 +305,7 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionContext): Prom
               (item: SelectItem) => `${item.label} ${item.description ?? ""}`,
             )
           : selectItems;
+        // FRAGILE: see model selector — depends on SelectList.filteredItems.
         (selectList as any).filteredItems = filtered;
         selectList.setSelectedIndex(0);
         queryText.setText(theme.fg("accent", `> ${query}▎`));

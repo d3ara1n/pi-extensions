@@ -202,7 +202,11 @@ export class PeekOverlay {
       });
   }
 
+  private closed = false;
+
   private close(): void {
+    if (this.closed) return;
+    this.closed = true;
     if (this.trackerTimer) {
       clearInterval(this.trackerTimer);
       this.trackerTimer = null;

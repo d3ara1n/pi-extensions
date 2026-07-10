@@ -32,11 +32,9 @@ export type {
 } from "./types.ts";
 
 // Short, memorable names. Single-word so they collide rarely and read cleanly.
-// Adjective + noun combos (~500 distinct names) to keep collisions rare
-// across reloads. Short enough to stay readable in the statusbar widget.
-// Short, memorable name pools. Deterministically indexed by a hash of the
-// session id (see deriveName), so the same session always gets the same name.
-// ~3600 distinct combos: birthday-paradox collision only beyond ~70 sessions.
+// Deterministically indexed by a hash of the session id (see deriveName), so
+// the same session always gets the same name. ~3600 distinct combos:
+// birthday-paradox collision only beyond ~70 sessions.
 const ADJECTIVES = [
   "Swift",
   "Calm",

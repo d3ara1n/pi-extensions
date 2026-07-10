@@ -59,7 +59,6 @@ export function initPeekAgentAPI(deps: PeekAgentDeps): PeekAgentAPI {
       const candidates = discovery.listPeersFromRegistry(
         state.registryDir,
         state.self.sessionId,
-        cfg.staleMs,
       );
       const peers = await discovery.pruneDeadPeers(candidates, state.registryDir);
       discovery.flagAmbiguous(peers);

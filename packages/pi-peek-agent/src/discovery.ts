@@ -121,7 +121,6 @@ export function removeSelfMarker(sessionId: string, registryDir: string): void {
 export function listPeersFromRegistry(
   registryDir: string,
   selfSessionId: string,
-  _staleMs: number,
 ): PeerInfo[] {
   let files: string[];
   try {

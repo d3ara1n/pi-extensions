@@ -20,17 +20,14 @@ export interface AgentConfig {
   registryDir?: string;
   /** How often to refresh our own marker's lastSeen. Default 15s. */
   heartbeatMs?: number;
-  /** A peer is considered stale if lastSeen is older than this. Default 45s. */
-  staleMs?: number;
   /** askPeer synchronous wait timeout. Default 30s. */
   askTimeoutMs?: number;
 }
 
 export const DEFAULT_AGENT_CONFIG: Required<
-  Pick<AgentConfig, "heartbeatMs" | "staleMs" | "askTimeoutMs">
+  Pick<AgentConfig, "heartbeatMs" | "askTimeoutMs">
 > = {
   heartbeatMs: 15_000,
-  staleMs: 45_000,
   askTimeoutMs: 30_000,
 };
 

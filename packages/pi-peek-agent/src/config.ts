@@ -44,7 +44,6 @@ export function loadAgentConfig(cwd?: string): AgentConfig {
   return {
     registryDir: raw.registryDir,
     heartbeatMs: raw.heartbeatMs ?? DEFAULT_AGENT_CONFIG.heartbeatMs,
-    staleMs: raw.staleMs ?? DEFAULT_AGENT_CONFIG.staleMs,
     askTimeoutMs: raw.askTimeoutMs ?? DEFAULT_AGENT_CONFIG.askTimeoutMs,
   };
 }

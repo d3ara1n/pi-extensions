@@ -48,7 +48,6 @@ Optional, in `~/.pi/agent/settings.json` under `peek`:
   "peek": {
     "registryDir": "~/.pi/peek/registry",  // marker directory
     "heartbeatMs": 15000,                    // refresh lastSeen interval
-    "staleMs": 45000,                        // peer considered stale after this
     "askTimeoutMs": 30000,                   // peek() sync wait timeout
     "role": "utility"                        // model role for consult (e.g. "default" for higher quality)
   }

@@ -29,9 +29,7 @@ export interface AccessDeniedConfig {
   mode: AccessMode;
   /**
    * Paths (absolute or home-relative) always treated as in-bounds, in
-   * addition to the current project cwd. Merges the former `extraAllowedDirs`
-   * (full read/write roots) and `extraSafePaths` (fine-grained) — both were
-   * prefix matches with identical effect, so they are unified here.
+   * addition to the current project cwd.
    */
   allowedPaths: string[];
   /**

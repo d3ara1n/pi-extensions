@@ -25,7 +25,7 @@
     }
   },
   "dependencies": {
-    "@d3ara1n/pi-model-roles": "^0.1.0"
+    "@d3ara1n/pi-model-roles": "^0.6.0"
   },
   "pi": {
     "extensions": [

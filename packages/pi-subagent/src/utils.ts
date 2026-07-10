@@ -1,9 +1,6 @@
 /**
- * Pure helpers for pi-subagent: formatting, sanitization, formatting helpers,
- * and the concurrency semaphore. No pi-API or I/O dependencies — safe to unit-test.
- *
- * Extracted from index.ts so these can be exercised directly. index.ts imports
- * them; behavior is unchanged.
+ * Pure helpers for pi-subagent: formatting, sanitization, and the concurrency
+ * semaphore. No pi-API or I/O dependencies — safe to unit-test.
  */
 
 import * as os from "node:os";

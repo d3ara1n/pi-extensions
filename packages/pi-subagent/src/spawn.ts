@@ -183,7 +183,7 @@ export async function spawnSubagent(
     }
 
     // Temp dir for: large-context/task spill files, and as PI_SUBAGENT_TMPDIR
-    // for subagent bash work (e.g. git clone). The system prompt no longer uses it.
+    // for subagent bash work (e.g. git clone).
     tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-subagent-"));
 
     // ── System prompt channel: inline text via --append-system-prompt ──
@@ -269,7 +269,7 @@ export async function spawnSubagent(
     };
 
     let thinkingCounter = 0;
-    // O(1) lookup from toolCallId → activityLog index (was linear find → O(n²) on busy runs)
+    // O(1) lookup from toolCallId → activityLog index.
     const toolCallIndex = new Map<string, number>();
 
     // Kill the child when the configured turn/cost budget is exceeded.

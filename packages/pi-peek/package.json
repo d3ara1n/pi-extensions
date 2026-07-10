@@ -2,7 +2,7 @@
   "name": "@d3ara1n/pi-peek",
   "version": "0.2.1",
   "type": "module",
-  "description": "Cross-instance peek for pi — glimpse what another pi instance is doing, or ask it a question without disturbing its main conversation (read-after-burn ephemeral side-channel)",
+  "description": "Consult core for pi — serialize the current session and ask questions about it via the utility model (read-after-burn). Pure library: no tools, no commands.",
   "main": "src/index.ts",
   "types": "src/types.ts",
   "keywords": [

@@ -29,15 +29,14 @@ Ask another instance a question without disturbing its main conversation.
 ## Installation
 
 ```bash
-pi extension add @d3ara1n/pi-peek          # install first — provides the consult core
-pi extension add @d3ara1n/pi-peek-agent
+pi install npm:@d3ara1n/pi-peek-agent
 ```
 
-Both must be in `settings.json` extensions — `pi-peek` provides the consult backend, `pi-peek-agent` registers the `peek`/`peek_list` tools.
+Requires [`@d3ara1n/pi-peek`](../pi-peek) (consult core) to be installed alongside.
 
 ## Dependencies
 
-- [`@d3ara1n/pi-peek`](../pi-peek) — consult core (tracker hooks + investigate backend)
+- [`@d3ara1n/pi-peek`](../pi-peek) — consult core (serialize + investigate + tracker)
 
 ## Configuration
 

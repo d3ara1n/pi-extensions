@@ -2,7 +2,7 @@
   "name": "@d3ara1n/pi-peek-user",
   "version": "0.2.2",
   "type": "module",
-  "description": "User-facing overlay for pi-peek — /peek opens a look-out panel to see what other pi instances are doing, or ask one a question with streamed answers",
+  "description": "Local /peek overlay for pi — ask your own session a question without disturbing the main agent (read-after-burn)",
   "main": "src/index.ts",
   "keywords": [
     "pi-package",

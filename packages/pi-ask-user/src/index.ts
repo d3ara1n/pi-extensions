@@ -25,7 +25,7 @@
  *   be scrolled back at any time — the exact mechanism ctx.ui.select()/input()
  *   rely on. (overlay:true would route through ui.showOverlay(), compositing the
  *   panel over the whole screen and visually hiding the transcript — making it
- *   unscrollable, which was the original bug.) Collapses to one status row.
+ *   unscrollable.) Collapses to one status row.
  */
 
 import type { ExtensionAPI, Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
@@ -120,7 +120,7 @@ interface TabState {
   multiChecked: Set<number>;
   /** Committed custom text for multi-select mode (kept alongside multiChecked, never overwriting it). Null if none. */
   customText: string | null;
-  /** Committed single-select index (or -1 if none yet, -2 = answered via type-something). */
+  /** Committed single-select index, or -1 if none yet. */
   selectedSingle: number;
 }
 
@@ -342,7 +342,7 @@ class AskUserPanel implements Component, Focusable {
   /** Committed note text (trimmed). Empty string = no note. Lives only on the
    *  review screen; the LLM cannot set it. */
   private messageText = "";
-  /** Dedicated editor for the note. Single-line semantics: Enter saves (like
+  /** Dedicated editor for the note. Text input: Enter saves (like
    *  the per-question "Type something." editor). */
   private messageEditor: Editor;
 
@@ -367,13 +367,11 @@ class AskUserPanel implements Component, Focusable {
       },
     };
     // Each tab owns its own Editor instance — its internal state IS that tab's
-    // draft, so tab switching needs no text shuttling. This is the fix for the
-    // draft-loss bug (previously a single shared editor was swapped in/out and
-    // the swap was lossy across the input-mode / tab-switch boundary).
+    // draft, so tab switching needs no text shuttling.
     this.tabs = questions.map((_, i) =>
       newTabState(tui, editorTheme, i, (ti, v) => this.handleSubmit(ti, v)),
     );
-    // Dedicated editor for the review-screen note. Enter saves (single-line),
+    // Dedicated editor for the review-screen note. Enter saves the text,
     // Esc returns to the review without saving — mirroring the per-question
     // "Type something." editor's semantics.
     this.messageEditor = new Editor(tui as never, editorTheme);
@@ -405,8 +403,7 @@ class AskUserPanel implements Component, Focusable {
       // did answers.set with only the custom text, dropping every check.)
       // Committing custom text only records it — we return to the OPTION LIST
       // (not advance) so the user can keep checking options and then press
-      // Enter on an option to confirm the whole question. Advancing here used
-      // to jump straight to review the moment the custom editor closed.
+      // Enter on an option to confirm the whole question.
       st.customText = trimmed;
       this.commitMultiAnswer(q, st);
       st.inputMode = false;
@@ -500,7 +497,7 @@ class AskUserPanel implements Component, Focusable {
   }
 
   /**
-   * Called before navigating AWAY from a question tab (Tab/→/←/Shift+Tab).
+   * Called before navigating FORWARD from a question tab (Tab/→ only).
    * Resolves the current question's state so it can be left cleanly:
    *
    *  - Already committed (answers.has): leave freely.
@@ -703,19 +700,25 @@ class AskUserPanel implements Component, Focusable {
       return;
     }
 
-    // Enter — confirm + advance to the next tab. It does NOT enter edit mode
-    // (Space owns that now), keeping the two keys orthogonal: Space modifies,
-    // Enter commits. Single-select commits the cursor position and advances;
+    // Enter — confirm + advance. Space owns editing; Enter commits what's at
+    // the cursor. Single-select commits the cursor option and advances;
     // multi-select commits the currently checked options as-is and advances
-    // (Space owns checking, so Enter no longer auto-checks the cursor option).
+    // (Space owns checking; Enter commits the existing checks without toggling the cursor option).
+    // One exception: on the single-select custom row, Enter opens the editor
+    // if no custom answer is committed yet (engaging the custom option).
     if (matchesKey(data, Key.enter)) {
       const opt = opts[st.cursor];
       if (!opt) return;
       if (opt.isOther && !multi) {
-        // Single-select isOther: Enter never edits (Space owns that). Only
-        // advance if a custom answer was already committed; otherwise stay.
+        // Single-select isOther: if a custom answer is already committed,
+        // advance; otherwise open the editor to type one. Space also opens the
+        // editor, but Enter on the custom row should engage the custom option
+        // rather than no-op when nothing's committed yet.
         if (this.answers.get(q.tab)?.kind === "custom") {
           this.advanceAfterAnswer();
+        } else {
+          st.inputMode = true;
+          this.invalidate();
         }
         return;
       }
@@ -786,7 +789,12 @@ class AskUserPanel implements Component, Focusable {
     }
     // Backward
     if (matchesKey(data, Key.shift("tab"))) {
-      this.switchTab(wrapTab(this.currentTab - 1, this.totalTabs));
+      // No backward wrap to review: backward navigation isn't validated by
+      // prepareQuestionForLeave, so wrapping Q0 → review would let a required
+      // (allowSkip:false) question be skipped. Stop at the first question,
+      // matching ← below.
+      if (this.currentTab - 1 < 0) return true; // stop at first question
+      this.switchTab(this.currentTab - 1);
       return true;
     }
     if (matchesKey(data, Key.left)) {
@@ -985,8 +993,7 @@ class AskUserPanel implements Component, Focusable {
       for (const w of wrapTextWithAnsi(th.fg("muted", q.prompt), innerW - 2))
         lines.push(row(` ${w}`));
     }
-    // 空行分隔 header/prompt 与 options。原来只在有 prompt 时才加，导致无
-    // prompt 的问题其标题与选项紧贴（"粘在一起"）。现在无条件加。
+    // 空行分隔 header/prompt 与 options，无条件添加。
     lines.push(row(""));
 
     // ── Body: options / preview / input editor ──
@@ -1002,7 +1009,7 @@ class AskUserPanel implements Component, Focusable {
 
     // ── Footer ──
     lines.push(th.fg("border", `├${"─".repeat(innerW)}┤`));
-    const doneCount = Array.from(this.answers.keys()).length;
+    const doneCount = Array.from(this.answers.values()).filter((a) => a.kind !== "skipped").length;
     const left =
       this.questions.length > 1
         ? th.fg("dim", ` ${doneCount}/${this.questions.length} answered · `)
@@ -1022,7 +1029,6 @@ class AskUserPanel implements Component, Focusable {
     st: TabState,
     multi: boolean,
     th: Theme,
-    _isCursor: boolean,
     customAnswered: boolean,
   ): string {
     if (opt.isOther) {
@@ -1078,9 +1084,7 @@ class AskUserPanel implements Component, Focusable {
     // Body indent (6 cols): questions and the note carry a 2-visible-col marker
     // (`1.` / `2.` … or `✎ ` for the note) right after the cursor, plus a
     // separator space, so every title starts at the same column. The body is
-    // indented one past that so header vs content stay visually distinct —
-    // previously the body sat at 5 cols and the note's icon pushed its title
-    // out of alignment with the question titles.
+    // indented one past that so header vs content stay visually distinct.
     const bodyIndent = "      "; // 6 spaces
     const maxW = innerW - 2 - bodyIndent.length;
     this.reviewViewportH = Math.max(3, Math.min(total, 10));
@@ -1176,7 +1180,7 @@ class AskUserPanel implements Component, Focusable {
       const ans = this.answers.get(q.tab);
       const committedCustom = multi ? st.customText : ans?.kind === "custom" ? ans.text : null;
       const customAnswered = !!committedCustom;
-      const glyph = this.optionGlyph(opt, i, st, multi, th, isCursor, customAnswered);
+      const glyph = this.optionGlyph(opt, i, st, multi, th, customAnswered);
       // For "Type something.", show the committed text instead of the placeholder.
       // Custom text is arbitrary-length user input — truncate to the label
       // column (the full text appears on the review screen and result card,
@@ -1240,7 +1244,7 @@ class AskUserPanel implements Component, Focusable {
       const opt = opts[i]!;
       const isCursor = i === st.cursor;
       const prefix = isCursor ? `${th.fg("accent", ICON_CURSOR)} ` : "  ";
-      const glyph = this.optionGlyph(opt, i, st, multi, th, isCursor, customAnswered);
+      const glyph = this.optionGlyph(opt, i, st, multi, th, customAnswered);
       const displayLabel = opt.isOther && customAnswered ? dualCommittedCustom! : opt.label;
       const labelColor = isCursor
         ? "accent"
@@ -1502,10 +1506,7 @@ export default function askUserExtension(pi: ExtensionAPI) {
       // Structure is intentionally SYMMETRIC with the questions schema the LLM
       // authored (AskUserParams): each question carries a `tab` as its identity
       // key, and each answer echoes that same `tab`, so the LLM can correlate
-      // answers back to its own questions by key with zero parsing effort. This
-      // replaces the old `tab: answer` text format, which broke when a custom
-      // answer contained a colon or newline (it could overwrite or collide with
-      // adjacent lines).
+      // answers back to its own questions by key with zero parsing effort.
       //
       // Field shape (only relevant fields are emitted — no noise):
       //   single-select, option picked : { tab, answer }

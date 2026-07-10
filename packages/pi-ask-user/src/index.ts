@@ -930,14 +930,16 @@ class AskUserPanel implements Component, Focusable {
         baseColor = "success";
       } else if (active) mark = "▸";
       const color = active ? "accent" : baseColor;
-      return th.fg(color, `${mark} ${q.tab}`);
+      const cell = th.fg(color, `${mark} ${q.tab}`);
+      return active ? th.bg("selectedBg", cell) : cell;
     });
     const reviewActive = this.isReviewTab;
     const reviewMark = reviewActive ? "▸" : " ";
     const reviewColor: import("@earendil-works/pi-coding-agent").ThemeColor = reviewActive
       ? "accent"
       : "muted";
-    const reviewCell = th.fg(reviewColor, `${reviewMark} [ Review ]`);
+    const reviewCellRaw = th.fg(reviewColor, `${reviewMark} [ Review ]`);
+    const reviewCell = reviewActive ? th.bg("selectedBg", reviewCellRaw) : reviewCellRaw;
     const sep = th.fg("dim", "  │");
     return ` ${tabCells.join(th.fg("dim", "  "))}${sep}${reviewCell}`;
   }

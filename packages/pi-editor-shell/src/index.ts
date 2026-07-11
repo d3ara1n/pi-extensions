@@ -47,6 +47,16 @@ function contextToken(pct: number | null | undefined): ThemeColor {
   return "success";
 }
 
+function trimFixed1(n: number): string {
+  const text = n.toFixed(1);
+  return text.endsWith(".0") ? text.slice(0, -2) : text;
+}
+
+function formatContextWindow(tokens: number): string {
+  if (tokens >= 1_000_000) return `${trimFixed1(tokens / 1_000_000)}M`;
+  return `${(tokens / 1_000).toFixed(0)}k`;
+}
+
 // ── Built-in icon set (Nerd Font). Users can override any subset via the
 //    `editorShell.icons` config — see config.ts. `cache` uses U+26A1, which
 //    Nerd Fonts maps `oct-zap` to directly (no dedicated glyph), so it is
@@ -280,8 +290,8 @@ export default function (pi: ExtensionAPI) {
       const ctxWindow = usage?.contextWindow ?? ctx.model?.contextWindow;
       const ctxText =
         pct != null && ctxWindow
-          ? `${pct.toFixed(1)}%/${(ctxWindow / 1000).toFixed(0)}k`
-          : "?/??k";
+          ? `${pct.toFixed(1)}%/${formatContextWindow(ctxWindow)}`
+          : "?/??";
 
       // Cache-read tokens — per-turn figure first, session total in parens,
       // then hit rate (pi's "CHxx%" formula). All refreshed at agent_end and

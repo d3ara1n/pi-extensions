@@ -200,6 +200,26 @@ function wrapTab(index: number, total: number): number {
   return ((index % total) + total) % total;
 }
 
+/**
+ * Normalize externally-supplied text for TUI rendering. Fold CR/CRLF into real
+ * newlines, convert tabs to a single space, and strip remaining C0 control
+ * chars (keeping only \n). Rationale: a raw \r returns the cursor to column 0
+ * mid-row and clobbers leading indent; a raw \t advances to the next terminal
+ * tab stop (which the panel's width math counts as 1 col, so rows overflow
+ * their declared width and redraws accumulate stale copies); other C0 bytes
+ * corrupt layout too. Callers then treat \n as the only meaningful break.
+ */
+function sanitizeMultiline(text: string): string {
+  // Build the control-char class from codepoints so no literal control bytes
+  // appear in source (keeps biome's noControlCharactersInRegex happy). \x09
+  // (tab) is handled separately below; \x0a (\n) is the one char we keep.
+  const controls = new RegExp("[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]", "g");
+  return text
+    .replace(/\r\n?/g, "\n")
+    .replace(/\t/g, " ")
+    .replace(controls, "");
+}
+
 /** Build the full option list for a question, always appending the "Type something." custom-input row. */
 function buildOptions(q: Question): RenderOption[] {
   const opts: RenderOption[] = [...q.options];
@@ -938,7 +958,10 @@ class AskUserPanel implements Component, Focusable {
         baseColor = "success";
       } else if (active) mark = "▸";
       const color = active ? "accent" : baseColor;
-      const cell = th.fg(color, `${mark} ${q.tab}`);
+      // Always reserve one padding cell on each side so tab width is constant
+      // across active/inactive (no horizontal jump when switching). Only the
+      // active tab paints the bg, turning that reserved space into a pill.
+      const cell = th.fg(color, ` ${mark} ${q.tab} `);
       return active ? th.bg("selectedBg", cell) : cell;
     });
     const reviewActive = this.isReviewTab;
@@ -946,7 +969,7 @@ class AskUserPanel implements Component, Focusable {
     const reviewColor: import("@earendil-works/pi-coding-agent").ThemeColor = reviewActive
       ? "accent"
       : "muted";
-    const reviewCellRaw = th.fg(reviewColor, `${reviewMark} [ Review ]`);
+    const reviewCellRaw = th.fg(reviewColor, ` ${reviewMark} [ Review ] `);
     const reviewCell = reviewActive ? th.bg("selectedBg", reviewCellRaw) : reviewCellRaw;
     const sep = th.fg("dim", "  │");
     return ` ${tabCells.join(th.fg("dim", "  "))}${sep}${reviewCell}`;
@@ -1298,6 +1321,8 @@ class AskUserPanel implements Component, Focusable {
   ): string[] {
     const indent = "     ";
     const color = selected ? "muted" : "dim";
+    // description is already control-char-sanitized at ingress, so \n is the
+    // only meaningful break here.
     if (description.includes("\n")) {
       const maxW = innerW - 2 - indent.length;
       return description
@@ -1479,9 +1504,21 @@ export default function askUserExtension(pi: ExtensionAPI) {
         return errorResult("Error: No questions provided");
       }
 
+      // Sanitize every externally-supplied display string once at ingress:
+      // strip control chars (a raw \r resets the terminal cursor to column 0
+      // and clobbers indentation; other C0 bytes corrupt rows too). Downstream
+      // renderers can then treat \n as the only meaningful break. tab is a key
+      // (matched against answers), so leave it byte-for-byte intact.
       const questions: Question[] = params.questions.map((q) => ({
         ...q,
-        options: q.options.map((o) => ({ ...o })),
+        header: sanitizeMultiline(q.header),
+        prompt: q.prompt === undefined ? undefined : sanitizeMultiline(q.prompt),
+        options: q.options.map((o) => ({
+          ...o,
+          label: sanitizeMultiline(o.label),
+          description: o.description === undefined ? undefined : sanitizeMultiline(o.description),
+          preview: o.preview === undefined ? undefined : sanitizeMultiline(o.preview),
+        })),
       }));
 
       const result = await ctx.ui.custom<AskUserResult>(

@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-editor-shell",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "description": "Replaces pi's default editor and status bar with a unified rounded-corner shell embedding status info in the border",
   "keywords": [

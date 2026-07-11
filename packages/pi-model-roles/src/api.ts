@@ -6,10 +6,20 @@
  * Exported functions provide type-safe access — consumers never touch globalThis.
  */
 
+// NOTE: imported from `@earendil-works/pi-ai/compat`, not the package root.
+// In pi-ai 0.80+, the top-level `streamSimple`/`completeSimple` standalone
+// functions were removed; the "new" API lives as methods on a `Models` instance
+// (`createModels().streamSimple(...)`). But that instance needs credentials +
+// provider registration that we can't assemble here — pi core hands extensions a
+// `ModelRegistry`, not a `Models`, and does not expose its internal provider set.
+// `/compat` preserves the registry-dispatched standalone functions with the same
+// `(model, context, options)` signature. This is the sanctioned path: pi core
+// itself imports from `/compat` (sdk.ts, agent-session.ts, model-registry.ts).
+// Migrate to a `Models` instance only once pi exposes one to extensions.
 import {
   completeSimple as piAiCompleteSimple,
   streamSimple as piAiStreamSimple,
-} from "@earendil-works/pi-ai";
+} from "@earendil-works/pi-ai/compat";
 import type { ModelRolesAPI, ModelRolesConfig, RoleConfig, ResolvedRole } from "./types.ts";
 import { loadRolesConfig } from "./config.ts";
 import { resolveModelForRole, resolveModelForRoleAsync } from "./resolver.ts";
@@ -165,7 +175,9 @@ export function initModelRolesAPI(
       // Resolve auth for the model actually used (refreshes OAuth tokens).
       const auth = await state.modelRegistry.getApiKeyAndHeaders(model);
       if (!auth.ok) {
-        throw new Error(`completeWithRole: auth failed for ${model.provider}/${model.id}: ${auth.error}`);
+        throw new Error(
+          `completeWithRole: auth failed for ${model.provider}/${model.id}: ${auth.error}`,
+        );
       }
       // Forward everything except `model` to pi-ai's completeSimple().
       // completeSimple goes through streamSimpleOpenAICompletions which

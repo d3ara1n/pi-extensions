@@ -10,16 +10,55 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+/** Border icon slots that users can override. Each holds a single glyph
+ *  (Nerd Font codepoint, Unicode symbol, or emoji) — whatever the user's
+ *  terminal can render. Defaults live next to the renderer in index.ts. */
+export interface EditorShellIcons {
+  model: string;
+  thinking: string;
+  context: string;
+  cache: string;
+  hitRate: string;
+  folder: string;
+}
+
 export interface EditorShellConfig {
   /**
    * Status keys to pin to the shell's top-right corner.
    * Only keys set via ctx.ui.setStatus() are eligible.
    */
   pinnedStatus: string[];
+  /**
+   * Per-slot border-icon overrides. Any subset; missing keys fall back to
+   * the built-in Nerd Font set. Values are raw characters — JSON `"\uf0e7"`
+   * for a Nerd Font glyph, or `"🤖"` for an emoji, etc.
+   */
+  icons: Partial<EditorShellIcons>;
+}
+
+const ICON_KEYS: ReadonlyArray<keyof EditorShellIcons> = [
+  "model",
+  "thinking",
+  "context",
+  "cache",
+  "hitRate",
+  "folder",
+];
+
+/** Keep only known icon slots with string values — silently drops typos and
+ *  wrong-typed entries so a bad config never crashes the renderer. */
+function filterIcons(obj: Record<string, unknown>): Partial<EditorShellIcons> {
+  const out: Partial<EditorShellIcons> = {};
+  for (const key of ICON_KEYS) {
+    const v = obj[key];
+    if (typeof v === "string") out[key] = v;
+  }
+  return out;
 }
 
 export const DEFAULT_CONFIG: EditorShellConfig = {
   pinnedStatus: [],
+  icons: {},
 };
 
 function getAgentDir(): string {
@@ -51,9 +90,14 @@ export function loadEditorShellConfig(cwd?: string): EditorShellConfig {
   if (!raw) return { ...DEFAULT_CONFIG };
 
   const pinned = raw.pinnedStatus;
+  const iconsRaw = raw.icons;
   return {
     pinnedStatus: Array.isArray(pinned)
       ? pinned.filter((k): k is string => typeof k === "string")
       : DEFAULT_CONFIG.pinnedStatus,
+    icons:
+      iconsRaw && typeof iconsRaw === "object"
+        ? filterIcons(iconsRaw as Record<string, unknown>)
+        : {},
   };
 }

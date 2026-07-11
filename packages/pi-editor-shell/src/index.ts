@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
 import { CardEditor, type FrameProvider, type SpinnerPhase } from "./card-editor";
-import { loadEditorShellConfig, type EditorShellConfig } from "./config";
+import { loadEditorShellConfig, type EditorShellConfig, type EditorShellIcons } from "./config";
 
 /**
  * pi-editor-shell — Replaces pi's default editor and status bar with a
@@ -47,15 +47,18 @@ function contextToken(pct: number | null | undefined): ThemeColor {
   return "success";
 }
 
-// ── Nerd Font icons (Octicons + FontAwesome) ──────────────────────────
-const ICON = {
+// ── Built-in icon set (Nerd Font). Users can override any subset via the
+//    `editorShell.icons` config — see config.ts. `cache` uses U+26A1, which
+//    Nerd Fonts maps `oct-zap` to directly (no dedicated glyph), so it is
+//    the same glyph in and out of a Nerd Font terminal.
+const DEFAULT_ICONS: EditorShellIcons = {
   model: "\uf4bc", //   oct-cpu
-  thinking: "\uf400", //   oct-light-bulb
+  thinking: "\uf400", //   oct-light_bulb
   context: "\uf49b", //   oct-cache
-  cache: "\u26a1", // ⚡  oct-zap
+  cache: "\u26a1", // ⚡  oct-zap (NF maps this codepoint to U+26A1)
   hitRate: "\uf140", //   fa-bullseye（靶心，缓存命中率）
-  folder: "\uf07c", //   fa-folder
-} as const;
+  folder: "\uf07c", //   fa-folder_open
+};
 
 /** Minimal inline types to read cache-read totals without importing the
  *  full pi-ai message union tree. */
@@ -192,7 +195,10 @@ export default function (pi: ExtensionAPI) {
   // The factory may run again when pi rebuilds the editor (model switch,
   // reload, …), so always drive whichever instance is current.
   let editor: CardEditor | undefined;
-  let config: EditorShellConfig = { pinnedStatus: [] };
+  let config: EditorShellConfig = { pinnedStatus: [], icons: {} };
+  // Resolved icons for the current session: built-in defaults merged with
+  // the user's overrides. Re-computed at session_start.
+  let icons: EditorShellIcons = { ...DEFAULT_ICONS };
   // Shared footer-data ref — the provider (running inside CardEditor.render)
   // reads it to resolve pinned status keys to their current text.
   let footerSnap: FooterSnap | undefined;
@@ -241,6 +247,7 @@ export default function (pi: ExtensionAPI) {
 
     _cwd = ctx.cwd;
     config = loadEditorShellConfig(ctx.cwd);
+    icons = { ...DEFAULT_ICONS, ...config.icons };
     _cacheTotal = sumCacheRead(ctx);
     _latestUsage = latestAssistantUsage(ctx);
     refreshGitDirty(ctx.cwd, () => editor?.requestRender());
@@ -283,7 +290,7 @@ export default function (pi: ExtensionAPI) {
       const hitRate = cacheHitRate(_latestUsage);
       const cachePart =
         _cacheTotal > 0
-          ? `${theme.fg("dim", " · ")}${theme.fg("warning", `${ICON.cache} ${formatTokens(cacheReadNow)} (${formatTokens(_cacheTotal)})${hitRate != null ? ` ${ICON.hitRate} ${hitRate.toFixed(1)}%` : ""}`)}`
+          ? `${theme.fg("dim", " · ")}${theme.fg("warning", `${icons.cache} ${formatTokens(cacheReadNow)} (${formatTokens(_cacheTotal)})${hitRate != null ? ` ${icons.hitRate} ${hitRate.toFixed(1)}%` : ""}`)}`
           : "";
 
       // Git branch + dirty state — pi's format: ~/Projects (main).
@@ -292,16 +299,16 @@ export default function (pi: ExtensionAPI) {
       const dirty = branch ? gitDirtyDisplay() : "";
       const cwdDisplay =
         branch && branch !== "detached"
-          ? `${ICON.folder} ${cwdText} (${branch}${dirty})`
-          : `${ICON.folder} ${cwdText}`;
+          ? `${icons.folder} ${cwdText} (${branch}${dirty})`
+          : `${icons.folder} ${cwdText}`;
 
       // Model in accent; thinking label in its level token — same hue the
       // border takes on, so switching levels visibly retints both together.
       return {
-        topLeft: ` ${theme.fg("accent", `${ICON.model} ${model}`)}${theme.fg("dim", " · ")}${theme.fg(thinkingColor, `${ICON.thinking} ${thinking}`)} `,
+        topLeft: ` ${theme.fg("accent", `${icons.model} ${model}`)}${theme.fg("dim", " · ")}${theme.fg(thinkingColor, `${icons.thinking} ${thinking}`)} `,
         topRight: buildPinned(),
         // Context in severity color; cwd stays muted so it never competes.
-        bottomLeft: ` ${theme.fg(contextToken(pct), `${ICON.context} ${ctxText}`)}${cachePart} `,
+        bottomLeft: ` ${theme.fg(contextToken(pct), `${icons.context} ${ctxText}`)}${cachePart} `,
         bottomRight: theme.fg("muted", ` ${cwdDisplay} `),
       };
     };

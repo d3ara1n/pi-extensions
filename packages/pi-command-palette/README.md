@@ -46,6 +46,8 @@ When a command replaces your current editor text, the original content is saved 
 
 The "Model: Switch Model" action opens a secondary overlay listing all models with configured API keys. Select one to switch instantly — no need to go through `/model` or `Ctrl+P`.
 
+**Scoped models float to the top**, marked with a ★ (favorite) prefix. "Scoped" here means the same set pi uses for its built-in selector's scoped tab and `Ctrl+P` cycling — the `enabledModels` patterns in your `settings.json` (project `.pi/settings.json` overrides global `~/.pi/agent/settings.json`). Everything else follows alphabetically. If no scope is configured, the list is a plain alphabetical roster — nothing breaks.
+
 ## Configuration
 
 The default shortcut is `Ctrl+Shift+P`. If it conflicts with your terminal, override it via either of the following (evaluated in order, first match wins).

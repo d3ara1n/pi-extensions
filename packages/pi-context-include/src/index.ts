@@ -80,8 +80,13 @@ let _lastScan: ScanDiagnostic | null = null;
 async function loadConfig(cwd?: string): Promise<void> {
   const settings = await readSettings(cwd);
   const config = settings?.contextInclude as ContextIncludeConfig | undefined;
-  _maxDepth = config?.maxDepth ?? DEFAULT_MAX_DEPTH;
-  _maxBytes = config?.maxBytes ?? DEFAULT_MAX_BYTES;
+  _maxDepth = validLimit(config?.maxDepth) ?? DEFAULT_MAX_DEPTH;
+  _maxBytes = validLimit(config?.maxBytes) ?? DEFAULT_MAX_BYTES;
+}
+
+/** Accept only non-negative finite numeric limits; invalid values use defaults. */
+function validLimit(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 /** Read merged settings (project overrides global). */
@@ -156,7 +161,7 @@ interface ResolveState {
   diag: ScanDiagnostic;
   maxDepth: number;
   maxBytes: number;
-  /** Running byte count of included content, enforced during resolution. */
+  /** Running UTF-8 byte count of included content, enforced during resolution. */
   accumulatedBytes: number;
 }
 
@@ -170,9 +175,11 @@ async function canonicalize(filePath: string): Promise<string> {
 }
 
 /**
- * Recursively resolve @path references from a file's content.
- * Dedup & cycle detection use canonical (realpath) paths so symlinks to the
- * same file are only included once.
+ * Recursively resolve @path references from a file's content. The function
+ * itself canonicalizes and registers every entry, including roots, before
+ * scanning references so cycles and duplicate includes are handled uniformly.
+ * Dedup uses canonical (realpath) paths so symlinks to the same file are only
+ * included once.
  */
 async function resolveIncludes(
   filePath: string,
@@ -230,7 +237,7 @@ async function resolveIncludes(
       continue;
     }
 
-    const size = includedContent.length;
+    const size = Buffer.byteLength(includedContent, "utf8");
     if (state.accumulatedBytes + size > state.maxBytes) {
       state.diag.skipped.push({
         ref,
@@ -240,12 +247,11 @@ async function resolveIncludes(
       continue;
     }
 
-    state.visited.add(real);
     state.results.push({ path: resolved, content: includedContent });
     state.accumulatedBytes += size;
     state.diag.included.push({ path: resolved, bytes: size });
 
-    // Recurse into included file for nested @references
+    // resolveIncludes registers the child itself before scanning its references.
     await resolveIncludes(real, includedContent, state, depth + 1);
   }
 }

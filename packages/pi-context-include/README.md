@@ -21,7 +21,7 @@ pi install npm:@d3ara1n/pi-context-include
 
 Or add to `~/.pi/agent/settings.json`:
 
-```jsonc
+```json
 {
   "extensions": [
     "/absolute/path/to/pi-extensions/packages/pi-context-include"
@@ -55,13 +55,15 @@ On each turn, the extension reads the referenced files and injects their content
 ## Configuration
 
 Optional. Read from `~/.pi/agent/settings.json` (global), merged with
-`{project}/.pi/settings.json` (project overrides global), under `contextInclude`:
+`{project}/.pi/settings.json` (project overrides global), under `contextInclude`.
+`maxDepth` and `maxBytes` must be finite, non-negative numbers; invalid values
+use the defaults. `maxBytes` is measured as UTF-8 bytes:
 
-```jsonc
+```json
 {
   "contextInclude": {
-    "maxDepth": 15,     // default: 10
-    "maxBytes": 1000000  // default: 500000 (500KB)
+    "maxDepth": 15,
+    "maxBytes": 1000000
   }
 }
 ```

@@ -1,6 +1,9 @@
-import { describe, it } from "node:test";
+import { describe, it, afterEach } from "node:test";
 import * as assert from "node:assert";
-import { extractReferences } from "./index.ts";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import contextIncludeExtension, { extractReferences } from "./index.ts";
 
 describe("extractReferences", () => {
   // ── basic resolution ──
@@ -172,5 +175,119 @@ describe("extractReferences", () => {
       "~/.agents/CODEGRAPH.md",
       "/etc/myapp/config.toml",
     ]);
+  });
+});
+
+// ── recursive resolution integration ───────────────────────────────────────
+
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+function makeTempProject(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "context-include-test-"));
+  tempDirs.push(dir);
+  return dir;
+}
+
+function writeFile(project: string, relativePath: string, content: string): string {
+  const filePath = path.join(project, relativePath);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, content);
+  return filePath;
+}
+
+function writeConfig(project: string, config: Record<string, unknown>): void {
+  writeFile(project, ".pi/settings.json", JSON.stringify({ contextInclude: config }));
+}
+
+/** Register the extension against a minimal in-memory pi API and run one scan. */
+async function scanIncludes(project: string, rootPath: string, rootContent: string): Promise<string | undefined> {
+  let sessionStart: ((event: unknown, ctx: { cwd: string }) => Promise<void>) | undefined;
+  let beforeAgentStart:
+    | ((event: {
+        systemPrompt?: string;
+        systemPromptOptions: { contextFiles: Array<{ path: string; content: string }> };
+      }) => Promise<{ systemPrompt: string } | undefined>)
+    | undefined;
+
+  contextIncludeExtension({
+    on(event: string, handler: unknown) {
+      if (event === "session_start") sessionStart = handler as typeof sessionStart;
+      if (event === "before_agent_start") beforeAgentStart = handler as typeof beforeAgentStart;
+    },
+    registerCommand() {},
+  } as any);
+
+  assert.ok(sessionStart);
+  assert.ok(beforeAgentStart);
+  await sessionStart({}, { cwd: project });
+  const result = await beforeAgentStart({
+    systemPrompt: "base prompt",
+    systemPromptOptions: { contextFiles: [{ path: rootPath, content: rootContent }] },
+  });
+  return result?.systemPrompt;
+}
+
+describe("context include recursive resolution", () => {
+  it("includes nested references depth-first with their absolute source paths", async () => {
+    const project = makeTempProject();
+    const root = writeFile(project, "AGENTS.md", "@first.md");
+    const first = writeFile(project, "first.md", "first\n@nested.md");
+    const nested = writeFile(project, "nested.md", "nested");
+    const canonicalFirst = fs.realpathSync(first);
+    const canonicalNested = fs.realpathSync(nested);
+
+    const prompt = await scanIncludes(project, root, "@first.md");
+
+    assert.ok(prompt);
+    assert.ok(prompt.includes(`<project_instructions path="${canonicalFirst}">\nfirst\n@nested.md\n</project_instructions>`));
+    assert.ok(prompt.includes(`<project_instructions path="${canonicalNested}">\nnested\n</project_instructions>`));
+    assert.ok(prompt.indexOf(canonicalFirst) < prompt.indexOf(canonicalNested));
+  });
+
+  it("terminates cycles without including the same child twice", async () => {
+    const project = makeTempProject();
+    const root = writeFile(project, "AGENTS.md", "@a.md");
+    const a = writeFile(project, "a.md", "A\n@b.md");
+    const b = writeFile(project, "b.md", "B\n@a.md");
+    const canonicalA = fs.realpathSync(a);
+    const canonicalB = fs.realpathSync(b);
+
+    const prompt = await scanIncludes(project, root, "@a.md");
+
+    assert.ok(prompt);
+    assert.equal(prompt.split(`<project_instructions path="${canonicalA}">`).length - 1, 1);
+    assert.equal(prompt.split(`<project_instructions path="${canonicalB}">`).length - 1, 1);
+  });
+
+  it("uses defaults for invalid numeric limits", async () => {
+    const project = makeTempProject();
+    writeConfig(project, { maxDepth: -1, maxBytes: "not-a-number" });
+    const root = writeFile(project, "AGENTS.md", "@first.md");
+    const first = writeFile(project, "first.md", "first\n@nested.md");
+    const nested = writeFile(project, "nested.md", "nested");
+
+    const prompt = await scanIncludes(project, root, "@first.md");
+
+    assert.ok(prompt?.includes(`<project_instructions path="${fs.realpathSync(first)}">`));
+    assert.ok(prompt?.includes(`<project_instructions path="${fs.realpathSync(nested)}">`));
+  });
+
+  it("enforces maxBytes using UTF-8 bytes rather than JavaScript character count", async () => {
+    const project = makeTempProject();
+    writeConfig(project, { maxBytes: 1 });
+    const root = writeFile(project, "AGENTS.md", "@accent.md");
+    const accent = writeFile(project, "accent.md", "é"); // one code point, two UTF-8 bytes
+    const canonicalAccent = fs.realpathSync(accent);
+
+    const blocked = await scanIncludes(project, root, "@accent.md");
+    assert.equal(blocked, undefined);
+
+    writeConfig(project, { maxBytes: 2 });
+    const included = await scanIncludes(project, root, "@accent.md");
+    assert.ok(included?.includes(`<project_instructions path="${canonicalAccent}">\né\n</project_instructions>`));
   });
 });

@@ -123,6 +123,8 @@ export async function spawnSubagent(
   task: string,
   options: {
     cwd?: string;
+    /** Thinking level passed to the child pi process when the role defines one. */
+    thinking?: string;
     tools?: string[];
     systemPrompt?: string;
     /** Extra context delivered as a separate channel from the task. */
@@ -177,6 +179,10 @@ export async function spawnSubagent(
   try {
     // Build CLI args
     const args: string[] = ["--mode", "json", "--no-session", "--model", modelRef];
+
+    if (options.thinking) {
+      args.push("--thinking", options.thinking);
+    }
 
     if (options.tools && options.tools.length > 0) {
       args.push("--tools", options.tools.join(","));

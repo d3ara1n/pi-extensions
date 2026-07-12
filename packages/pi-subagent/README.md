@@ -32,9 +32,9 @@ This means:
 
 | Role | Model Role | Tools | Can Delegate To | Description |
 |------|-----------|-------|-----------------|-------------|
-| `explorer` | fast | read, find, grep, glob | — | Fast code search (read-only, no bash) |
-| `reviewer` | heavy | read, bash, grep, glob | — | Deep code review (read-only, bash for git/log) |
-| `worker` | default | read, bash, edit, write, grep, glob, delegate | explorer, researcher | Implementation — the only role that can modify files |
+| `explorer` | fast | read, find, grep | — | Fast code search (read-only, no bash) |
+| `reviewer` | heavy | read, bash, grep, find | — | Deep code review (read-only, bash for git/log) |
+| `worker` | default | read, bash, edit, write, grep, find, delegate | explorer, researcher | Implementation — the only role that can modify files |
 | `researcher` | fast | web_search, fetch_content, read, bash, delegate | explorer | Web research + GitHub repo analysis |
 
 **Nested delegation**: `worker` and `researcher` can spawn their own subagents. This keeps the main model's context clean — a worker can explore unfamiliar code via an `explorer` subagent without returning intermediate results to the main model.

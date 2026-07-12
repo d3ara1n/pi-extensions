@@ -1,6 +1,6 @@
 # @d3ara1n/pi-provider-agnes
 
-Agnes AI provider for pi — registers two providers sharing the same text models but differing in billing model.
+Agnes AI provider for pi — registers two providers sharing the same text + image models but differing in billing model.
 
 ## Providers
 
@@ -19,7 +19,7 @@ Subscription plan provider. Cost set to zero — the subscription fee is a fixed
 
 ## Models
 
-Both providers export the same text models:
+Both providers export the same models:
 
 | Model | Reasoning | Input | Context | Max Output |
 |---|---|---|---|---|

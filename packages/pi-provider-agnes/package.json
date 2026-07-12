@@ -2,7 +2,7 @@
   "name": "@d3ara1n/pi-provider-agnes",
   "version": "1.1.0",
   "type": "module",
-  "description": "Agnes AI provider for pi — registers agnes (token billing) and agnes-plan (subscription) providers with text models",
+  "description": "Agnes AI provider for pi — registers agnes (token billing) and agnes-plan (subscription) providers with text and image input models",
   "keywords": [
     "pi-package",
     "pi",

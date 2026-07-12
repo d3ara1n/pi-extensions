@@ -5,7 +5,7 @@
  * - `agnes`      — token billing (pricing unpublished → cost 0)
  * - `agnes-plan` — subscription plan; cost = 0
  *
- * Both share the same base URL and model list (text models only).
+ * Both share the same base URL and model list (text + image input).
  *
  * Usage quota/balance reporting is not yet implemented — Agnes AI does not
  * currently expose a public quota or balance API. When one becomes available,
@@ -17,7 +17,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const BASE_URL = "https://apihub.agnes-ai.com/v1";
 
-// ── Models (text only) ────────────────────────────────────────────────────
+// ── Models ────────────────────────────────────────────────────────────────
 
 interface TextModelDef {
   id: string;

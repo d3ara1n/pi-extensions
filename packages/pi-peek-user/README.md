@@ -40,7 +40,7 @@ pi install npm:@d3ara1n/pi-peek-user
 
 Or add to `~/.pi/agent/settings.json`:
 
-```jsonc
+```json
 {
   "extensions": [
     "/absolute/path/to/pi-extensions/packages/pi-model-roles",

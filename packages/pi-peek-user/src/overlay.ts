@@ -83,6 +83,10 @@ export class PeekOverlay {
   private askStart = 0;
   private streamText = "";
 
+  // cached reference for this overlay's follow-up questions
+  private referenceText: string | null = null;
+  private requestGeneration = 0;
+
   // tracker (main agent's current activity, shown in the header)
   private tracker: MainAgentStatus | null = null;
   private trackerTimer: ReturnType<typeof setInterval> | null = null;
@@ -168,18 +172,26 @@ export class PeekOverlay {
     this.autoFollow = true;
     this.tui.requestRender();
 
+    const generation = ++this.requestGeneration;
+    const referenceText = this.referenceText ?? this.api.serializeMainConversation();
+    this.referenceText = referenceText;
+
     this.api
       .investigate(q, {
+        referenceText,
         onStage: (s) => {
+          if (this.closed || generation !== this.requestGeneration) return;
           this.stage = s;
           this.tui.requestRender();
         },
         onToken: (d) => {
+          if (this.closed || generation !== this.requestGeneration) return;
           this.streamText += d;
           this.tui.requestRender();
         },
       })
       .then((result) => {
+        if (this.closed || generation !== this.requestGeneration) return;
         this.history.push({
           role: "assistant",
           text: result.answer,
@@ -193,6 +205,7 @@ export class PeekOverlay {
         this.tui.requestRender();
       })
       .catch((err) => {
+        if (this.closed || generation !== this.requestGeneration) return;
         const msg = err instanceof Error ? err.message : String(err);
         this.history.push({ role: "assistant", text: `Error: ${msg}` });
         this.mode = "input";
@@ -207,6 +220,8 @@ export class PeekOverlay {
   private close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.requestGeneration++;
+    this.referenceText = null;
     if (this.trackerTimer) {
       clearInterval(this.trackerTimer);
       this.trackerTimer = null;

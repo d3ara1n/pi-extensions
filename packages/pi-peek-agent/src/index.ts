@@ -284,7 +284,7 @@ export default function registerPeekAgentExtension(pi: ExtensionAPI): void {
 
     // Serve remote asks: serialize our conversation + investigate via utility model.
     // Never touches our main session — getPeekAPI().investigate() is read-after-burn.
-    server = startPeekServer(sockPath, () => api.getSelfInfo(), {
+    const serverResult = await startPeekServer(sockPath, () => api.getSelfInfo(), {
       async onAsk(data, emitters) {
         const peekApi = getPeekAPI();
         const { answer } = await peekApi.investigate(data.question ?? "", {
@@ -294,6 +294,16 @@ export default function registerPeekAgentExtension(pi: ExtensionAPI): void {
         return { answer };
       },
     });
+
+    if (serverResult.error || !serverResult.server) {
+      const message = `peek-agent failed to start IPC server at ${sockPath}: ${serverResult.error?.message ?? "unknown error"}`;
+      if (ctx.hasUI) ctx.ui.notify(message, "error");
+      else console.error(message);
+      latestCtx = ctx;
+      refreshWidget(ctx, name, 0);
+      return;
+    }
+    server = serverResult.server;
 
     // Seed our registry marker + heartbeat (also refreshes the widget count).
     writeSelfMarker(api.getSelfInfo(), registryDir);

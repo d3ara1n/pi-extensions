@@ -22,7 +22,7 @@
     }
   },
   "dependencies": {
-    "@d3ara1n/pi-peek": "^0.2.0"
+    "@d3ara1n/pi-peek": "^0.3.0"
   },
   "pi": {
     "extensions": [

@@ -5,6 +5,7 @@
  * fields there). This package reads only the cross-instance fields.
  */
 
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -41,7 +42,7 @@ function positiveNumber(value: unknown, fallback: number): number {
  * `?? DEFAULT` fills any gap. (No field-level merge — project replaces global.) */
 export function loadAgentConfig(cwd?: string): AgentConfig {
   const globalRaw = readPeek(path.join(getAgentDir(), "settings.json"));
-  const projectRaw = cwd ? readPeek(path.join(cwd, ".pi", "settings.json")) : undefined;
+  const projectRaw = cwd ? readPeek(path.join(cwd, CONFIG_DIR_NAME, "settings.json")) : undefined;
   const raw = projectRaw ?? globalRaw;
   if (!raw) return { ...DEFAULT_AGENT_CONFIG };
 

@@ -49,16 +49,21 @@ export interface PeekServer {
   close(): void;
 }
 
+export interface PeekServerResult {
+  server?: PeekServer;
+  error?: Error;
+}
+
 /**
  * Start a UDS server at sockPath. On connection, reads JSON-per-line requests.
  * "ask" requests are handled by `handlers.onAsk`; the server streams emits
  * back during handling, then sends the final response.
  */
-export function startPeekServer(
+export async function startPeekServer(
   sockPath: string,
   getSelfInfo: () => PeerInfo,
   handlers: PeekServerHandlers,
-): PeekServer {
+): Promise<PeekServerResult> {
   // Remove a stale socket file from a crashed previous owner.
   try {
     fs.unlinkSync(sockPath);
@@ -90,23 +95,49 @@ export function startPeekServer(
     });
   });
 
-  server.listen(sockPath);
-  server.on("error", () => {
-    // surface nothing fatal; pi keeps running
+  const listenError = await new Promise<Error | undefined>((resolve) => {
+    const onError = (err: Error) => {
+      server.off("listening", onListening);
+      resolve(err);
+    };
+    const onListening = () => {
+      server.off("error", onError);
+      resolve(undefined);
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    try {
+      server.listen(sockPath);
+    } catch (err) {
+      server.off("error", onError);
+      server.off("listening", onListening);
+      resolve(err instanceof Error ? err : new Error(String(err)));
+    }
   });
 
+  if (listenError) {
+    try {
+      server.close();
+    } catch {
+      // ignore
+    }
+    return { error: listenError };
+  }
+
   return {
-    close() {
-      try {
-        server.close();
-      } catch {
-        // ignore
-      }
-      try {
-        fs.unlinkSync(sockPath);
-      } catch {
-        // ignore
-      }
+    server: {
+      close() {
+        try {
+          server.close();
+        } catch {
+          // ignore
+        }
+        try {
+          fs.unlinkSync(sockPath);
+        } catch {
+          // ignore
+        }
+      },
     },
   };
 }

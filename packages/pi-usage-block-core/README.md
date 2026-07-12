@@ -7,7 +7,7 @@ Provider-agnostic — any provider plugin can register itself, and any UI plugin
 A provider is one of two **kinds**, discriminated by `kind`:
 
 - **`quota`** — usage consumed within a time window (e.g. a 5h tokens quota). Has a natural denominator (`limit`), so the display shows a percentage.
-- **`balance`** — an absolute prepaid amount on an account (e.g. $32.50 remaining). No window, no reset — just an amount + unit.
+- **`balance`** — an absolute prepaid amount on an account (e.g. $32.50 remaining). No window, no reset — just an amount and currency.
 
 ## Dependencies
 
@@ -52,7 +52,7 @@ An absolute remaining balance with no time window.
 ```ts
 interface BalanceInfo {
   amount: number;        // remaining amount, e.g. 32.5
-  unit: UsageUnit;
+  currency: string;      // ISO 4217 currency code, e.g. "USD", "CNY"
 }
 ```
 
@@ -139,4 +139,4 @@ usageRegistry.size: number;
 
 ## Why a separate package?
 
-Pi loads extensions from the same `node_modules` tree. By sharing a registry package with a `globalThis` singleton, provider and UI plugins can communicate without knowing about each other — even across jiti module reloads.
+Pi extensions can load the same package under distinct module identities. Storing this registry on `globalThis` keeps provider and UI plugins connected across those identities and reloads.

@@ -114,9 +114,8 @@ export type UsageProvider = QuotaProvider | BalanceProvider;
 /**
  * Global singleton registry for usage providers.
  *
- * Shared across all pi extensions via the npm package —
- * because pi loads all extensions from the same node_modules tree,
- * the module-level instance is naturally shared.
+ * Shared across all pi extensions through globalThis, which avoids duplicate
+ * registries when the same package is loaded under different module identities.
  */
 export class UsageRegistry {
   private providers = new Map<string, UsageProvider>();
@@ -147,7 +146,7 @@ export class UsageRegistry {
   }
 }
 
-/** Module-level singleton — shared via globalThis to survive jiti module dedup issues. */
+/** Global singleton registry shared via globalThis across module identities. */
 const GLOBAL_KEY = Symbol.for("@d3ara1n/pi-usage-block-core/registry");
 
 function createRegistry(): UsageRegistry {

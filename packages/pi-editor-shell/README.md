@@ -15,19 +15,13 @@ All segments are re-read from live session state on every paint, so switching th
 
 In `~/.pi/agent/settings.json` under the `editorShell` key:
 
-```jsonc
+```json
 {
   "editorShell": {
-    // Status keys to pin to the top-right corner of the shell.
-    // Only keys set via ctx.ui.setStatus() are eligible.
     "pinnedStatus": ["subagent", "access-denied"],
-
-    // Per-slot border-icon overrides. Any subset; missing keys fall back
-    // to the built-in Nerd Font set (see table below). Values are raw
-    // characters — "\uf0e7" for a Nerd Font glyph, "🤖" for an emoji.
     "icons": {
-      "model": "🤖",
-      "cache": "\uf0e7"
+      "model": "robot",
+      "cache": "\\uf0e7"
     }
   }
 }
@@ -64,7 +58,7 @@ pi install npm:@d3ara1n/pi-editor-shell
 
 Or add to `~/.pi/agent/settings.json`:
 
-```jsonc
+```json
 {
   "extensions": [
     "/absolute/path/to/pi-extensions/packages/pi-editor-shell"

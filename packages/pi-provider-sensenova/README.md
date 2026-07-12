@@ -14,12 +14,14 @@ SenseNova (商汤日日新) provider for [Pi Coding Agent](https://pi.dev) — r
 |---|---|---|---|---|
 | `sensenova-6.7-flash-lite` | Yes | text, image | 256K | 64K |
 
-`sensenova-6.7-flash-lite` is SenseTime's lightweight multimodal agent model for real-world workflows. It supports:
-- **Text + image input** (OpenAI Vision-compatible format)
-- **Reasoning** (chain-of-thought via `reasoning` field, controlled by `reasoning_effort`)
-- **Tool calling** (`tools` / `tool_choice`)
-- **JSON mode** (`response_format: { type: "json_object" }`)
-- **Streaming** (SSE, with `usage` in last chunk)
+`sensenova-6.7-flash-lite` is SenseTime's lightweight multimodal agent model for real-world workflows. This provider registers the model with:
+
+- **Text + image input**
+- **Reasoning enabled** in pi's model metadata
+- **OpenAI-compatible chat/completions transport** via pi's built-in provider layer
+- **`system` role compatibility** (`supportsDeveloperRole: false`)
+
+Other compatibility details such as tool-call streaming quirks, usage chunks, and overflow error text should be re-verified against the live API before changing compat flags; see [`PROVIDER.md`](../../PROVIDER.md).
 
 ## Installation
 

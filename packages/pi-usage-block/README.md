@@ -155,7 +155,7 @@ The active provider is marked with `*(active)*`.
 **Usage — all providers**
 
 Zhipu Coding Plan *(active)* (api)      🟢 43% ↺3h34m
-OpenAI (api)                             🔴 89% ↺1h
+OpenAI (headers)                         🔴 89% ↺1h
 Anthropic (headers)                      —
 DeepSeek (api)                           🟢 $32.50
 ```

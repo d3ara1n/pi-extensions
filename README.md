@@ -22,7 +22,7 @@ A collection of small extensions for [Pi Coding Agent](https://pi.dev).
 | [`pi-peek-user`](./packages/pi-peek-user) <sup>‡</sup> | `/peek` overlay — ask your own session a question via the utility model, read-after-burn (never disturbs the main agent) |
 | [`pi-peek-agent`](./packages/pi-peek-agent) <sup>‡</sup> | Cross-instance peek — `peek`/`peek_list` tools over a zero-dep Unix domain socket mesh; ask another pi instance without disturbing it |
 
-> <sup>†</sup> Requires [`pi-model-roles`](./packages/pi-model-roles) installed; <sup>‡</sup> Requires [`pi-peek`](./packages/pi-peek) in installed (which itself requires [`pi-model-roles`](./packages/pi-model-roles))
+> <sup>†</sup> Requires [`pi-model-roles`](./packages/pi-model-roles) installed; <sup>‡</sup> Requires [`pi-peek`](./packages/pi-peek) installed (which itself requires [`pi-model-roles`](./packages/pi-model-roles))
 
 ## Libraries
 

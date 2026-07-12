@@ -97,9 +97,7 @@ used directly by name (e.g. as `sideAgentRole` in scout config) and resolved via
 | `model` | `string \| null` | `null` | `"provider/model-id"` or `null` = use current model |
 | `thinking` | `string` | | `"off"` `"minimal"` `"low"` `"medium"` `"high"` `"xhigh"` |
 | `description` | `string` | | Human-readable description |
-| `tools` | `string` | | Comma-separated default tool list |
 | `hidden` | `boolean` | `false` | Hide from user-facing listings |
-| `systemPromptAppend` | `string` | | Extra system prompt content |
 
 ## API (for extension authors)
 

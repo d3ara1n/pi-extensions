@@ -26,12 +26,8 @@ export interface RoleConfig {
   thinking?: ThinkingLevel;
   /** Human-readable description of when to use this role */
   description?: string;
-  /** Comma-separated list of tools available to this role */
-  tools?: string;
   /** If true, hide this role from user-facing listings */
   hidden?: boolean;
-  /** Additional system prompt content appended when this role is active */
-  systemPromptAppend?: string;
 }
 
 /** Top-level modelRoles configuration stored in pi settings. */

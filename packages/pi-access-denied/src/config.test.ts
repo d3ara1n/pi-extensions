@@ -376,10 +376,10 @@ describe("file IO robustness", () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// Global + project merge (A: shallow merge — project replaces, per-key)
+// Global + project replacement (project replaces the entire accessDenied block)
 // ────────────────────────────────────────────────────────────────────────────
 
-describe("global + project merge (shallow)", () => {
+describe("global + project replacement", () => {
   test("project mode overrides global mode", () => {
     writeGlobal({ accessDenied: { mode: "deny" } });
     writeProject({ accessDenied: { mode: "allow" } });
@@ -408,18 +408,23 @@ describe("global + project merge (shallow)", () => {
     assert.deepEqual(loadConfig(tmpProject).allowedPaths, ["/project"]);
   });
 
-  test("project can OVERRIDE a key while global keys survive", () => {
-    // Shallow merge of the accessDenied OBJECT: project.mode replaces
-    // global.mode, but an absent project.allowedPaths inherits global's.
+  test("a project accessDenied block replaces the global block; omitted fields use defaults", () => {
     writeGlobal({
-      accessDenied: { mode: "deny", allowedPaths: ["/from-global"] },
+      accessDenied: {
+        mode: "deny",
+        allowedPaths: ["/from-global"],
+        deniedPaths: [{ paths: ["/global-denied"], reason: "global" }],
+        tools: ["write"],
+      },
     });
     writeProject({
-      accessDenied: { mode: "allow" }, // allowedPaths intentionally absent
+      accessDenied: { mode: "allow" },
     });
     const cfg = loadConfig(tmpProject);
-    assert.equal(cfg.mode, "allow"); // overridden
-    assert.deepEqual(cfg.allowedPaths, ["/from-global"]); // inherited
+    assert.equal(cfg.mode, "allow");
+    assert.deepEqual(cfg.allowedPaths, DEFAULT_CONFIG.allowedPaths);
+    assert.deepEqual(cfg.deniedPaths, DEFAULT_CONFIG.deniedPaths);
+    assert.deepEqual(cfg.tools, DEFAULT_CONFIG.tools);
   });
 
   test("no project settings → global used", () => {

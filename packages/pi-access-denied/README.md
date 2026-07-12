@@ -43,7 +43,7 @@ pi install npm:@d3ara1n/pi-access-denied
 
 Or add to `~/.pi/agent/settings.json`:
 
-```jsonc
+```json
 {
   "extensions": [
     "/absolute/path/to/pi-extensions/packages/pi-access-denied"
@@ -55,21 +55,21 @@ Then `/reload` (or restart pi).
 
 ## Configuration
 
-Under the `accessDenied` key in `settings.json` (global `~/.pi/agent/settings.json` or per-project `.pi/settings.json`; project overrides global):
+Under the `accessDenied` key in `settings.json` (global `~/.pi/agent/settings.json` or per-project `.pi/settings.json`). A present project `accessDenied` block replaces the global block; fields omitted from the selected block use their defaults:
 
-```jsonc
+```json
 {
   "accessDenied": {
-    "mode": "prompt",                    // prompt | deny | allow, default prompt
-    "allowedPaths": [                    // always in-bounds roots, in addition to cwd
-      "~/Documents/notes",               //   (~ and $HOME are expanded)
+    "mode": "prompt",
+    "allowedPaths": [
+      "~/Documents/notes",
       "/var/log/myapp"
     ],
-    "deniedPaths": [                     // groups of paths sharing one reason
-      { "paths": ["~/.config/X/data"], "reason": "X 数据已迁到 ~/MyData/X，请用新位置" },
-      { "paths": ["/old/cache"] }        //   reason omitted = block with default message
+    "deniedPaths": [
+      { "paths": ["~/.config/X/data"], "reason": "X data moved to ~/MyData/X; use the new location" },
+      { "paths": ["/old/cache"] }
     ],
-    "tools": ["write", "edit", "bash"]   // which tools to gate, default these three
+    "tools": ["write", "edit", "bash"]
   }
 }
 ```
@@ -94,10 +94,12 @@ A same-depth allow/deny conflict (same path in both lists) resolves to **deny** 
 
 The primary use case is **redirecting an agent away from a stale path**. An agent often reaches for a data dir it "remembers" from training data; if you moved that dir, the agent fails to find it and starts searching the disk. Listing the old path in `deniedPaths` with the new location as the reason short-circuits that:
 
-```jsonc
-"deniedPaths": [
-  { "paths": ["~/.config/some-app"], "reason": "moved to ~/MyData/some-app — use the new location" }
-]
+```json
+{
+  "deniedPaths": [
+    { "paths": ["~/.config/some-app"], "reason": "moved to ~/MyData/some-app; use the new location" }
+  ]
+}
 ```
 
 The agent touches `~/.config/some-app`, gets blocked, and the reason (surfaced as a "user note") tells it exactly where to look instead — no more disk-wide scavenger hunts.

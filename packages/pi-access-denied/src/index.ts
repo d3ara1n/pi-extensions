@@ -203,24 +203,24 @@ export default function (pi: ExtensionAPI) {
       return { block: true, reason: "Authorization dismissed" };
     }
 
-    // Any deny → block the whole call. Deny-always paths are remembered with
-    // the panel's single global reason. The stored reason is the user's RAW
-    // note, re-wrapped on each cache hit so a misleading note can't pass as
-    // an operation result (defense-in-depth alongside is_error: true).
+    // Persist every "always" choice before deciding this call. A deny still
+    // blocks the whole call, but any simultaneous always-allow must remain
+    // available to subsequent calls.
+    const userNote = result.reason?.trim() ?? "";
+    for (const [p, c] of result.choices) {
+      if (c === "always-allow") pm.addSessionAllow(p);
+      else if (c === "always-deny") pm.addSessionDeny(p, userNote);
+    }
+
+    // Any deny blocks the whole call. The stored deny reason is the user's RAW
+    // note, re-wrapped on each cache hit so a misleading note can't pass as an
+    // operation result (defense-in-depth alongside is_error: true).
     const hasDeny = [...result.choices.values()].some((c) => c === "deny" || c === "always-deny");
     if (hasDeny) {
-      const userNote = result.reason?.trim() ?? "";
-      for (const [p, c] of result.choices) {
-        if (c === "always-deny") pm.addSessionDeny(p, userNote);
-      }
       return { block: true, reason: denyReason(userNote) };
     }
 
-    // All allow / always-allow → passthrough; always-allow paths remembered.
-    for (const [p, c] of result.choices) {
-      if (c === "always-allow") pm.addSessionAllow(p);
-    }
-    return; // passthrough this one call
+    return; // all allow / always-allow → passthrough this call
   });
 
   // ── Commands ───────────────────────────────────────────────────────────

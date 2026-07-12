@@ -80,17 +80,20 @@ function asDeniedPaths(value: unknown): Record<string, string | null> {
 }
 
 /**
- * Load accessDenied config, merged from global + project settings over defaults.
+ * Load accessDenied config from project or global settings over defaults.
+ * A present project `accessDenied` object replaces the global object entirely;
+ * missing fields then fall back to DEFAULT_CONFIG.
  * @param cwd - Project working directory (for .pi/settings.json lookup)
  */
 export function loadConfig(cwd?: string): AccessDeniedConfig {
   const globalSettings = readSettingsFile(path.join(getAgentDir(), "settings.json"));
   const projectSettings = cwd ? readSettingsFile(path.join(cwd, ".pi", "settings.json")) : {};
 
-  // Project overrides global. Only the accessDenied key matters here.
-  const globalCfg = globalSettings?.accessDenied ?? {};
-  const projectCfg = projectSettings?.accessDenied ?? {};
-  const raw = { ...globalCfg, ...projectCfg };
+  // A project accessDenied block replaces the global block as a whole. Fields
+  // omitted from that selected block fall back to DEFAULT_CONFIG below.
+  const globalRaw = globalSettings?.accessDenied;
+  const projectRaw = projectSettings?.accessDenied;
+  const raw = projectRaw ?? globalRaw ?? {};
 
   return {
     mode: asMode(raw.mode) ?? DEFAULT_CONFIG.mode,

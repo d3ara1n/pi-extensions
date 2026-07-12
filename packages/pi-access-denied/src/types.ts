@@ -22,7 +22,8 @@ export interface AuthResult {
 /**
  * Configuration stored under the `accessDenied` key in pi settings
  * (`~/.pi/agent/settings.json` globally, `.pi/settings.json` per project).
- * Project settings override global ones.
+ * Project settings replace the global `accessDenied` block when present; fields
+ * omitted from the selected block fall back to defaults.
  */
 export interface AccessDeniedConfig {
   /** Default mode on session start. Defaults to `"prompt"`. */

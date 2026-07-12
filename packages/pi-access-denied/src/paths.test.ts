@@ -87,6 +87,15 @@ describe("posixUnder: posix-style prefix check", () => {
   test("equal path is under root", () => {
     assert.equal(posixUnder("/tmp", "/tmp"), true);
   });
+  test("the filesystem root covers every absolute path", () => {
+    assert.equal(posixUnder("/", "/"), true);
+    assert.equal(posixUnder("/etc/passwd", "/"), true);
+  });
+  test("Windows drive paths compare case-insensitively", () => {
+    assert.equal(posixUnder("C:/Project/Src/file.ts", "c:/project"), true);
+    assert.equal(posixUnder("c:/project", "C:/PROJECT"), true);
+    assert.equal(posixUnder("C:/Project2/file.ts", "c:/project"), false);
+  });
   test("sibling-prefix trap: /tmp2 is NOT under /tmp", () => {
     assert.equal(posixUnder("/tmp2", "/tmp"), false);
     assert.equal(posixUnder("/tm", "/tmp"), false);
@@ -98,6 +107,10 @@ describe("underRoot: separator-agnostic prefix check", () => {
     assert.equal(underRoot("/a/b/c", "/a/b"), true);
     assert.equal(underRoot("\\a\\b\\c", "/a/b"), true); // backslash target
     assert.equal(underRoot("/a/b", "/a/b"), true); // equal
+  });
+  test("Windows drive paths are case-insensitive after separator normalization", () => {
+    assert.equal(underRoot("C:\\Project\\src\\file.ts", "c:/project"), true);
+    assert.equal(underRoot("C:/Project2/file.ts", "c:\\project"), false);
   });
   test("siblings and outside are not under root", () => {
     assert.equal(underRoot("/a/bc", "/a/b"), false); // sibling-prefix trap
@@ -306,6 +319,13 @@ describe("PathManager: cwd + allowedPaths", () => {
     const pm = new PathManager("/home/me/proj", [], {});
     assert.equal(pm.decide("/home/me/proj").kind, "allow");
     assert.equal(pm.decide("/home/me/proj/src/foo.ts").kind, "allow");
+  });
+  test("a root cwd covers the entire filesystem, unless a deeper deny overrides it", () => {
+    const pm = new PathManager("/", [], { "/private": "blocked" });
+    assert.equal(pm.decide("/etc/passwd").kind, "allow");
+    const denied = pm.decide("/private/data");
+    assert.equal(denied.kind, "deny");
+    assert.equal(denied.reason, "blocked");
   });
   test("sibling of cwd is outside (sibling-prefix trap)", () => {
     const pm = new PathManager("/home/me/proj", [], {});

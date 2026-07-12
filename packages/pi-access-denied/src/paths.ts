@@ -51,23 +51,34 @@ export function toPosix(p: string): string {
 
 /**
  * POSIX-style prefix check (separator `/`). Pure — usable on any platform to
- * test a posix-normalized target against a posix-normalized root.
+ * test a posix-normalized target against a posix-normalized root. Windows
+ * drive paths (`C:/...`) compare case-insensitively, matching Windows path
+ * semantics without changing the paths retained for display.
  *
  * @internal — exported for testing; use {@link underRoot} in production.
  */
 export function posixUnder(posixTarget: string, posixRoot: string): boolean {
-  return posixTarget === posixRoot || posixTarget.startsWith(posixRoot + "/");
+  const target = isWindowsDrivePath(posixTarget) ? posixTarget.toLowerCase() : posixTarget;
+  const root = isWindowsDrivePath(posixRoot) ? posixRoot.toLowerCase() : posixRoot;
+  if (target === root) return true;
+  // Both POSIX `/` and Windows `C:/` are roots whose trailing slash already
+  // supplies the child boundary; appending another slash would make `//`.
+  return target.startsWith(root.endsWith("/") ? root : root + "/");
+}
+
+/** True for a POSIX-normalized Windows drive path; pure for cross-host tests. */
+function isWindowsDrivePath(p: string): boolean {
+  return /^[A-Za-z]:\//.test(p);
 }
 
 /**
  * True if `target` equals or sits beneath `root`. Separator-agnostic: both
- * sides are normalized to POSIX first, so `/a/b` and `C:\proj` style roots
- * both work. Used by the PathManager for prefix matching.
+ * sides are normalized to POSIX first. Windows drive paths compare without
+ * case sensitivity while the original normalized paths remain available for
+ * status display. Used by the PathManager for prefix matching.
  */
 export function underRoot(target: string, root: string): boolean {
-  const t = toPosix(target);
-  const r = toPosix(root);
-  return t === r || t.startsWith(r + "/");
+  return posixUnder(toPosix(target), toPosix(root));
 }
 
 /**

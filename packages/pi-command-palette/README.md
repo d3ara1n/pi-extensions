@@ -18,7 +18,7 @@ pi install npm:@d3ara1n/pi-command-palette
 
 Or add to `~/.pi/agent/settings.json`:
 
-```jsonc
+```json
 {
   "extensions": [
     "/absolute/path/to/pi-extensions/packages/pi-command-palette"
@@ -64,9 +64,9 @@ Add it to your shell profile to persist (`~/.zshrc` on macOS, `~/.bashrc` on bas
 
 ### 2. settings.json
 
-Set `commandPalette.shortcut` in `~/.pi/agent/settings.json` (global) or `.pi/settings.json` in your project (project overrides global):
+Set `commandPalette.shortcut` in `~/.pi/agent/settings.json` (global) or `.pi/settings.json` in your project. A present project `commandPalette` block replaces the global block:
 
-```jsonc
+```json
 {
   "commandPalette": {
     "shortcut": "ctrl+alt+k"

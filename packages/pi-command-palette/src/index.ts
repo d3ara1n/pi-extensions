@@ -158,6 +158,18 @@ function buildPaletteItems(pi: ExtensionAPI, ctx: ExtensionContext): PaletteItem
 const STAR = "★ ";
 
 /**
+ * @internal — exported for testing; parses the selector's `provider/model-id` values.
+ */
+export function parseModelRef(modelRef: string): { provider: string; modelId: string } | undefined {
+  const slash = modelRef.indexOf("/");
+  if (slash === -1) return undefined;
+  return {
+    provider: modelRef.slice(0, slash),
+    modelId: modelRef.slice(slash + 1),
+  };
+}
+
+/**
  * Resolve the set of "scoped" model full-ids (`provider/id`) — the same models
  * pi surfaces in its built-in selector's "scoped" tab and Ctrl+P cycling.
  *
@@ -298,7 +310,9 @@ async function showModelSelector(pi: ExtensionAPI, ctx: ExtensionContext): Promi
 
   if (!result) return;
 
-  const [provider, modelId] = result.split("/");
+  const parsed = parseModelRef(result);
+  if (!parsed) return;
+  const { provider, modelId } = parsed;
   const model = ctx.modelRegistry.find(provider, modelId);
   if (model) {
     const success = await pi.setModel(model);

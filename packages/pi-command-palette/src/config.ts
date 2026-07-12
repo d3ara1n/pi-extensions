@@ -4,8 +4,8 @@
  * Priority (highest wins):
  *   1. `PI_COMMAND_PALETTE_KEY` env var — works even when the terminal intercepts
  *      `Ctrl+Shift+P` before it reaches the session (e.g. Termius on Windows/WSL2).
- *   2. `settings.json` `commandPalette.shortcut` (project `.pi/settings.json`
- *      overrides global `~/.pi/agent/settings.json`)
+ *   2. `settings.json` `commandPalette.shortcut` (a present project
+ *      `commandPalette` block replaces the global block)
  *   3. default `"ctrl+shift+p"`
  *
  * Why not a CLI flag? Flags are applied to the extension runtime AFTER extensions
@@ -54,12 +54,13 @@ export function resolveShortcutKey(cwd: string = process.cwd()): KeyId {
   const envKey = normalizeKey(process.env.PI_COMMAND_PALETTE_KEY);
   if (envKey) return envKey as KeyId;
 
-  // 2. settings.json — global ~/.pi/agent/settings.json; project overrides global.
+  // 2. settings.json — a present project block replaces the global block.
   const globalSettings = readSettings(path.join(getAgentDir(), "settings.json"));
   const projectSettings = readSettings(path.join(cwd, ".pi", "settings.json"));
-  const globalCfg = (globalSettings.commandPalette ?? {}) as { shortcut?: unknown };
-  const projectCfg = (projectSettings.commandPalette ?? {}) as { shortcut?: unknown };
-  const settingsKey = normalizeKey(projectCfg.shortcut ?? globalCfg.shortcut);
+  const globalRaw = globalSettings.commandPalette;
+  const projectRaw = projectSettings.commandPalette;
+  const config = (projectRaw ?? globalRaw ?? {}) as { shortcut?: unknown };
+  const settingsKey = normalizeKey(config.shortcut);
   if (settingsKey) return settingsKey as KeyId;
 
   // 3. default

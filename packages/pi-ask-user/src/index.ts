@@ -9,7 +9,7 @@
  *   - Per-question state (cursor position, scroll offset, type-something draft,
  *     multi-select picks) survives tab navigation — switching tabs never loses
  *     what you typed.
- *   - Single-select icons (◎→◉) and multi-select icons (□→▣) all live in the
+ *   - Single-select icons (○→◉) and multi-select icons (□→▣) all live in the
  *     U+25A0–25FF Geometric Shapes block, so any font that renders one renders
  *     all. The cursor indicator (▸) is independent of the "selected" glyph:
  *     moving up/down only moves ▸; Enter fills the selected glyph.
@@ -40,309 +40,44 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
-
-// ────────────────────────────────────────────────────────────────────────────
-// Icon constants — all in U+25A0–25FF Geometric Shapes for font consistency
-// ────────────────────────────────────────────────────────────────────────────
-
-const ICON_RADIO_EMPTY = "○"; // U+25CB white circle
-const ICON_RADIO_FILLED = "◉"; // U+25C9 fisheye
-const ICON_CHECK_EMPTY = "□"; // U+25A1
-const ICON_CHECK_FILLED = "▣"; // U+25A3
-const ICON_OTHER = "✎"; // pencil for "Type something."
-const ICON_CURSOR = "▸"; // current cursor position, independent of selection
-const ICON_NOTE = ICON_OTHER; // same ✎ pencil as custom answers — the note is also free-form user input
-const ICON_ANSWER = "›"; // lead glyph on option-pick answers in the result card
-
-// ────────────────────────────────────────────────────────────────────────────
-// Types
-// ────────────────────────────────────────────────────────────────────────────
-
-interface QuestionOption {
-  label: string;
-  description?: string;
-  /** Rich preview shown in the right column when this option is focused. */
-  preview?: string;
-}
-
-interface RenderOption extends QuestionOption {
-  isOther?: boolean;
-}
-
-interface Question {
-  /** Internal per-call identity. Never exposed in the tool's JSON result. */
-  id: string;
-  /** Original caller-provided key. Kept byte-for-byte for JSON results. */
-  tab: string;
-  /** Sanitized, non-empty label used exclusively by the TUI. */
-  displayTab: string;
-  header: string;
-  prompt?: string;
-  options: QuestionOption[];
-  multiSelect?: boolean;
-  allowSkip?: boolean;
-}
-
-/** A committed answer. Discriminated by `kind` so every state carries exactly
- *  the fields it needs — the compiler guarantees completeness, and the three
- *  display/serialization consumers all derive from `describeAnswer()` (single
- *  source of truth) so they can never drift apart.
- *
- *  - `single`: the user picked one of the offered options.
- *  - `custom`: single-select, the user typed a custom answer ("Type something.").
- *  - `multi`:  multi-select — `options` are the picked option labels; an
- *    optional `custom` carries any typed text alongside them. Pure-custom
- *    (no options checked) is `options: []` + `custom`; an empty commit
- *    (skippable, submitted with nothing) is `options: []` with no `custom`.
- *  - `skipped`: the user navigated past without answering (Tab/arrows).
- */
-type Answer =
-  | { id: string; tab: string; kind: "single"; option: string }
-  | { id: string; tab: string; kind: "custom"; text: string }
-  | { id: string; tab: string; kind: "multi"; options: string[]; custom?: string }
-  | { id: string; tab: string; kind: "skipped" };
-
-interface AskUserResult {
-  questions: Question[];
-  answers: Answer[];
-  cancelled: boolean;
-  /** Free-form note the user can attach on the review screen. Absent when empty. */
-  message?: string;
-}
-
-/** Per-tab ephemeral UI state. Preserved across tab switches. */
-interface TabState {
-  /** Cursor position (where ▸ is). */
-  cursor: number;
-  /** Vertical scroll offset for the options viewport. */
-  scrollOffset: number;
-  /** Whether "Type something." input mode is active for this tab. */
-  inputMode: boolean;
-  /** This tab's own editor instance (its draft lives inside; no cross-tab sync needed). */
-  editor: Editor;
-  /** Indices of committed options (multi-select). */
-  multiChecked: Set<number>;
-  /** Committed custom text for multi-select mode (kept alongside multiChecked, never overwriting it). Null if none. */
-  customText: string | null;
-  /** Committed single-select index, or -1 if none yet. */
-  selectedSingle: number;
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Schema
-// ────────────────────────────────────────────────────────────────────────────
-
-const QuestionOptionSchema = Type.Object({
-  label: Type.String({
-    description: "Short display label for the option (shown on the selection row)",
-  }),
-  description: Type.Optional(
-    Type.String({
-      description:
-        "Short explanation shown under the label (wraps). Add one when the label alone isn't self-explanatory.",
-    }),
-  ),
-  preview: Type.Optional(
-    Type.String({
-      description:
-        "Use this when `description` (a short one-liner) is not enough and the user genuinely benefits from seeing more detail in a side column — e.g. an ASCII layout demo, a code skeleton, a Pro/Cons breakdown, or the reasoning behind why this option is offered and what choosing it entails. Rendered verbatim in a side column (spaces/newlines preserved). Do NOT treat preview as extra text capacity. Every line competes for the user's attention against the option list; only add a preview when the content is worth reading, not just because there's room for more words. If a short `description` already conveys the option, leave preview empty. Most options need only `description`.",
-    }),
-  ),
-});
-
-const QuestionSchema = Type.Object({
-  header: Type.String({
-    description: "Short question title shown in the panel header, e.g. 'Which layout?'",
-  }),
-  tab: Type.String({
-    description:
-      'Short keyword that identifies this question. Shown on the tab bar when there are multiple questions, and returned in the result as the answer\'s prefix. Write it in the user\'s language (e.g. "数据库" or "布局" in a Chinese conversation, "Database" or "Layout" in English), not as a programmatic identifier like "db_choice". Must be unique across questions in one call.',
-  }),
-  prompt: Type.Optional(
-    Type.String({ description: "Optional longer body text shown under the header" }),
-  ),
-  options: Type.Array(QuestionOptionSchema, {
-    description:
-      "Available options. Pass 2-4; each needs a short `label` + a `description`, and a `preview` only when a description can't fully convey the option.",
-  }),
-  multiSelect: Type.Optional(
-    Type.Boolean({
-      description:
-        "If true, the user may check multiple options (space toggles, enter commits). Default false.",
-    }),
-  ),
-  allowSkip: Type.Optional(
-    Type.Boolean({
-      description:
-        "If false, the user MUST answer before proceeding (Tab/Enter with no selection is blocked). Default true. Use false for required questions.",
-    }),
-  ),
-});
-
-const AskUserParams = Type.Object({
-  questions: Type.Array(QuestionSchema, { description: "One or more questions to ask" }),
-});
-
-// ────────────────────────────────────────────────────────────────────────────
-// Constants
-// ────────────────────────────────────────────────────────────────────────────
-
-/**
- * Collapse/expand toggle. Ctrl+\ (0x1c) is free in pi's built-in keybindings
- * (unlike Ctrl+] which collides with tui.editor.jumpForward) and is not used
- * as a prefix by tmux/zellij/screen/ssh.
- */
-const TOGGLE_KEY = Key.ctrl("\\");
-const TOGGLE_HINT = "Ctrl+\\";
-
-// ────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ────────────────────────────────────────────────────────────────────────────
-
-function wrapTab(index: number, total: number): number {
-  if (total <= 0) return 0;
-  return ((index % total) + total) % total;
-}
-
-/**
- * Normalize externally-supplied text for TUI rendering. Fold CR/CRLF into real
- * newlines, convert tabs to a single space, and strip remaining C0 control
- * chars (keeping only \n). Rationale: a raw \r returns the cursor to column 0
- * mid-row and clobbers leading indent; a raw \t advances to the next terminal
- * tab stop (which the panel's width math counts as 1 col, so rows overflow
- * their declared width and redraws accumulate stale copies); other C0 bytes
- * corrupt layout too. Callers then treat \n as the only meaningful break.
- */
-function sanitizeMultiline(text: string): string {
-  // Build the control-char class from codepoints so no literal control bytes
-  // appear in source (keeps biome's noControlCharactersInRegex happy). \x09
-  // (tab) is handled separately below; \x0a (\n) is the one char we keep.
-  const controls = new RegExp("[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]", "g");
-  return text
-    .replace(/\r\n?/g, "\n")
-    .replace(/\t/g, " ")
-    .replace(controls, "");
-}
-
-function sanitizeTabDisplay(tab: string): string {
-  return sanitizeMultiline(tab).replace(/\n/g, " ").trim() || "(unnamed)";
-}
-
-/** Build the full option list for a question, always appending the "Type something." custom-input row. */
-function buildOptions(q: Question): RenderOption[] {
-  const opts: RenderOption[] = [...q.options];
-  opts.push({ label: "Type something.", isOther: true });
-  return opts;
-}
-
-function isMulti(q: Question | undefined): boolean {
-  return !!q?.multiSelect;
-}
-
-/** Whether the user is allowed to skip this question (default true). */
-function canSkip(q: Question | undefined): boolean {
-  return q?.allowSkip !== false;
-}
-
-/** Does this question use the two-column (options | preview) layout? */
-function isDualColumn(q: Question | undefined): boolean {
-  if (!q) return false;
-  return q.options.some((o) => o.preview);
-}
-
-function newTabState(
-  tui: TuiLike,
-  theme: EditorTheme,
-  tabIndex: number,
-  onSubmit: (tabIndex: number, value: string) => void,
-): TabState {
-  const editor = new Editor(tui as never, theme);
-  editor.onSubmit = (value) => onSubmit(tabIndex, value);
-  return {
-    cursor: 0,
-    scrollOffset: 0,
-    inputMode: false,
-    editor,
-    multiChecked: new Set(),
-    customText: null,
-    selectedSingle: -1,
-  };
-}
-
-function errorResult(
-  message: string,
-  questions: Question[] = [],
-): {
-  content: { type: "text"; text: string }[];
-  details: AskUserResult;
-} {
-  return {
-    content: [{ type: "text", text: message }],
-    details: { questions, answers: [], cancelled: true },
-  };
-}
-
-/** Pad a string with trailing spaces to a visible width (left-justified). */
-function padRight(s: string, width: number): string {
-  const v = visibleWidth(s);
-  return v >= width ? s : s + " ".repeat(width - v);
-}
-
-/** Truncate to a visible width, appending “…” only when the text actually
- *  overflows. (truncateToWidth's third arg is a fill, not a suffix, so we
- *  reserve one column and append the ellipsis ourselves when needed.) */
-function truncForDisplay(text: string, maxW: number): string {
-  if (maxW <= 0) return "";
-  if (maxW === 1) return "…";
-  const vw = visibleWidth(text);
-  if (vw <= maxW) return text;
-  return truncateToWidth(text, maxW - 1, "") + "…";
-}
-
-/** Structured interpretation of an Answer for display/serialization.
- *  Single source of truth — all three consumers (review screen's
- *  formatAnswerText, result card's formatAnswer, execute's JSON payload)
- *  derive from this, so they can never drift apart. */
-interface AnswerView {
-  /** Human-readable text WITHOUT ANSI — e.g. "Sidebar" / "甲, 乙" /
-   *  "✎ 自定义文本" / "(none)" / "(skipped)". Consumers wrap it in color. */
-  text: string;
-  /** Theme color name for the whole text. */
-  color: ThemeColor;
-}
-
-/** Interpret an Answer into display form. `customGlyph` (default "✎") prefixes
- *  any custom text. Returns `(no answer)` / dim for an absent answer. */
-function describeAnswer(ans: Answer | undefined, customGlyph = ICON_OTHER): AnswerView {
-  if (!ans) return { text: "(no answer)", color: "dim" };
-  switch (ans.kind) {
-    case "skipped":
-      return { text: "(skipped)", color: "warning" };
-    case "multi": {
-      if (ans.options.length === 0 && !ans.custom) return { text: "(none)", color: "dim" };
-      const parts = [...ans.options];
-      if (ans.custom) parts.push(`${customGlyph} ${ans.custom}`);
-      return { text: parts.join(", "), color: "text" };
-    }
-    case "custom":
-      return { text: `${customGlyph} ${ans.text}`, color: "text" };
-    case "single":
-      return { text: ans.option, color: "text" };
-  }
-}
+import {
+  buildOptions,
+  canSkip,
+  describeAnswer,
+  errorResult,
+  isDualColumn,
+  isMulti,
+  newTabState,
+  padRight,
+  sanitizeMultiline,
+  sanitizeTabDisplay,
+  truncForDisplay,
+  wrapTab,
+} from "./helpers.ts";
+import { AskUserParams } from "./schema.ts";
+import {
+  type Answer,
+  type AskUserResult,
+  ICON_ANSWER,
+  ICON_CHECK_EMPTY,
+  ICON_CHECK_FILLED,
+  ICON_CURSOR,
+  ICON_NOTE,
+  ICON_OTHER,
+  ICON_RADIO_EMPTY,
+  ICON_RADIO_FILLED,
+  type PanelCallbacks,
+  type Question,
+  type RenderOption,
+  type TabState,
+  TOGGLE_HINT,
+  TOGGLE_KEY,
+  type TuiLike,
+} from "./types.ts";
 
 // ────────────────────────────────────────────────────────────────────────────
 // The overlay component
 // ────────────────────────────────────────────────────────────────────────────
-
-interface TuiLike {
-  requestRender(): void;
-}
-
-interface PanelCallbacks {
-  onResult: (result: AskUserResult) => void;
-}
 
 class AskUserPanel implements Component, Focusable {
   focused = false;
@@ -1508,7 +1243,7 @@ export default function askUserExtension(pi: ExtensionAPI) {
     name: "ask_user",
     label: "Ask User",
     description:
-      'Ask the user one or more questions with options. Supports single-select (◎→◉) and multi-select (□→▣, space toggles). Every question always includes a \'Type something.\' row so the user can type a custom answer whenever none of the provided options fit — this is built in and cannot be disabled, so never assume the user is restricted to your listed options. The custom-input draft is preserved across tab switches, and a focused side panel shows extended detail (ASCII layouts, code, reasoning) when an option carries a `preview` field. Each option needs a short `label` + a `description` (shown beneath it); add a `preview` field only when a description can\'t fully convey the option. The panel is collapsible (Ctrl+\\). Use for clarifying requirements, getting preferences, or confirming decisions. Avoid using this to pick one item from a long list you just enumerated (e.g. "which of these 8 fixes should I start with?"): options are capped at a handful for a reason, and if the choice isn\'t a real either/or, present the list in a normal message and let the user reply freely, or just proceed with the highest-priority item — reserve ask_user for genuine decisions with a few distinct, mutually-exclusive paths. All displayed user-facing text should use the conversation\'s language. The result is returned as JSON: `{ "cancelled": bool, "answers": [{ "tab": <the question\'s tab>, ... }], "message"?: string }`. Each answer echoes the question\'s `tab` so you can correlate by key. Duplicate tabs are discouraged, but are preserved in question order as `tab`, `tab-2`, `tab-3`, and so on. Per answer only the relevant fields appear: single-select option pick → `answer`; single-select custom text → `custom`; multi-select option picks → `answers: [...]`; multi-select with custom → `answers` + `custom`; multi-select empty commit (skippable, submitted with nothing) → `answers: []`; Tab-skipped → `skipped: true`. `custom` is a sibling of `answer`/`answers`, never mixed in — it signals the user typed something outside the offered options. The optional top-level `message` is a free-form note the user can attach on the review screen (about overall direction, pacing, or anything beyond the specific questions); it is user-provided and out-of-band: you cannot set it via the parameters, and it may be absent; when present, treat it as high-priority context that can override or reframe the answers above it.',
+      'Ask the user one or more questions with options. Supports single-select (○→◉) and multi-select (□→▣, space toggles). Every question always includes a \'Type something.\' row so the user can type a custom answer whenever none of the provided options fit — this is built in and cannot be disabled, so never assume the user is restricted to your listed options. The custom-input draft is preserved across tab switches, and a focused side panel shows extended detail (ASCII layouts, code, reasoning) when an option carries a `preview` field. Each option needs a short `label` + a `description` (shown beneath it); add a `preview` field only when a description can\'t fully convey the option. The panel is collapsible (Ctrl+\\). Use for clarifying requirements, getting preferences, or confirming decisions. Avoid using this to pick one item from a long list you just enumerated (e.g. "which of these 8 fixes should I start with?"): options are capped at a handful for a reason, and if the choice isn\'t a real either/or, present the list in a normal message and let the user reply freely, or just proceed with the highest-priority item — reserve ask_user for genuine decisions with a few distinct, mutually-exclusive paths. All displayed user-facing text should use the conversation\'s language. The result is returned as JSON: `{ "cancelled": bool, "answers": [{ "tab": <the question\'s tab>, ... }], "message"?: string }`. Each answer echoes the question\'s `tab` so you can correlate by key. Duplicate tabs are discouraged, but are preserved in question order as `tab`, `tab-2`, `tab-3`, and so on. Per answer only the relevant fields appear: single-select option pick → `answer`; single-select custom text → `custom`; multi-select option picks → `answers: [...]`; multi-select with custom → `answers` + `custom`; multi-select empty commit (skippable, submitted with nothing) → `answers: []`; Tab-skipped → `skipped: true`. `custom` is a sibling of `answer`/`answers`, never mixed in — it signals the user typed something outside the offered options. The optional top-level `message` is a free-form note the user can attach on the review screen (about overall direction, pacing, or anything beyond the specific questions); it is user-provided and out-of-band: you cannot set it via the parameters, and it may be absent; when present, treat it as high-priority context that can override or reframe the answers above it.',
     parameters: AskUserParams,
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

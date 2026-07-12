@@ -69,7 +69,10 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
       } catch {
         // Side agent failed (often a timeout on the cheap utility model) —
         // fall back to a truncated prompt title and surface it in the TUI.
-        const fallback = event.prompt.slice(0, config.maxLength).replace(/\n/g, " ").trim();
+        const fallback = event.prompt
+          .slice(0, config.maxLength || undefined)
+          .replace(/\n/g, " ")
+          .trim();
         pi.setSessionName(fallback || "New session");
         ctx.ui.notify("Session naming failed — using fallback title.", "warning");
       }

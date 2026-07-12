@@ -87,9 +87,10 @@ function cleanSessionName(raw: string, maxLength: number): string {
   // Remove newlines
   name = name.replace(/\n/g, " ").trim();
 
-  // Truncate
-  if (name.length > maxLength) {
-    name = name.slice(0, maxLength - 3) + "...";
+  // Truncate only when a positive limit is configured. For limits shorter
+  // than an ellipsis, preserve the hard maximum instead of overflowing it.
+  if (maxLength > 0 && name.length > maxLength) {
+    name = maxLength <= 3 ? name.slice(0, maxLength) : name.slice(0, maxLength - 3) + "...";
   }
 
   return name || "New session";

@@ -43,9 +43,14 @@ export function loadNamerConfig(cwd?: string): SessionNamerConfig {
   const raw = projectRaw ?? globalRaw;
   if (!raw) return DEFAULT_CONFIG;
 
+  const maxLength =
+    typeof raw.maxLength === "number" && Number.isFinite(raw.maxLength)
+      ? Math.max(0, Math.floor(raw.maxLength))
+      : DEFAULT_CONFIG.maxLength;
+
   return {
     enabled: raw.enabled ?? DEFAULT_CONFIG.enabled,
     sideAgentRole: raw.sideAgentRole ?? DEFAULT_CONFIG.sideAgentRole,
-    maxLength: raw.maxLength ?? DEFAULT_CONFIG.maxLength,
+    maxLength,
   };
 }

@@ -22,8 +22,7 @@ In `~/.pi/agent/settings.json`:
   "sessionNamer": {
     "enabled": true,
     "sideAgentRole": "utility",
-    "maxLength": 50,
-    "language": "zh"
+    "maxLength": 50
   }
 }
 ```
@@ -32,7 +31,7 @@ In `~/.pi/agent/settings.json`:
 |-------|---------|-------------|
 | `enabled` | `true` | Global on/off switch |
 | `sideAgentRole` | `"utility"` | pi-model-roles role for the naming side agent |
-| `maxLength` | `50` | Maximum name length in characters |
+| `maxLength` | `50` | Maximum name length in characters; `0` means unlimited, and negative values are normalized to `0` |
 
 Project-level `.pi/settings.json` overrides global settings.
 

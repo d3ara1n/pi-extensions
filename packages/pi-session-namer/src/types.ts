@@ -8,7 +8,7 @@ export interface SessionNamerConfig {
   enabled: boolean;
   /** pi-model-roles role name for the side agent */
   sideAgentRole: string;
-  /** Maximum name length (characters) */
+  /** Maximum name length in characters; 0 = unlimited. */
   maxLength: number;
 }
 

@@ -11,7 +11,6 @@ Only shows usage when the active model's provider has a matching usage provider 
 
 ## Dependencies
 
-- [`pi-powerline-footer`](https://www.npmjs.com/package/pi-powerline-footer) — required for powerline custom item rendering
 - [`@d3ara1n/pi-editor-shell`](../pi-editor-shell) — optional, for editor shell pinned status integration
 
 ## Installation

@@ -300,8 +300,10 @@ export default function (pi: ExtensionAPI) {
             lastError.delete(p.id);
           } else if (p.kind === "quota" && p.fetchUsage) {
             const windows = await withTimeout(p.fetchUsage(), 5_000);
-            fetchedWindows.set(p.id, windows);
-            lastWindows.set(p.id, windows);
+            if (windows.length) {
+              fetchedWindows.set(p.id, windows);
+              lastWindows.set(p.id, windows);
+            }
             lastError.delete(p.id);
           }
         } catch (e) {

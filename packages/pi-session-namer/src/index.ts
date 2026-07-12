@@ -84,21 +84,7 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
   // ── /namer — show status ────────────────────────────────────────
   pi.registerCommand("namer", {
     description: "Show session namer status and config",
-    handler: async (args, ctx) => {
-      const value = (args ?? "").trim().toLowerCase();
-
-      // Handle on/off toggles
-      if (value === "on") {
-        config.enabled = true;
-        ctx.ui.notify("Session Namer: enabled", "info");
-        return;
-      }
-      if (value === "off") {
-        config.enabled = false;
-        ctx.ui.notify("Session Namer: disabled", "info");
-        return;
-      }
-
+    handler: async (_args, ctx) => {
       const currentName = pi.getSessionName();
       const lines = [
         `Session Namer: ${config.enabled ? "enabled" : "disabled"}`,
@@ -106,8 +92,27 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
         `Max length: ${config.maxLength}`,
         `Current name: ${currentName ?? "(none)"}`,
         `Has auto-named: ${hasNamed}`,
+        "",
+        "Session toggles: /namer:enable or /namer:disable",
+        "Persistent config: set sessionNamer.enabled in settings.json",
       ];
       ctx.ui.notify(lines.join("\n"), "info");
+    },
+  });
+
+  pi.registerCommand("namer:enable", {
+    description: "Enable session namer for the current session",
+    handler: async (_args, ctx) => {
+      config.enabled = true;
+      ctx.ui.notify("Session Namer: enabled for this session", "info");
+    },
+  });
+
+  pi.registerCommand("namer:disable", {
+    description: "Disable session namer for the current session",
+    handler: async (_args, ctx) => {
+      config.enabled = false;
+      ctx.ui.notify("Session Namer: disabled for this session", "info");
     },
   });
 

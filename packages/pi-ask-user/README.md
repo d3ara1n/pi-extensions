@@ -53,7 +53,7 @@ alongside `pi-powerline-footer` — exactly the case where overlay tools break.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `header` | string | yes | Short title shown in the panel header |
-| `tab` | string | yes | Short keyword identifying this question. Shown on the tab bar when there are multiple questions, and returned in the result as the answer's prefix. Write it in the user's language, not as a programmatic identifier. Must be unique across all questions in one call |
+| `tab` | string | yes | Short keyword identifying this question. Shown on the tab bar when there are multiple questions, and returned in the result as the answer's prefix. Write it in the user's language, not as a programmatic identifier. It should be unique across all questions in one call; if duplicates are supplied, results preserve question order as `tab`, `tab-2`, `tab-3`, … |
 | `options` | array | yes | 2–4 options |
 | `prompt` | string | no | Longer body text under the header |
 | `multiSelect` | boolean | no | Check multiple options. Default `false` |
@@ -214,7 +214,9 @@ question by the `tab` key:
 }
 ```
 
-Only the relevant fields appear per answer (no noise):
+Only the relevant fields appear per answer (no noise). For duplicate input tabs, the
+result keeps every question in order by suffixing later occurrences as `tab-2`,
+`tab-3`, and so on; the original first occurrence remains `tab`.
 
 | Situation | Fields |
 |-----------|--------|

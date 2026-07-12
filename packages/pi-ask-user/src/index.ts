@@ -71,7 +71,12 @@ interface RenderOption extends QuestionOption {
 }
 
 interface Question {
+  /** Internal per-call identity. Never exposed in the tool's JSON result. */
+  id: string;
+  /** Original caller-provided key. Kept byte-for-byte for JSON results. */
   tab: string;
+  /** Sanitized, non-empty label used exclusively by the TUI. */
+  displayTab: string;
   header: string;
   prompt?: string;
   options: QuestionOption[];
@@ -93,10 +98,10 @@ interface Question {
  *  - `skipped`: the user navigated past without answering (Tab/arrows).
  */
 type Answer =
-  | { tab: string; kind: "single"; option: string }
-  | { tab: string; kind: "custom"; text: string }
-  | { tab: string; kind: "multi"; options: string[]; custom?: string }
-  | { tab: string; kind: "skipped" };
+  | { id: string; tab: string; kind: "single"; option: string }
+  | { id: string; tab: string; kind: "custom"; text: string }
+  | { id: string; tab: string; kind: "multi"; options: string[]; custom?: string }
+  | { id: string; tab: string; kind: "skipped" };
 
 interface AskUserResult {
   questions: Question[];
@@ -218,6 +223,10 @@ function sanitizeMultiline(text: string): string {
     .replace(/\r\n?/g, "\n")
     .replace(/\t/g, " ")
     .replace(controls, "");
+}
+
+function sanitizeTabDisplay(tab: string): string {
+  return sanitizeMultiline(tab).replace(/\n/g, " ").trim() || "(unnamed)";
 }
 
 /** Build the full option list for a question, always appending the "Type something." custom-input row. */
@@ -412,7 +421,7 @@ class AskUserPanel implements Component, Focusable {
       st.editor.setText("");
       if (isMulti(q)) {
         st.customText = null;
-        if (!this.commitMultiAnswer(q, st)) this.answers.delete(q.tab);
+        if (!this.commitMultiAnswer(q, st)) this.answers.delete(q.id);
       }
       if (tabIndex === this.currentTab) this.invalidate();
       return;
@@ -430,7 +439,8 @@ class AskUserPanel implements Component, Focusable {
       if (tabIndex === this.currentTab) this.invalidate();
       return;
     }
-    this.answers.set(q.tab, {
+    this.answers.set(q.id, {
+      id: q.id,
       tab: q.tab,
       kind: "custom",
       text: trimmed,
@@ -471,12 +481,13 @@ class AskUserPanel implements Component, Focusable {
     // "nothing to record here".)
     if (labels.length === 0 && !customText) return false;
     const ans: Answer = {
+      id: q.id,
       tab: q.tab,
       kind: "multi",
       options: labels,
     };
     if (customText) ans.custom = customText;
-    this.answers.set(q.tab, ans);
+    this.answers.set(q.id, ans);
     return true;
   }
 
@@ -535,7 +546,7 @@ class AskUserPanel implements Component, Focusable {
   private prepareQuestionForLeave(): boolean {
     const q = this.currentQuestion();
     if (!q) return true;
-    if (this.answers.has(q.tab)) return true;
+    if (this.answers.has(q.id)) return true;
     const st = this.currentTabState();
     // Multi-select: uncommitted checks count as an answer — commit them,
     // then leave. commitMultiAnswer only returns false when there's nothing
@@ -545,7 +556,8 @@ class AskUserPanel implements Component, Focusable {
       return true;
     }
     if (!canSkip(q)) return false; // required question, nothing chosen: block
-    this.answers.set(q.tab, {
+    this.answers.set(q.id, {
+      id: q.id,
       tab: q.tab,
       kind: "skipped",
     });
@@ -697,7 +709,7 @@ class AskUserPanel implements Component, Focusable {
         //   - Single-select: custom text lives in the `custom` answer.
         //   - Multi-select:  it lives in st.customText (kept alongside checks).
         st.inputMode = true;
-        const existing = this.answers.get(q.tab);
+        const existing = this.answers.get(q.id);
         const prefill = multi ? st.customText : existing?.kind === "custom" ? existing.text : null;
         if (prefill) st.editor.setText(prefill);
         this.invalidate();
@@ -711,7 +723,8 @@ class AskUserPanel implements Component, Focusable {
       }
       // single-select: mark the selection WITHOUT advancing (stay on question)
       st.selectedSingle = st.cursor;
-      this.answers.set(q.tab, {
+      this.answers.set(q.id, {
+        id: q.id,
         tab: q.tab,
         kind: "single",
         option: opt.label,
@@ -734,7 +747,7 @@ class AskUserPanel implements Component, Focusable {
         // advance; otherwise open the editor to type one. Space also opens the
         // editor, but Enter on the custom row should engage the custom option
         // rather than no-op when nothing's committed yet.
-        if (this.answers.get(q.tab)?.kind === "custom") {
+        if (this.answers.get(q.id)?.kind === "custom") {
           this.advanceAfterAnswer();
         } else {
           st.inputMode = true;
@@ -752,7 +765,8 @@ class AskUserPanel implements Component, Focusable {
         if (this.commitMultiAnswer(q, st)) {
           this.advanceAfterAnswer();
         } else if (canSkip(q)) {
-          this.answers.set(q.tab, {
+          this.answers.set(q.id, {
+            id: q.id,
             tab: q.tab,
             kind: "multi",
             options: [],
@@ -763,7 +777,8 @@ class AskUserPanel implements Component, Focusable {
       }
       // single-select: commit cursor position as the selection, then advance
       st.selectedSingle = st.cursor;
-      this.answers.set(q.tab, {
+      this.answers.set(q.id, {
+        id: q.id,
         tab: q.tab,
         kind: "single",
         option: opt.label,
@@ -920,11 +935,11 @@ class AskUserPanel implements Component, Focusable {
   private renderCollapsed(width: number): string[] {
     const th = this.theme;
     const qParts = this.questions.map((q, i) => {
-      const done = this.answers.has(q.tab);
+      const done = this.answers.has(q.id);
       const active = i === this.currentTab && !this.isReviewTab;
       const mark = active ? "▸" : done ? "✓" : "○";
       const color = active ? "accent" : done ? "success" : "dim";
-      return th.fg(color, `${q.tab}${mark}`);
+      return th.fg(color, `${q.displayTab}${mark}`);
     });
     const reviewPart = this.isReviewTab ? th.fg("accent", "Review▸") : th.fg("dim", "Review○");
     const tabsPart = [...qParts, reviewPart].join(th.fg("dim", " "));
@@ -945,7 +960,7 @@ class AskUserPanel implements Component, Focusable {
   private renderTabBarContent(th: Theme): string {
     const tabCells = this.questions.map((q, i) => {
       const active = i === this.currentTab;
-      const ans = this.answers.get(q.tab);
+      const ans = this.answers.get(q.id);
       let mark = " ";
       let baseColor: import("@earendil-works/pi-coding-agent").ThemeColor = active
         ? "accent"
@@ -961,7 +976,7 @@ class AskUserPanel implements Component, Focusable {
       // Always reserve one padding cell on each side so tab width is constant
       // across active/inactive (no horizontal jump when switching). Only the
       // active tab paints the bg, turning that reserved space into a pill.
-      const cell = th.fg(color, ` ${mark} ${q.tab} `);
+      const cell = th.fg(color, ` ${mark} ${q.displayTab} `);
       return active ? th.bg("selectedBg", cell) : cell;
     });
     const reviewActive = this.isReviewTab;
@@ -1142,7 +1157,7 @@ class AskUserPanel implements Component, Focusable {
         continue;
       }
       const q = this.questions[i]!;
-      const ans = this.answers.get(q.tab);
+      const ans = this.answers.get(q.id);
       // Header row: cursor + marker + title.
       const marker = th.fg(headerColor, `${i + 1}.`);
       lines.push(row(` ${prefix}${marker} ${th.fg(headerColor, q.header)}`));
@@ -1200,7 +1215,7 @@ class AskUserPanel implements Component, Focusable {
       const opt = opts[i]!;
       const isCursor = i === st.cursor;
       const prefix = isCursor ? `${th.fg("accent", ICON_CURSOR)} ` : "  ";
-      const ans = this.answers.get(q.tab);
+      const ans = this.answers.get(q.id);
       const committedCustom = multi ? st.customText : ans?.kind === "custom" ? ans.text : null;
       const customAnswered = !!committedCustom;
       const glyph = this.optionGlyph(opt, i, st, multi, th, customAnswered);
@@ -1256,7 +1271,7 @@ class AskUserPanel implements Component, Focusable {
 
     // ── build left column lines (options) ──
     const leftLines: string[] = [];
-    const dualAns = this.answers.get(q.tab);
+    const dualAns = this.answers.get(q.id);
     const dualCommittedCustom = multi
       ? st.customText
       : dualAns?.kind === "custom"
@@ -1349,7 +1364,7 @@ class AskUserPanel implements Component, Focusable {
 // ────────────────────────────────────────────────────────────────────────────
 
 class AskUserResultView implements Component {
-  private questions: ReadonlyArray<Pick<Question, "header" | "tab">>;
+  private questions: ReadonlyArray<Pick<Question, "id" | "header" | "tab">>;
   private result: AskUserResult;
   private theme: Theme;
   private expanded = false;
@@ -1357,7 +1372,7 @@ class AskUserResultView implements Component {
   private cachedLines?: string[];
 
   constructor(
-    questions: ReadonlyArray<Pick<Question, "header" | "tab">>,
+    questions: ReadonlyArray<Pick<Question, "id" | "header" | "tab">>,
     result: AskUserResult,
     theme: Theme,
   ) {
@@ -1413,7 +1428,7 @@ class AskUserResultView implements Component {
     const head = `${th.fg(color, icon)} ${th.fg(color, phrase)}`;
     const sep = th.fg("dim", ": ");
     const pairs = this.questions.map((q) => {
-      const ans = this.result.answers.find((a) => a.tab === q.tab);
+      const ans = this.result.answers.find((a) => a.id === q.id);
       return `${q.header}=${this.formatAnswer(ans).text}`;
     });
     const body = pairs.join(th.fg("dim", " · "));
@@ -1448,7 +1463,7 @@ class AskUserResultView implements Component {
       return out;
     };
     for (const q of this.questions) {
-      const ans = this.result.answers.find((a) => a.tab === q.tab);
+      const ans = this.result.answers.find((a) => a.id === q.id);
       lines.push(truncateToWidth(th.fg("muted", q.header), width));
       if (!ans) {
         lines.push(`${indent}${th.fg("dim", "(no answer)")}`);
@@ -1493,7 +1508,7 @@ export default function askUserExtension(pi: ExtensionAPI) {
     name: "ask_user",
     label: "Ask User",
     description:
-      'Ask the user one or more questions with options. Supports single-select (◎→◉) and multi-select (□→▣, space toggles). Every question always includes a \'Type something.\' row so the user can type a custom answer whenever none of the provided options fit — this is built in and cannot be disabled, so never assume the user is restricted to your listed options. The custom-input draft is preserved across tab switches, and a focused side panel shows extended detail (ASCII layouts, code, reasoning) when an option carries a `preview` field. Each option needs a short `label` + a `description` (shown beneath it); add a `preview` field only when a description can\'t fully convey the option. The panel is collapsible (Ctrl+\\). Use for clarifying requirements, getting preferences, or confirming decisions. Avoid using this to pick one item from a long list you just enumerated (e.g. "which of these 8 fixes should I start with?"): options are capped at a handful for a reason, and if the choice isn\'t a real either/or, present the list in a normal message and let the user reply freely, or just proceed with the highest-priority item — reserve ask_user for genuine decisions with a few distinct, mutually-exclusive paths. All displayed user-facing text should use the conversation\'s language. The result is returned as JSON: `{ "cancelled": bool, "answers": [{ "tab": <the question\'s tab>, ... }], "message"?: string }`. Each answer echoes the question\'s `tab` so you can correlate by key. Per answer only the relevant fields appear: single-select option pick → `answer`; single-select custom text → `custom`; multi-select option picks → `answers: [...]`; multi-select with custom → `answers` + `custom`; multi-select empty commit (skippable, submitted with nothing) → `answers: []`; Tab-skipped → `skipped: true`. `custom` is a sibling of `answer`/`answers`, never mixed in — it signals the user typed something outside the offered options. The optional top-level `message` is a free-form note the user can attach on the review screen (about overall direction, pacing, or anything beyond the specific questions); it is user-provided and out-of-band: you cannot set it via the parameters, and it may be absent; when present, treat it as high-priority context that can override or reframe the answers above it.',
+      'Ask the user one or more questions with options. Supports single-select (◎→◉) and multi-select (□→▣, space toggles). Every question always includes a \'Type something.\' row so the user can type a custom answer whenever none of the provided options fit — this is built in and cannot be disabled, so never assume the user is restricted to your listed options. The custom-input draft is preserved across tab switches, and a focused side panel shows extended detail (ASCII layouts, code, reasoning) when an option carries a `preview` field. Each option needs a short `label` + a `description` (shown beneath it); add a `preview` field only when a description can\'t fully convey the option. The panel is collapsible (Ctrl+\\). Use for clarifying requirements, getting preferences, or confirming decisions. Avoid using this to pick one item from a long list you just enumerated (e.g. "which of these 8 fixes should I start with?"): options are capped at a handful for a reason, and if the choice isn\'t a real either/or, present the list in a normal message and let the user reply freely, or just proceed with the highest-priority item — reserve ask_user for genuine decisions with a few distinct, mutually-exclusive paths. All displayed user-facing text should use the conversation\'s language. The result is returned as JSON: `{ "cancelled": bool, "answers": [{ "tab": <the question\'s tab>, ... }], "message"?: string }`. Each answer echoes the question\'s `tab` so you can correlate by key. Duplicate tabs are discouraged, but are preserved in question order as `tab`, `tab-2`, `tab-3`, and so on. Per answer only the relevant fields appear: single-select option pick → `answer`; single-select custom text → `custom`; multi-select option picks → `answers: [...]`; multi-select with custom → `answers` + `custom`; multi-select empty commit (skippable, submitted with nothing) → `answers: []`; Tab-skipped → `skipped: true`. `custom` is a sibling of `answer`/`answers`, never mixed in — it signals the user typed something outside the offered options. The optional top-level `message` is a free-form note the user can attach on the review screen (about overall direction, pacing, or anything beyond the specific questions); it is user-provided and out-of-band: you cannot set it via the parameters, and it may be absent; when present, treat it as high-priority context that can override or reframe the answers above it.',
     parameters: AskUserParams,
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -1507,10 +1522,13 @@ export default function askUserExtension(pi: ExtensionAPI) {
       // Sanitize every externally-supplied display string once at ingress:
       // strip control chars (a raw \r resets the terminal cursor to column 0
       // and clobbers indentation; other C0 bytes corrupt rows too). Downstream
-      // renderers can then treat \n as the only meaningful break. tab is a key
-      // (matched against answers), so leave it byte-for-byte intact.
-      const questions: Question[] = params.questions.map((q) => ({
+      // renderers can then treat \n as the only meaningful break. `tab` is
+      // retained byte-for-byte for the JSON payload but rendered through a
+      // sanitized display-only label. Internal ids keep duplicate tabs apart.
+      const questions: Question[] = params.questions.map((q, index) => ({
         ...q,
+        id: `question-${index + 1}`,
+        displayTab: sanitizeTabDisplay(q.tab),
         header: sanitizeMultiline(q.header),
         prompt: q.prompt === undefined ? undefined : sanitizeMultiline(q.prompt),
         options: q.options.map((o) => ({
@@ -1558,24 +1576,34 @@ export default function askUserExtension(pi: ExtensionAPI) {
       // so the LLM can tell the user stepped outside the offered options — a
       // useful signal, not an anti-spoofing measure. The empty-message note is
       // omitted entirely ("user left no note" is noise the LLM doesn't need).
-      const jsonAnswers = result.answers.map((a): Record<string, unknown> => {
-        const out: Record<string, unknown> = { tab: a.tab };
-        switch (a.kind) {
+      // `tab` gets a deterministic occurrence suffix for duplicate caller
+      // keys so every answer stays addressable without mutating the originals.
+      const answerById = new Map(result.answers.map((answer) => [answer.id, answer]));
+      const duplicateTabs = new Map<string, number>();
+      const jsonAnswers = questions.flatMap((question): Record<string, unknown>[] => {
+        const answer = answerById.get(question.id);
+        if (!answer) return [];
+        const count = (duplicateTabs.get(answer.tab) ?? 0) + 1;
+        duplicateTabs.set(answer.tab, count);
+        const out: Record<string, unknown> = {
+          tab: count === 1 ? answer.tab : `${answer.tab}-${count}`,
+        };
+        switch (answer.kind) {
           case "skipped":
             out.skipped = true;
             break;
           case "single":
-            out.answer = a.option;
+            out.answer = answer.option;
             break;
           case "custom":
-            out.custom = a.text;
+            out.custom = answer.text;
             break;
           case "multi":
-            out.answers = a.options;
-            if (a.custom) out.custom = a.custom;
+            out.answers = answer.options;
+            if (answer.custom) out.custom = answer.custom;
             break;
         }
-        return out;
+        return [out];
       });
       const payload: Record<string, unknown> = {
         cancelled: result.cancelled,
@@ -1589,9 +1617,13 @@ export default function askUserExtension(pi: ExtensionAPI) {
       };
     },
     renderResult(result, options, theme, context) {
-      // context.args.questions is the schema-static type; AskUserResultView
-      // only needs header+tab, so the structural subtype is compatible.
-      const questions = context.args?.questions ?? [];
+      // Rebuild the per-call ids used by the interactive panel. The static
+      // tool arguments retain caller-supplied tabs only, while details carries
+      // answers keyed by these stable ids.
+      const questions = (context.args?.questions ?? []).map((question, index) => ({
+        ...question,
+        id: `question-${index + 1}`,
+      }));
       // Field-level fallback: result.details may be a truthy partial object
       // (e.g. { cancelled: false }) whose .answers is undefined, which would
       // crash getStatus/renderCollapsed/renderCard with "Cannot read

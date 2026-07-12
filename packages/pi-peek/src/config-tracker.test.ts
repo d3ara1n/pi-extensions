@@ -46,7 +46,6 @@ test("loadPeekConfig floors valid numeric values and falls back for invalid valu
   writeJson(path.join(globalDir, "settings.json"), {
     peek: {
       recentTurns: 7.9,
-      maxChars: Infinity,
       toolResultLimit: -1,
       role: "  reviewer  ",
     },
@@ -54,15 +53,14 @@ test("loadPeekConfig floors valid numeric values and falls back for invalid valu
 
   assert.deepEqual(loadPeekConfig(projectDir), {
     recentTurns: 7,
-    maxChars: DEFAULT_PEEK_CONFIG.maxChars,
     toolResultLimit: DEFAULT_PEEK_CONFIG.toolResultLimit,
-    role: "  reviewer  ",
+    role: "reviewer",
   });
 });
 
 test("loadPeekConfig lets a project block replace global fields wholesale", () => {
   writeJson(path.join(globalDir, "settings.json"), {
-    peek: { recentTurns: 20, maxChars: 10_000, toolResultLimit: 1_000, role: "global" },
+    peek: { recentTurns: 20, toolResultLimit: 1_000, role: "global" },
   });
   writeJson(path.join(projectDir, ".pi", "settings.json"), {
     peek: { recentTurns: 3.2 },
@@ -70,7 +68,6 @@ test("loadPeekConfig lets a project block replace global fields wholesale", () =
 
   assert.deepEqual(loadPeekConfig(projectDir), {
     recentTurns: 3,
-    maxChars: DEFAULT_PEEK_CONFIG.maxChars,
     toolResultLimit: DEFAULT_PEEK_CONFIG.toolResultLimit,
     role: DEFAULT_PEEK_CONFIG.role,
   });

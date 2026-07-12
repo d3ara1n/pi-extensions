@@ -20,6 +20,7 @@ import { loadPeekConfig } from "./config.ts";
 export { getPeekAPI } from "./api.ts";
 export type {
   PeekAPI,
+  InvestigateMessage,
   MainAgentStatus,
   InvestigateOptions,
   InvestigateResult,

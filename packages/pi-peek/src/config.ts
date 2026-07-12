@@ -7,6 +7,7 @@
  * pi-peek-agent.
  */
 
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -40,19 +41,22 @@ function positiveInteger(value: unknown, fallback: number): number {
     : fallback;
 }
 
+function roleName(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
 /**
  * Load peek config. Project overrides global wholesale; per-field defaults fill
  * any gap. (No field-level merge — project replaces global.) */
 export function loadPeekConfig(cwd?: string): PeekConfig {
   const globalRaw = readPeek(path.join(getAgentDir(), "settings.json"));
-  const projectRaw = cwd ? readPeek(path.join(cwd, ".pi", "settings.json")) : undefined;
+  const projectRaw = cwd ? readPeek(path.join(cwd, CONFIG_DIR_NAME, "settings.json")) : undefined;
   const raw = projectRaw ?? globalRaw;
   if (!raw) return { ...DEFAULT_PEEK_CONFIG };
 
   return {
     recentTurns: positiveInteger(raw.recentTurns, DEFAULT_PEEK_CONFIG.recentTurns),
-    maxChars: positiveInteger(raw.maxChars, DEFAULT_PEEK_CONFIG.maxChars),
     toolResultLimit: positiveInteger(raw.toolResultLimit, DEFAULT_PEEK_CONFIG.toolResultLimit),
-    role: typeof raw.role === "string" && raw.role.trim() ? raw.role : DEFAULT_PEEK_CONFIG.role,
+    role: roleName(raw.role, DEFAULT_PEEK_CONFIG.role),
   };
 }

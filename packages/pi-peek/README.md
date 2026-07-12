@@ -41,14 +41,13 @@ Optional tuning in `~/.pi/agent/settings.json` under `peek`:
 {
   "peek": {
     "recentTurns": 10,
-    "maxChars": 50000,
     "toolResultLimit": 500,
     "role": "utility"
   }
 }
 ```
 
-`recentTurns` and `toolResultLimit` control serialization. `maxChars` is retained for settings compatibility but does not truncate the complete serialized conversation; invalid numeric values fall back to defaults.
+`recentTurns` and `toolResultLimit` control serialization; invalid numeric values fall back to defaults. `role` selects the pi-model-roles role used for consults.
 
 ## API (for extension authors)
 

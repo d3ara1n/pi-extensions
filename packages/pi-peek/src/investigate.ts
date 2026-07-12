@@ -7,6 +7,12 @@
  * nothing is persisted, no session file is touched.
  */
 
+import type {
+  AssistantMessage,
+  Message,
+  TextContent,
+  UserMessage,
+} from "@earendil-works/pi-ai";
 import { getModelRolesAPI } from "@d3ara1n/pi-model-roles";
 import type { InvestigateOptions, InvestigateResult } from "./types.ts";
 
@@ -47,21 +53,47 @@ export async function investigateWithReference(
 
   opts.onStage?.("investigating");
 
+  const historyMessages: Message[] = (opts.messages ?? []).map((message, index) => {
+    const timestamp = message.timestamp ?? Date.now() + index;
+    if (message.role === "user") {
+      return { role: "user", content: message.content, timestamp } satisfies UserMessage;
+    }
+    return {
+      role: "assistant",
+      content: [{ type: "text", text: message.content } satisfies TextContent],
+      api: resolved.model.api,
+      provider: resolved.model.provider,
+      model: resolved.model.id,
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp,
+    } satisfies AssistantMessage;
+  });
+  const messages: Message[] = [
+    ...historyMessages,
+    {
+      role: "user",
+      content: question,
+      timestamp: Date.now(),
+    },
+  ];
+
   const stream = await rolesApi.streamWithRole(
     roleName,
     {
       // The record is BACKGROUND CONTEXT (not a message to the model).
-      // Putting it in the system prompt — wrapped in a tag — keeps the user
-      // message as the clean, standalone question, so a casual "hi" isn't
-      // dragged into the record's subject matter.
+      // Putting it in the system prompt — wrapped in a tag — keeps the current
+      // user message as the clean question, while local multi-turn consult
+      // history (if provided) remains real chat history in `messages`.
       systemPrompt: `${PEEK_CONSULT_PROMPT}\n\n<session_record>\n${referenceText}\n</session_record>`,
-      messages: [
-        {
-          role: "user",
-          content: question,
-          timestamp: Date.now(),
-        },
-      ],
+      messages,
     },
     {
       maxTokens: 2048,

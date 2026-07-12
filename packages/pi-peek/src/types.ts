@@ -17,8 +17,6 @@
 export interface PeekConfig {
   /** Serialize: keep the most recent N user-initiated turns. */
   recentTurns?: number;
-  /** Retained for settings compatibility; serialization has no whole-session output cap. */
-  maxChars?: number;
   /** Serialize: truncate a single tool result longer than this. */
   toolResultLimit?: number;
   /** Model role to use for consult (resolved via pi-model-roles). Default: "utility". */
@@ -26,10 +24,9 @@ export interface PeekConfig {
 }
 
 export const DEFAULT_PEEK_CONFIG: Required<
-  Pick<PeekConfig, "recentTurns" | "maxChars" | "toolResultLimit" | "role">
+  Pick<PeekConfig, "recentTurns" | "toolResultLimit" | "role">
 > = {
   recentTurns: 10,
-  maxChars: 50_000,
   toolResultLimit: 500,
   role: "utility",
 };
@@ -55,9 +52,17 @@ export interface MainAgentStatus {
 // investigate() — entry-point-agnostic consult core (no session/UI dependency)
 // ---------------------------------------------------------------------------
 
+export interface InvestigateMessage {
+  role: "user" | "assistant";
+  content: string;
+  timestamp?: number;
+}
+
 export interface InvestigateOptions {
   /** Pre-serialized reference text. If omitted, the caller serializes. */
   referenceText?: string;
+  /** Prior consult messages for multi-turn entry points. The current question is appended automatically. */
+  messages?: readonly InvestigateMessage[];
   /** Streaming token callback. */
   onToken?: (delta: string) => void;
   /** Stage change callback: "investigating" | "done" | "error". */

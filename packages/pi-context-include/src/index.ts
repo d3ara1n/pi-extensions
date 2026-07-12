@@ -25,9 +25,9 @@
  */
 
 import { readFile, realpath } from "node:fs/promises";
+import { CONFIG_DIR_NAME, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const DEFAULT_MAX_DEPTH = 10;
 const DEFAULT_MAX_BYTES = 500_000; // 500KB
@@ -78,8 +78,7 @@ let _maxBytes = DEFAULT_MAX_BYTES;
 let _lastScan: ScanDiagnostic | null = null;
 
 async function loadConfig(cwd?: string): Promise<void> {
-  const settings = await readSettings(cwd);
-  const config = settings?.contextInclude as ContextIncludeConfig | undefined;
+  const config = await readContextIncludeConfig(cwd);
   _maxDepth = validLimit(config?.maxDepth) ?? DEFAULT_MAX_DEPTH;
   _maxBytes = validLimit(config?.maxBytes) ?? DEFAULT_MAX_BYTES;
 }
@@ -89,16 +88,22 @@ function validLimit(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
-/** Read merged settings (project overrides global). */
-async function readSettings(cwd?: string): Promise<Record<string, unknown>> {
-  const globalSettings = await readSettingsFile(
-    path.join(os.homedir(), ".pi", "agent", "settings.json"),
-  );
-  let projectSettings: Record<string, unknown> = {};
-  if (cwd) {
-    projectSettings = await readSettingsFile(path.join(cwd, ".pi", "settings.json"));
-  }
-  return { ...globalSettings, ...projectSettings };
+function getAgentDir(): string {
+  return process.env.PI_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+}
+
+/** Read contextInclude config. A project block replaces the global block. */
+async function readContextIncludeConfig(cwd?: string): Promise<ContextIncludeConfig | undefined> {
+  const globalSettings = await readSettingsFile(path.join(getAgentDir(), "settings.json"));
+  const projectSettings = cwd
+    ? await readSettingsFile(path.join(cwd, CONFIG_DIR_NAME, "settings.json"))
+    : {};
+  const raw = projectSettings.contextInclude ?? globalSettings.contextInclude;
+  return isObject(raw) ? (raw as ContextIncludeConfig) : undefined;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

@@ -276,6 +276,34 @@ describe("context include recursive resolution", () => {
     assert.ok(prompt?.includes(`<project_instructions path="${fs.realpathSync(nested)}">`));
   });
 
+  it("project config block replaces global config before defaults fill gaps", async () => {
+    const project = makeTempProject();
+    const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "context-include-agent-"));
+    const savedAgentDir = process.env.PI_AGENT_DIR;
+    process.env.PI_AGENT_DIR = agentDir;
+    try {
+      fs.mkdirSync(path.join(project, ".pi"), { recursive: true });
+      fs.writeFileSync(
+        path.join(agentDir, "settings.json"),
+        JSON.stringify({ contextInclude: { maxDepth: 20, maxBytes: 1 } }),
+      );
+      fs.writeFileSync(
+        path.join(project, ".pi", "settings.json"),
+        JSON.stringify({ contextInclude: { maxDepth: 20 } }),
+      );
+
+      const root = writeFile(project, "AGENTS.md", "@child.md");
+      const child = writeFile(project, "child.md", "included despite global maxBytes");
+      const prompt = await scanIncludes(project, root, "@child.md");
+
+      assert.ok(prompt?.includes(`<project_instructions path="${fs.realpathSync(child)}">`));
+    } finally {
+      if (savedAgentDir === undefined) delete process.env.PI_AGENT_DIR;
+      else process.env.PI_AGENT_DIR = savedAgentDir;
+      fs.rmSync(agentDir, { recursive: true, force: true });
+    }
+  });
+
   it("enforces maxBytes using UTF-8 bytes rather than JavaScript character count", async () => {
     const project = makeTempProject();
     writeConfig(project, { maxBytes: 1 });

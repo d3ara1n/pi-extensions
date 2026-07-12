@@ -54,10 +54,11 @@ On each turn, the extension reads the referenced files and injects their content
 
 ## Configuration
 
-Optional. Read from `~/.pi/agent/settings.json` (global), merged with
-`{project}/.pi/settings.json` (project overrides global), under `contextInclude`.
-`maxDepth` and `maxBytes` must be finite, non-negative numbers; invalid values
-use the defaults. `maxBytes` is measured as UTF-8 bytes:
+Optional. Read from `~/.pi/agent/settings.json` (global) or
+`{project}/.pi/settings.json` (project). A present project `contextInclude`
+block replaces the global block; omitted fields then use defaults. `maxDepth`
+and `maxBytes` must be finite, non-negative numbers; invalid values use the
+defaults. `maxBytes` is measured as UTF-8 bytes:
 
 ```json
 {

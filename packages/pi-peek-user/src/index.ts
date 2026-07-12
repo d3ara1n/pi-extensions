@@ -17,8 +17,8 @@ export default function registerPeekUserExtension(pi: ExtensionAPI): void {
   pi.registerCommand("peek", {
     description: "Aside consult: ask this session a question without disturbing the main agent",
     handler: async (_args, ctx: ExtensionContext) => {
-      if (!ctx.hasUI) {
-        ctx.ui.notify("peek overlay requires TUI mode", "warning");
+      if (ctx.mode !== "tui") {
+        if (ctx.hasUI) ctx.ui.notify("peek overlay requires TUI mode", "warning");
         return;
       }
       await ctx.ui.custom<void>((tui, theme, _kb, done) => new PeekOverlay(tui, theme, done, ctx), {

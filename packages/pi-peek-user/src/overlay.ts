@@ -34,6 +34,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { getPeekAPI, type InvestigateResult, type MainAgentStatus } from "@d3ara1n/pi-peek";
 import type { ExtensionContext, ThemeColor } from "@earendil-works/pi-coding-agent";
+import { buildPeekHistoryMessages, type PeekReferenceHistoryEntry } from "./reference.ts";
 
 /** Minimal slice of TUI we use: render trigger + terminal size. */
 interface PeekTui {
@@ -49,9 +50,7 @@ interface PeekTheme {
   bold(text: string): string;
 }
 
-interface HistoryItem {
-  role: "user" | "assistant";
-  text: string;
+interface HistoryItem extends PeekReferenceHistoryEntry {
   usage?: InvestigateResult["usage"];
   model?: string;
 }
@@ -86,6 +85,7 @@ export class PeekOverlay {
   // cached reference for this overlay's follow-up questions
   private referenceText: string | null = null;
   private requestGeneration = 0;
+  private requestAbort: AbortController | null = null;
 
   // tracker (main agent's current activity, shown in the header)
   private tracker: MainAgentStatus | null = null;
@@ -168,17 +168,23 @@ export class PeekOverlay {
     this.stage = "investigating";
     this.askStart = Date.now();
     this.streamText = "";
+    const priorHistory = this.history.slice();
     this.history.push({ role: "user", text: q });
     this.autoFollow = true;
     this.tui.requestRender();
 
     const generation = ++this.requestGeneration;
+    const requestAbort = new AbortController();
+    this.requestAbort = requestAbort;
     const referenceText = this.referenceText ?? this.api.serializeMainConversation();
     this.referenceText = referenceText;
+    const messages = buildPeekHistoryMessages(priorHistory);
 
     this.api
       .investigate(q, {
         referenceText,
+        messages,
+        signal: requestAbort.signal,
         onStage: (s) => {
           if (this.closed || generation !== this.requestGeneration) return;
           this.stage = s;
@@ -191,6 +197,7 @@ export class PeekOverlay {
         },
       })
       .then((result) => {
+        if (this.requestAbort === requestAbort) this.requestAbort = null;
         if (this.closed || generation !== this.requestGeneration) return;
         this.history.push({
           role: "assistant",
@@ -205,6 +212,7 @@ export class PeekOverlay {
         this.tui.requestRender();
       })
       .catch((err) => {
+        if (this.requestAbort === requestAbort) this.requestAbort = null;
         if (this.closed || generation !== this.requestGeneration) return;
         const msg = err instanceof Error ? err.message : String(err);
         this.history.push({ role: "assistant", text: `Error: ${msg}` });
@@ -221,6 +229,8 @@ export class PeekOverlay {
     if (this.closed) return;
     this.closed = true;
     this.requestGeneration++;
+    this.requestAbort?.abort();
+    this.requestAbort = null;
     this.referenceText = null;
     if (this.trackerTimer) {
       clearInterval(this.trackerTimer);

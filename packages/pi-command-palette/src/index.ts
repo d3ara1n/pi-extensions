@@ -1,7 +1,7 @@
 /**
  * pi-command-palette — Global command palette for pi.
  *
- * Press Ctrl+Shift+P to open a searchable command palette overlay,
+ * Press Ctrl+Alt+P to open a searchable command palette overlay,
  * regardless of whether the editor has content.
  *
  * Features:

@@ -1,6 +1,6 @@
 # pi-command-palette
 
-Global command palette for [Pi Coding Agent](https://pi.dev) — press **Ctrl+Shift+P** to search and run commands from anywhere.
+Global command palette for [Pi Coding Agent](https://pi.dev) — press **Ctrl+Alt+P** to search and run commands from anywhere.
 
 ## Why?
 
@@ -30,7 +30,7 @@ Or add to `~/.pi/agent/settings.json`:
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+Shift+P` _(default, configurable)_ | Open command palette |
+| `Ctrl+Alt+P` _(default, configurable)_ | Open command palette |
 
 The palette lists:
 
@@ -50,14 +50,14 @@ The "Model: Switch Model" action opens a secondary overlay listing all models wi
 
 ## Configuration
 
-The default shortcut is `Ctrl+Shift+P`. If it conflicts with your terminal, override it via either of the following (evaluated in order, first match wins).
+The default shortcut is `Ctrl+Alt+P`. This avoids pi's built-in `Ctrl+P` / `Ctrl+Shift+P` model cycling shortcuts while keeping the palette mnemonic. If it conflicts with your terminal, override it via either of the following (evaluated in order, first match wins).
 
 ### 1. Environment variable
 
 Useful for terminals that intercept `Ctrl+Shift+<key>` before it reaches the session (e.g. Termius on Windows/WSL2):
 
 ```bash
-export PI_COMMAND_PALETTE_KEY=ctrl+alt+k
+export PI_COMMAND_PALETTE_KEY=ctrl+shift+p
 ```
 
 Add it to your shell profile to persist (`~/.zshrc` on macOS, `~/.bashrc` on bash).
@@ -69,9 +69,9 @@ Set `commandPalette.shortcut` in `~/.pi/agent/settings.json` (global) or `.pi/se
 ```json
 {
   "commandPalette": {
-    "shortcut": "ctrl+alt+k"
+    "shortcut": "ctrl+shift+p"
   }
 }
 ```
 
-Any valid pi keybinding string works (e.g. `ctrl+shift+k`, `ctrl+alt+p`, `ctrl+k`). Restart pi (or run `/reload`) after changing the shortcut.
+Any valid pi keybinding string works (e.g. `ctrl+shift+p`, `ctrl+shift+k`, `ctrl+alt+k`, `ctrl+k`). Restart pi (or run `/reload`) after changing the shortcut.

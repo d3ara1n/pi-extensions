@@ -4,15 +4,17 @@ Per-turn side agent decision framework for [pi](https://github.com/earendil-work
 
 Before each conversation turn, scout analyzes the user's prompt and makes routing decisions:
 
-1. **skill-router** — Selects which skills to activate and injects their full content (replacing pi's default skill metadata list)
-2. **model-router** — Automatically switches the active model role based on task complexity
+1. **skill-router** — Selects which skills to advertise to the main model and replaces pi's full skill list with a compact selected-skill list
+2. **model-router** — Switches the active model role based on task complexity
 3. **short-circuit** — Skips the side model entirely on trivial acknowledgments (`好的` / `ok` / `はい`), avoiding the per-turn latency and cost
 
 All three modules can be independently toggled on/off.
 
 ## Why model-router is disabled by default
 
-Model-router switches the active model role based on task complexity, which can:
+Model-router switches the active model role based on task complexity. This is a persistent pi model change, the same kind of state change as selecting a model manually, so subsequent turns continue on the routed model until something changes it again.
+
+This can:
 
 - **Break prompt caching**: Different models don't share cache, causing cache write costs on each switch
 - **Increase API costs**: Frequent model switching adds ~118% overhead in typical workloads
@@ -58,8 +60,9 @@ before_agent_start hook fires
     ├─ otherwise → Side agent (cheap model) analyzes prompt + available skills + current role
     ├─ Returns: { skills: [...], role: "...", reasoning: "..." }
     │
-    ├─ [skill-router] Strips <available_skills> XML, injects selected skill SKILL.md content
-    └─ [model-router] Switches model if a different role is recommended
+    ├─ [skill-router] Replaces pi's full skill list with selected skill metadata
+    │     (the main model can then read the selected skill file when needed)
+    └─ [model-router] Switches the active model if a different role is recommended
 ```
 
 ## Dependencies
@@ -131,7 +134,7 @@ Edit `~/.pi/agent/settings.json`:
 
 ## Performance
 
-Side agent adds ~0.5–2s latency per turn. Output is limited to 256 tokens.
+Side agent adds ~0.5–2s latency per non-short-circuited turn. The prompt asks the side agent for compact JSON, but the current implementation does not enforce a hard output-token cap; malformed or oversized output is rejected and the main turn continues without applying that decision.
 
 ## License
 

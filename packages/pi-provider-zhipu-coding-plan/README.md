@@ -48,6 +48,10 @@ Or manually add to `~/.pi/agent/auth.json`:
 
 Supported models span the GLM-4.5 through GLM-5.2 series (text only). Model metadata (context window, max tokens, compatibility flags) is maintained statically in `KNOWN_MODELS`.
 
+## Compatibility Notes
+
+The current provider configuration uses pi's built-in `openai-completions` transport and static compat flags maintained in `KNOWN_MODELS`. Before changing model metadata or compat flags, re-run the provider checks in [`PROVIDER.md`](../../PROVIDER.md): thinking format, system/developer role, tool-call stream shape, usage reporting, max-token field, and context-overflow error text.
+
 ## Usage Display
 
 When paired with `@d3ara1n/pi-usage-block`, the status bar shows:

@@ -17,7 +17,7 @@
 export interface PeekConfig {
   /** Serialize: keep the most recent N user-initiated turns. */
   recentTurns?: number;
-  /** Serialize: hard cap on total serialized characters. */
+  /** Retained for settings compatibility; serialization has no whole-session output cap. */
   maxChars?: number;
   /** Serialize: truncate a single tool result longer than this. */
   toolResultLimit?: number;

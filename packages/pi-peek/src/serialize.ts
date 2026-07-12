@@ -2,7 +2,7 @@
  * Serialize the local main conversation to reference text for peek consults.
  *
  * Inherited from pi-aside's design: pure function over SessionEntry[], with
- * length truncation so a single huge tool result can't blow up the utility
+ * per-tool-result truncation so a single huge result can't dominate the utility
  * model's context.
  */
 
@@ -13,7 +13,6 @@ import { DEFAULT_PEEK_CONFIG } from "./types.ts";
 /** Serialize a session branch to peek reference text. */
 export function serializeConversation(branch: SessionEntry[], config: PeekConfig = {}): string {
   const recentTurns = config.recentTurns ?? DEFAULT_PEEK_CONFIG.recentTurns;
-  const maxChars = config.maxChars ?? DEFAULT_PEEK_CONFIG.maxChars;
   const toolResultLimit = config.toolResultLimit ?? DEFAULT_PEEK_CONFIG.toolResultLimit;
 
   // Only message entries participate.
@@ -34,11 +33,7 @@ export function serializeConversation(branch: SessionEntry[], config: PeekConfig
     parts.push(serializeMessage(entry, toolResultLimit));
   }
 
-  let out = parts.join("\n").trim();
-  if (out.length > maxChars) {
-    const kept = out.slice(0, maxChars);
-    out = kept + `\n\n[...truncated, ${out.length - maxChars} more chars omitted...]`;
-  }
+  const out = parts.join("\n").trim();
   return out || "(empty conversation)";
 }
 

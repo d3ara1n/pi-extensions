@@ -34,9 +34,15 @@ function readPeek(filePath: string): Record<string, any> | undefined {
   return raw && typeof raw === "object" ? raw : undefined;
 }
 
+function positiveInteger(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : fallback;
+}
+
 /**
- * Load peek config. Project overrides global wholesale; per-field `??
- * DEFAULT` fills any gap. (No field-level merge — project replaces global.) */
+ * Load peek config. Project overrides global wholesale; per-field defaults fill
+ * any gap. (No field-level merge — project replaces global.) */
 export function loadPeekConfig(cwd?: string): PeekConfig {
   const globalRaw = readPeek(path.join(getAgentDir(), "settings.json"));
   const projectRaw = cwd ? readPeek(path.join(cwd, ".pi", "settings.json")) : undefined;
@@ -44,9 +50,9 @@ export function loadPeekConfig(cwd?: string): PeekConfig {
   if (!raw) return { ...DEFAULT_PEEK_CONFIG };
 
   return {
-    recentTurns: raw.recentTurns ?? DEFAULT_PEEK_CONFIG.recentTurns,
-    maxChars: raw.maxChars ?? DEFAULT_PEEK_CONFIG.maxChars,
-    toolResultLimit: raw.toolResultLimit ?? DEFAULT_PEEK_CONFIG.toolResultLimit,
-    role: raw.role ?? DEFAULT_PEEK_CONFIG.role,
+    recentTurns: positiveInteger(raw.recentTurns, DEFAULT_PEEK_CONFIG.recentTurns),
+    maxChars: positiveInteger(raw.maxChars, DEFAULT_PEEK_CONFIG.maxChars),
+    toolResultLimit: positiveInteger(raw.toolResultLimit, DEFAULT_PEEK_CONFIG.toolResultLimit),
+    role: typeof raw.role === "string" && raw.role.trim() ? raw.role : DEFAULT_PEEK_CONFIG.role,
   };
 }

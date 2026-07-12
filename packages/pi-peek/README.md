@@ -6,7 +6,7 @@ Core capability library for [pi](https://github.com/earendil-works/pi) — seria
 
 ## What it does
 
-- **Serialize** the current main conversation branch into compact reference text (turns + tool calls, truncated)
+- **Serialize** the current main conversation branch into compact reference text (turns + tool calls, per-tool-result truncation)
 - **Investigate**: stream a consult to the `utility` model role with the record as background context and the question as the standalone user message
 - **Tracker**: live snapshot of the local main agent's activity (tool name, turn index), hook-driven
 - **Read-after-burn**: nothing is persisted, no session file is touched, the main agent is never disturbed
@@ -14,7 +14,19 @@ Core capability library for [pi](https://github.com/earendil-works/pi) — seria
 ## Installation
 
 ```bash
+pi install npm:@d3ara1n/pi-model-roles
 pi install npm:@d3ara1n/pi-peek
+```
+
+Both are extensions and must be loaded in `~/.pi/agent/settings.json`:
+
+```json
+{
+  "extensions": [
+    "/absolute/path/to/pi-extensions/packages/pi-model-roles",
+    "/absolute/path/to/pi-extensions/packages/pi-peek"
+  ]
+}
 ```
 
 ## Dependencies
@@ -25,16 +37,18 @@ pi install npm:@d3ara1n/pi-peek
 
 Optional tuning in `~/.pi/agent/settings.json` under `peek`:
 
-```jsonc
+```json
 {
   "peek": {
-    "recentTurns": 10,        // keep the most recent N user-initiated turns
-    "maxChars": 50000,        // hard cap on total serialized characters
-    "toolResultLimit": 500,   // truncate a single tool result longer than this
-    "role": "utility"         // model role for consult (e.g. "default" for higher quality)
+    "recentTurns": 10,
+    "maxChars": 50000,
+    "toolResultLimit": 500,
+    "role": "utility"
   }
 }
 ```
+
+`recentTurns` and `toolResultLimit` control serialization. `maxChars` is retained for settings compatibility but does not truncate the complete serialized conversation; invalid numeric values fall back to defaults.
 
 ## API (for extension authors)
 

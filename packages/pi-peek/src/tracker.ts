@@ -52,8 +52,17 @@ export function onToolStart(toolName: string, args: any): void {
   };
 }
 
-export function onToolEnd(_toolName: string): void {
-  status = { ...status, lastUpdated: nowIso() };
+export function onToolEnd(toolName: string): void {
+  if (status.toolName !== toolName) {
+    status = { ...status, lastUpdated: nowIso() };
+    return;
+  }
+  status = {
+    ...status,
+    activity: "thinking",
+    toolName: undefined,
+    lastUpdated: nowIso(),
+  };
 }
 
 function formatToolActivity(name: string, args: any): string {

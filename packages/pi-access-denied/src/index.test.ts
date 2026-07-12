@@ -70,6 +70,7 @@ test("mixed always-allow and deny persists the grant while blocking the call", a
   const notices: string[] = [];
   const ctx = {
     cwd: project,
+    mode: "tui",
     hasUI: true,
     ui: {
       theme: { fg: (_color: string, text: string) => text },
@@ -109,4 +110,61 @@ test("mixed always-allow and deny persists the grant while blocking the call", a
 
   await status.handler([], ctx);
   assert.ok(notices.at(-1)?.includes(`  • ${alwaysAllowed}   (session)`));
+});
+
+test("prompt mode blocks outside access outside TUI without calling custom UI", async () => {
+  project = fs.mkdtempSync(path.join(os.tmpdir(), "ad-rpc-test-"));
+  fs.mkdirSync(path.join(project, ".pi"));
+  fs.writeFileSync(
+    path.join(project, ".pi", "settings.json"),
+    JSON.stringify({ accessDenied: { mode: "prompt" } }),
+  );
+
+  const handlers = new Map<string, Handler>();
+  accessDenied({
+    on(event: string, handler: Handler) {
+      handlers.set(event, handler);
+    },
+    registerCommand() {},
+  } as any);
+
+  const start = handlers.get("session_start");
+  const toolCall = handlers.get("tool_call");
+  const stop = handlers.get("session_shutdown");
+  assert.ok(start);
+  assert.ok(toolCall);
+  assert.ok(stop);
+  shutdown = () => stop();
+
+  let customCalled = false;
+  const ctx = {
+    cwd: project,
+    mode: "rpc",
+    hasUI: true,
+    ui: {
+      theme: { fg: (_color: string, text: string) => text },
+      setStatus() {},
+      custom: async () => {
+        customCalled = true;
+        throw new Error("custom should not be called outside TUI");
+      },
+    },
+  };
+
+  await start({}, ctx);
+  const result = await toolCall(
+    {
+      type: "tool_call",
+      toolCallId: "rpc-outside",
+      toolName: "bash",
+      input: { command: "cat /etc/passwd" },
+    },
+    ctx,
+  );
+
+  assert.equal(customCalled, false);
+  assert.deepEqual(result, {
+    block: true,
+    reason: "Blocked (TUI authorization unavailable):   • /etc/passwd",
+  });
 });

@@ -1,10 +1,10 @@
 /**
- * pi-access-denied — sandbox write/edit/bash to the project directory.
+ * pi-access-denied — behavior guard for write/edit/bash path choices.
  *
- * Gates built-in `write`, `edit`, and `bash` tools so they cannot reach paths
- * outside an allowlist (cwd + configured allowedPaths) without authorization,
- * and hard-blocks any path listed in `deniedPaths` (optionally with a reason
- * that is surfaced back to the agent as a redirect).
+ * Nudges agents away from unnecessary access outside the project: broad disk
+ * searches, stale application-data paths, and persistent output written to
+ * unrelated directories. It is intentionally a low-noise behavioral guard,
+ * not a security boundary or shell sandbox; bash inspection is best-effort.
  *
  * Three modes (switchable at runtime via `/access-denied`):
  *   - prompt: ask the user; choices are allow / always-allow / deny / always-deny
@@ -31,11 +31,16 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { loadConfig } from "./config.ts";
 import { PathManager } from "./path-manager.ts";
 import { extractBashTargets, resolveTarget, toPosix } from "./paths.ts";
-import { DEFAULT_CONFIG, type AccessMode, type AuthResult } from "./types.ts";
+import { DEFAULT_CONFIG, type AccessMode, type AuthResult, type SupportedTool } from "./types.ts";
 import { AuthPanel } from "./auth-panel.ts";
 
 const GLOBAL_KEY = "__piAccessDenied";
 const STATUS_KEY = "access-denied";
+const SUPPORTED_TOOLS: ReadonlySet<string> = new Set<SupportedTool>(["write", "edit", "bash"]);
+
+function isSupportedTool(toolName: string): toolName is SupportedTool {
+  return SUPPORTED_TOOLS.has(toolName);
+}
 
 interface SessionState {
   mode: AccessMode;
@@ -141,7 +146,7 @@ export default function (pi: ExtensionAPI) {
     if (!state.alive) return; // not bound to a session yet
 
     const toolName = event.toolName;
-    if (!state.config.tools.includes(toolName)) return;
+    if (!isSupportedTool(toolName) || !state.config.tools.includes(toolName)) return;
 
     const pm = state.pm;
     const cwd = ctx.cwd;
@@ -191,9 +196,10 @@ export default function (pi: ExtensionAPI) {
       };
     }
 
-    // prompt mode — but no UI available (print/json mode): fail safe.
-    if (!ctx.hasUI) {
-      return { block: true, reason: `Blocked (no UI to authorize): ${formatPaths(outside)}` };
+    // prompt mode — custom panels are TUI-only. RPC has UI helpers, but not
+    // ctx.ui.custom(); print/json also cannot authorize interactively.
+    if (ctx.mode !== "tui") {
+      return { block: true, reason: `Blocked (TUI authorization unavailable): ${formatPaths(outside)}` };
     }
 
     // 6. Prompt for the outside paths.

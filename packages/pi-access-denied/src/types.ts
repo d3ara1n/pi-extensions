@@ -4,6 +4,7 @@
 
 /** Access control mode. */
 export type AccessMode = "prompt" | "deny" | "allow";
+export type SupportedTool = "write" | "edit" | "bash";
 
 /** Per-path choice chosen from the authorization panel. */
 export type Choice = "allow" | "always-allow" | "deny" | "always-deny";
@@ -61,7 +62,7 @@ export interface AccessDeniedConfig {
    */
   deniedPaths: Record<string, string | null>;
   /** Built-in tools to gate. Defaults to `["write", "edit", "bash"]`. */
-  tools: string[];
+  tools: SupportedTool[];
 }
 
 export const DEFAULT_CONFIG: AccessDeniedConfig = {

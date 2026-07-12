@@ -1,12 +1,14 @@
 # pi-access-denied
 
-Sandbox `write` / `edit` / `bash` to the project directory — any access outside an allowlist requires your authorization first.
+Behavior guard for `write` / `edit` / `bash` path choices. It nudges an agent back toward the project when it tries broad disk searches, reaches for stale sensitive-data locations, or writes persistent data outside the working directory.
 
 ## Why
 
-By default, pi's `write` / `edit` / `bash` can read and write any file the agent process has permission to. This extension adds an access boundary: **outside the project directory = needs authorization**.
+LLMs sometimes choose unnecessarily broad or misplaced paths: `find /` instead of searching the project, an application data directory remembered from training data, or a home-directory output path when the result belongs in the repository. This extension catches common forms of those calls and either asks you, redirects the agent with a reason, or blocks the call according to your selected mode.
 
-> About pi's built-in "trusted projects": that controls *whether to load a project's local config / resources / extensions* (defense against malicious `.pi/settings.json` executing code) — its semantics is code-execution trust. What this extension does is *restrict the file-access range of agent tools*. The two are orthogonal, so it does **not** reuse pi's trust store; it only borrows the `ask / always / never` UX pattern.
+It is a **behavior-correction layer**, not a security sandbox. Bash matching is deliberately best-effort and biased toward low noise: missing an unusual path expression is preferable to interrupting ordinary commands with false positives. Use OS/container isolation when access must be enforced against deliberate or comprehensive evasion.
+
+> Pi's built-in "trusted projects" controls whether project-local config, resources, and extensions may load. This extension instead influences agent tool behavior after loading; it does not reuse or replace pi's trust model.
 
 ## Three modes
 
@@ -18,12 +20,12 @@ By default, pi's `write` / `edit` / `bash` can read and write any file the agent
 
 Authorization panel (`prompt` mode only):
 
-When a tool reaches outside the allowlist, a bottom-anchored panel lists every out-of-bounds path on its own row, each defaulting to **Accept**. A single horizontal action bar reflects the *focused* path's current choice:
+When a recognized tool call contains a path outside the configured roots, a bottom-anchored panel lists each matched path on its own row, defaulting to **Allow**. A single horizontal action bar reflects the focused path's current choice:
 
 - **Allow** (default) — allow this one call; shows no marker on its row
 - **Always allow** — remember the path **and everything beneath it**, don't ask again this session; marks the row `[always-allow]` (green)
 - **Deny** — block this one call; marks the row `[deny]` (red)
-- **Always deny** — permanently block that path **and everything beneath it** this session; marks the row `[always-deny]` (red)
+- **Always deny** — block that path **and everything beneath it** for the rest of this session; marks the row `[always-deny]` (red)
 
 Each path keeps its own choice, so a multi-path `bash` call can allow some paths while denying others in a single pass. Submitting with any deny present pops a **single global reason** input (leave empty for a default reason); **Esc there returns to the path list** rather than committing a no-reason deny.
 
@@ -90,9 +92,9 @@ allow /aaa/bbb     deny /aaa/bbb/ccc     deny /aaa
 
 A same-depth allow/deny conflict (same path in both lists) resolves to **deny** — the safe default. Session decisions are equal peers: a runtime "always-allow `/a/b/c`" overrides a config "deny `/a/b`" for that subtree, exactly as two config rules would.
 
-### `deniedPaths` — deny with a redirect
+### `deniedPaths` — redirect recurring agent behavior
 
-The primary use case is **redirecting an agent away from a stale path**. An agent often reaches for a data dir it "remembers" from training data; if you moved that dir, the agent fails to find it and starts searching the disk. Listing the old path in `deniedPaths` with the new location as the reason short-circuits that:
+The primary use case is **redirecting an agent away from a stale or unwanted path**. An agent may reach for a data directory it remembers from training data; if that path is wrong, it can escalate into a broad disk search. Listing the old path in `deniedPaths` with the preferred location as the reason corrects the behavior immediately:
 
 ```json
 {
@@ -108,7 +110,7 @@ The reason is delivered to the agent wrapped as a "user note" (`Blocked by acces
 
 ## Built-in safe paths (never prompt)
 
-The gate's purpose is to stop an out-of-control agent from leaving **permanent footprints** outside the project (configs, user data, system files) — not to isolate users or hide other programs' data. So task-scoped scratch space that the OS reclaims is always allowed:
+The guard is intended to correct persistent or overly broad filesystem behavior, not to interfere with ordinary task-scoped scratch work. OS-reclaimed temporary locations are therefore allowed by default:
 
 - **Pseudo-devices**: `/dev/null`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr`, `/dev/zero`, `/dev/urandom`, `/dev/random`, `/dev/fd/` (the process's own file descriptors). On Windows, the native device names `NUL`/`CON`/`AUX`/`PRN`/`COM1-9`/`LPT1-9` are also recognized (matched by basename, so `C:\proj\NUL`, bare `NUL`, and `NUL.txt` all work).
 - **Scratch dirs**: `/tmp` (system shared, auto-cleaned) and `os.tmpdir()` (per-user temp; on Linux these are the same place). macOS `/tmp` -> `/private/tmp` symlink is handled. On Git Bash for Windows, `/tmp` maps to `%TEMP%` — see [Cross-platform behavior](#cross-platform-behavior).
@@ -139,7 +141,7 @@ Use `allowedPaths` to add your own always-safe roots (e.g. a log dir you always 
 
   Relative paths under `cwd` (e.g. `src/foo.ts`, `cat README.md`) are left alone by default.
 
-**Quoted strings and heredoc bodies are treated as data, not paths.** A quoted run (`echo '...'`, `sed 's|a|b|g'`, `printf '%s' ...`) is a literal passed to a program, so it's skipped entirely — this is what stops a JS block comment like `'/* header */ code'` at the start of a quoted string from being mistaken for absolute path `/`. Likewise, a `<<DELIM ... DELIM` heredoc body is stdin data, so every `/...` token inside embedded code is ignored. Only the opener line (e.g. `cat /etc/passwd <<EOF`) is still scanned.
+**Quoted strings and heredoc bodies are treated as data, not paths.** This intentionally reduces false positives in commands containing code, regular expressions, or embedded text. Consequently, a quoted real path may pass through; that trade-off is consistent with this plugin's behavior-correction purpose.
 
 **Backslash escapes are honored inside unquoted tokens.** `Agent\ Workspace` is one token (a path containing a literal space), not two — the `\` + next char is kept together and the backslash stripped, so `/a/Agent\ Workspace/b` is treated as `/a/Agent Workspace/b`. This covers `\ ` (space), `\;`, `\(`, `\|`, even `\\` → `\`. It applies only to **unquoted** tokens; inside quotes the backslash is left untouched (quotes already protect the content).
 
@@ -167,11 +169,11 @@ A bash command is an arbitrary shell string, so **perfect static path analysis i
 - **Quoted real paths are no longer caught** as a side effect of treating quoted runs as data: `cat '/etc/passwd'` passes through even though `cat /etc/passwd` (bare) is blocked. The bare-path check still covers the common case; this only loosens quoted-path arguments.
 - Complex quoting can in theory cause misjudgment. Plain backslash escapes in unquoted tokens are handled (see Path resolution), but nested/layered quoting (`"'$x'"`) is not.
 
-This is a **protection layer**, not an **absolute sandbox** — it blocks the vast majority of straightforward out-of-bounds access (`cat /etc/passwd`, `rm ~/notes`, `echo x > /etc/foo`) but not deliberate evasion. For strong isolation, combine with pi's containerization / SSH remote execution.
+This is intentional best-effort matching, not an absolute sandbox. The goal is to correct common agent behavior with little noise, not to understand every possible shell expansion. For enforced isolation, use a container or remote execution boundary.
 
 ## Non-interactive mode
 
-In `-p` (print), `--mode json`, `--mode rpc` without a UI, `prompt` mode can't show a dialog, so it **fails safe**: out-of-bounds access is blocked (reason: `no UI to authorize`). To allow access in those modes, set `mode` to `allow`.
+The authorization panel uses pi's TUI-only `ctx.ui.custom()` API. In print, JSON, and RPC modes, `prompt` mode cannot open that panel and blocks matched out-of-project calls with `TUI authorization unavailable`. Set `mode` to `allow` when running non-interactively and this behavior guard is not wanted.
 
 ## Design notes
 

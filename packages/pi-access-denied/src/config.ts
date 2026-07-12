@@ -9,7 +9,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { DEFAULT_CONFIG, type AccessDeniedConfig, type AccessMode } from "./types.ts";
+import { DEFAULT_CONFIG, type AccessDeniedConfig, type AccessMode, type SupportedTool } from "./types.ts";
 /** Get the pi agent directory path. Honors PI_AGENT_DIR override. */
 function getAgentDir(): string {
   const envDir = process.env.PI_AGENT_DIR;
@@ -29,6 +29,7 @@ function readSettingsFile(filePath: string): any {
 }
 
 const VALID_MODES: ReadonlySet<AccessMode> = new Set(["prompt", "deny", "allow"]);
+const VALID_TOOLS: ReadonlySet<SupportedTool> = new Set(["write", "edit", "bash"]);
 
 function asMode(value: unknown): AccessMode | undefined {
   return typeof value === "string" && VALID_MODES.has(value as AccessMode)
@@ -39,6 +40,13 @@ function asMode(value: unknown): AccessMode | undefined {
 function asStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   return value.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+}
+
+function asToolArray(value: unknown): SupportedTool[] | undefined {
+  const tools = asStringArray(value)?.filter((tool): tool is SupportedTool =>
+    VALID_TOOLS.has(tool as SupportedTool),
+  );
+  return tools && tools.length > 0 ? tools : undefined;
 }
 
 /**
@@ -99,6 +107,6 @@ export function loadConfig(cwd?: string): AccessDeniedConfig {
     mode: asMode(raw.mode) ?? DEFAULT_CONFIG.mode,
     allowedPaths: asStringArray(raw.allowedPaths) ?? DEFAULT_CONFIG.allowedPaths,
     deniedPaths: asDeniedPaths(raw.deniedPaths),
-    tools: asStringArray(raw.tools) ?? DEFAULT_CONFIG.tools,
+    tools: asToolArray(raw.tools) ?? DEFAULT_CONFIG.tools,
   };
 }

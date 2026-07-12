@@ -307,9 +307,19 @@ describe("allowedPaths", () => {
 });
 
 describe("tools", () => {
-  test("custom tools pass through", () => {
-    writeGlobal({ accessDenied: { tools: ["write"] } });
-    assert.deepEqual(loadConfig(tmpProject).tools, ["write"]);
+  test("supported tools pass through", () => {
+    writeGlobal({ accessDenied: { tools: ["write", "bash"] } });
+    assert.deepEqual(loadConfig(tmpProject).tools, ["write", "bash"]);
+  });
+
+  test("unknown tools are ignored", () => {
+    writeGlobal({ accessDenied: { tools: ["read", "write", "grep", "edit"] } });
+    assert.deepEqual(loadConfig(tmpProject).tools, ["write", "edit"]);
+  });
+
+  test("empty or invalid tool list falls back to default three", () => {
+    writeGlobal({ accessDenied: { tools: ["read", "grep"] } });
+    assert.deepEqual(loadConfig(tmpProject).tools, DEFAULT_CONFIG.tools);
   });
 
   test("non-array → default three", () => {

@@ -2,7 +2,7 @@
   "name": "@d3ara1n/pi-provider-zhipu-coding-plan",
   "version": "1.4.0",
   "type": "module",
-  "description": "Zhipu AI Coding Plan provider for pi — auto-discovers models, reports usage quota",
+  "description": "Zhipu AI Coding Plan provider for pi — static GLM model list and usage quota reporting",
   "keywords": [
     "pi-package",
     "pi",

@@ -9,17 +9,18 @@ Zhipu AI Coding Plan provider for [Pi Coding Agent](https://pi.dev) — ships a 
 
 ## Dependencies
 
-None.
+- [`@d3ara1n/pi-usage-block-core`](../pi-usage-block-core) — registers the Zhipu quota provider
 
 ## Installation
 
 ```bash
+pi install npm:@d3ara1n/pi-usage-block-core
 pi install npm:@d3ara1n/pi-provider-zhipu-coding-plan
 ```
 
-Or add to `~/.pi/agent/settings.json`:
+Or add the provider extension to `~/.pi/agent/settings.json`:
 
-```jsonc
+```json
 {
   "extensions": [
     "/absolute/path/to/pi-extensions/packages/pi-provider-zhipu-coding-plan"

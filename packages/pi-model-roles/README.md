@@ -9,11 +9,12 @@ Defines named model roles (e.g. "heavy", "fast", "utility") and resolves them to
 - Reads role definitions from `~/.pi/agent/settings.json` → `modelRoles` field
 - Resolves role names to `Model<Api>` instances via pi's `ModelRegistry`
 - Exposes a `ModelRolesAPI` singleton for other extensions to consume via direct import
-- **Pure library**: no tools, no commands, no event hooks
+- Registers the `/roles` command and session/model hooks that initialize and maintain the singleton
 
-## Dependencies
-
-None.
+This package is an **extension dependency**, not a passive npm-only library. It
+must be listed in pi's `extensions` array alongside every consumer so its
+`session_start` hook initializes the shared API. Installing it as an npm
+dependency alone does not load the extension.
 
 ## Installation
 
@@ -74,8 +75,13 @@ Override specific roles in `~/.pi/agent/settings.json`:
 }
 ```
 
-User settings **merge** with built-in defaults: only override roles you want to change.
-You can also add entirely new roles.
+User settings merge with built-in defaults: only override roles you want to change.
+You can also add entirely new roles. A missing role requested through
+`resolveRole()`, `resolveRoleAsync()`, `completeWithRole()`, or `streamWithRole()`
+uses `defaultRole`'s configuration once; if that configuration cannot resolve, the
+call falls back to the current model when applicable or reports no model. The
+returned `ResolvedRole.name` remains the unknown requested name, and `getRole()`
+continues to return only explicitly defined roles.
 
 ### Hidden roles
 

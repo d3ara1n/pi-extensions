@@ -1,8 +1,9 @@
 /**
  * pi-model-roles — Extension entry point.
  *
- * Dependency library: provides ModelRolesAPI singleton.
- * Registers /roles command for inspection.
+ * Extension dependency library: provides a ModelRolesAPI singleton and a
+ * /roles inspection command. It registers session/model hooks to initialize
+ * and keep the singleton current.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

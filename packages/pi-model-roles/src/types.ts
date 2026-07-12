@@ -63,15 +63,19 @@ export interface ModelRolesAPI {
   /** Get a single role configuration by name. */
   getRole(name: string): RoleConfig | undefined;
   /**
-   * Resolve a role name to a model instance (sync, no auth).
+   * Resolve a requested role name to a model instance (sync, no auth).
+   * Unknown names use the configured default role's config, but the returned
+   * `name` remains the requested name. `getRole()` remains a declared-role
+   * lookup, so callers never mistake an unknown name for a defined role.
    * model=null is transparently resolved to pi's current model.
-   * Returns model=undefined only if the model is truly unavailable.
+   * Returns model=undefined only if the effective role is unavailable.
    */
   resolveRole(name: string): ResolvedRole;
   /**
-   * Resolve a role name to a model instance with auth info (async).
+   * Resolve a requested role name with auth info (async). Unknown names use
+   * the configured default role's config once, then return the current model
+   * or undefined when that effective role cannot resolve.
    * model=null is transparently resolved to pi's current model.
-   * Returns model=undefined only if the model is truly unavailable.
    */
   resolveRoleAsync(name: string): Promise<ResolvedRole>;
   /** Get the default role name. */

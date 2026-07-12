@@ -51,6 +51,14 @@ export function initModelRolesAPI(
     return state.config;
   }
 
+  /** Resolve a requested role through the configured default exactly once.
+   * The requested name is retained by resolveRole() so an unknown role is
+   * never presented to consumers as though it were the default role itself. */
+  function getEffectiveRoleConfig(name: string): RoleConfig {
+    const config = getConfig();
+    return config.roles[name] ?? config.roles[config.defaultRole ?? "default"] ?? { model: null };
+  }
+
   const api: ModelRolesAPI = {
     getRoles(): Record<string, RoleConfig> {
       return getConfig().roles;
@@ -61,43 +69,13 @@ export function initModelRolesAPI(
     },
 
     resolveRole(name: string): ResolvedRole {
-      const roleConfig = getConfig().roles[name];
-      if (!roleConfig) {
-        return {
-          name,
-          config: { model: null },
-          model: state.currentModel,
-          apiKey: undefined,
-          headers: undefined,
-        };
-      }
-
+      const roleConfig = getEffectiveRoleConfig(name);
       const resolved = resolveModelForRole(roleConfig, state.modelRegistry, state.currentModel);
       return { name, config: roleConfig, ...resolved };
     },
 
     async resolveRoleAsync(name: string): Promise<ResolvedRole> {
-      const roleConfig = getConfig().roles[name];
-      if (!roleConfig) {
-        if (state.currentModel) {
-          const auth = await state.modelRegistry.getApiKeyAndHeaders(state.currentModel);
-          return {
-            name,
-            config: { model: null },
-            model: state.currentModel,
-            apiKey: auth.ok ? auth.apiKey : undefined,
-            headers: auth.ok ? auth.headers : undefined,
-          };
-        }
-        return {
-          name,
-          config: { model: null },
-          model: undefined,
-          apiKey: undefined,
-          headers: undefined,
-        };
-      }
-
+      const roleConfig = getEffectiveRoleConfig(name);
       const resolved = await resolveModelForRoleAsync(
         roleConfig,
         state.modelRegistry,
@@ -165,7 +143,7 @@ export function initModelRolesAPI(
     async completeWithRole(roleName: string, context: any, options?: any): Promise<any> {
       // Resolve model: explicit override wins, else the role's declared model
       // (model=null transparently uses pi's current model).
-      const roleConfig = getConfig().roles[roleName] ?? { model: null };
+      const roleConfig = getEffectiveRoleConfig(roleName);
       const model =
         options?.model ??
         resolveModelForRole(roleConfig, state.modelRegistry, state.currentModel).model;
@@ -193,7 +171,7 @@ export function initModelRolesAPI(
     },
 
     async streamWithRole(roleName: string, context: any, options?: any): Promise<any> {
-      const roleConfig = getConfig().roles[roleName] ?? { model: null };
+      const roleConfig = getEffectiveRoleConfig(roleName);
       const model =
         options?.model ??
         resolveModelForRole(roleConfig, state.modelRegistry, state.currentModel).model;

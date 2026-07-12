@@ -32,6 +32,10 @@ function readPeek(filePath: string): Record<string, any> | undefined {
   return raw && typeof raw === "object" ? raw : undefined;
 }
 
+function positiveNumber(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 /**
  * Load pi-peek-agent config. Project overrides global wholesale; per-field
  * `?? DEFAULT` fills any gap. (No field-level merge — project replaces global.) */
@@ -42,8 +46,8 @@ export function loadAgentConfig(cwd?: string): AgentConfig {
   if (!raw) return { ...DEFAULT_AGENT_CONFIG };
 
   return {
-    registryDir: raw.registryDir,
-    heartbeatMs: raw.heartbeatMs ?? DEFAULT_AGENT_CONFIG.heartbeatMs,
-    askTimeoutMs: raw.askTimeoutMs ?? DEFAULT_AGENT_CONFIG.askTimeoutMs,
+    registryDir: typeof raw.registryDir === "string" && raw.registryDir.trim() ? raw.registryDir : undefined,
+    heartbeatMs: positiveNumber(raw.heartbeatMs, DEFAULT_AGENT_CONFIG.heartbeatMs),
+    askTimeoutMs: positiveNumber(raw.askTimeoutMs, DEFAULT_AGENT_CONFIG.askTimeoutMs),
   };
 }

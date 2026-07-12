@@ -60,7 +60,7 @@ export function initPeekAgentAPI(deps: PeekAgentDeps): PeekAgentAPI {
         state.registryDir,
         state.self.sessionId,
       );
-      const peers = await discovery.pruneDeadPeers(candidates, state.registryDir);
+      const peers = await discovery.pruneDeadPeers(candidates);
       discovery.flagAmbiguous(peers);
       return discovery.sortByProject(peers, state.self.cwd);
     },

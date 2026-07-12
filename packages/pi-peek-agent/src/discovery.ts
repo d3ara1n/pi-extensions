@@ -2,15 +2,28 @@
  * Discovery — lightweight PID-file registry + liveness probing.
  *
  * Each instance writes a tiny marker JSON (sessionId → {pid, sockPath, …}) to
- * a shared registry dir. Discovery = readdir + kill(pid,0) probe. Crashed peers
- * leave a marker that's pruned on the next read (O(1) per file, no data dirs).
+ * a shared registry dir. Discovery validates marker identity, then probes the
+ * owning process and socket. Crashed peers leave a marker that's pruned on the
+ * next read (O(1) per file, no data dirs).
  */
 
 import * as fs from "node:fs";
 import * as net from "node:net";
+import * as os from "node:os";
 import * as path from "node:path";
 import type { PeerInfo } from "./types.ts";
 import { defaultRegistryDir } from "./types.ts";
+
+interface RegistryPeer extends PeerInfo {
+  /** Path obtained from the registry enumeration and validated against sessionId. */
+  markerFile: string;
+}
+
+const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
+function isSafeSessionId(sessionId: unknown): sessionId is string {
+  return typeof sessionId === "string" && SESSION_ID_RE.test(sessionId);
+}
 
 /**
  * Returns true if a process with the given pid is alive (POSIX kill(pid,0)).
@@ -34,10 +47,9 @@ export function isPidAlive(pid: number): boolean {
 /**
  * Cross-platform liveness probe via a one-shot socket connect.
  *
- * Authoritative on Windows (where the pid probe is broken) and equally valid
- * on POSIX. Connect success ⇒ a server is listening at sockPath ⇒ the owning
- * process is alive. Connect failure/timeout ⇒ dead; caller should prune.
- * No data is exchanged — connect then immediately destroy.
+ * Connect success ⇒ a server is listening at sockPath ⇒ the owning process is
+ * alive. Connect failure/timeout ⇒ dead; caller should prune. No data is
+ * exchanged — connect then immediately destroy.
  */
 export async function probeSocketAlive(sockPath: string, timeoutMs = 1000): Promise<boolean> {
   return new Promise((resolve) => {
@@ -64,20 +76,23 @@ export async function probeSocketAlive(sockPath: string, timeoutMs = 1000): Prom
  * Probe every candidate peer for liveness and prune dead markers.
  *
  * Platform dispatch:
- *   - POSIX: isPidAlive (kill(pid,0)) — synchronous, O(1), authoritative.
+ *   - POSIX: isPidAlive (kill(pid,0)) followed by probeSocketAlive. The
+ *     socket check prevents a reused PID from keeping a stale marker alive.
  *   - Windows: probeSocketAlive — kill(pid,0) is broken under Bun here.
  *
  * Dead peers have their marker file unlinked and are dropped from the result.
  * Probes run in parallel, so total latency ≈ a single probe's timeout.
  */
-export async function pruneDeadPeers(peers: PeerInfo[], registryDir: string): Promise<PeerInfo[]> {
+export async function pruneDeadPeers(peers: RegistryPeer[]): Promise<PeerInfo[]> {
   const isWindows = process.platform === "win32";
   const probed = await Promise.all(
     peers.map(async (p) => {
-      const alive = isWindows ? await probeSocketAlive(p.sockPath) : isPidAlive(p.pid);
+      const alive = isWindows
+        ? await probeSocketAlive(p.sockPath)
+        : isPidAlive(p.pid) && (await probeSocketAlive(p.sockPath));
       if (!alive) {
         try {
-          fs.unlinkSync(markerPath(registryDir, p.sessionId));
+          fs.unlinkSync(p.markerFile);
         } catch {
           // ignore — marker may already be gone
         }
@@ -85,19 +100,25 @@ export async function pruneDeadPeers(peers: PeerInfo[], registryDir: string): Pr
       return alive ? p : null;
     }),
   );
-  return probed.filter((p): p is PeerInfo => p !== null);
+  return probed.filter((p): p is RegistryPeer => p !== null);
 }
 
-/** Resolve the registry directory (honors config override). */
+/** Resolve the registry directory (honors config override and leading `~`). */
 export function resolveRegistryDir(override?: string): string {
-  return override ?? defaultRegistryDir();
+  if (!override) return defaultRegistryDir();
+  if (override === "~") return os.homedir();
+  if (override.startsWith(`~${path.sep}`) || override.startsWith("~/")) {
+    return path.join(os.homedir(), override.slice(2));
+  }
+  return override;
 }
 
 /** Write (or refresh) this instance's marker. */
 export function writeSelfMarker(info: PeerInfo, registryDir: string): void {
   try {
-    fs.mkdirSync(registryDir, { recursive: true });
     const file = markerPath(registryDir, info.sessionId);
+    if (!file) return;
+    fs.mkdirSync(registryDir, { recursive: true });
     fs.writeFileSync(file, JSON.stringify(info, null, 2));
   } catch {
     // registry write failure is non-fatal (peek degrades to local-only)
@@ -107,21 +128,18 @@ export function writeSelfMarker(info: PeerInfo, registryDir: string): void {
 /** Remove this instance's marker (best-effort, called on shutdown). */
 export function removeSelfMarker(sessionId: string, registryDir: string): void {
   try {
-    fs.unlinkSync(markerPath(registryDir, sessionId));
+    const file = markerPath(registryDir, sessionId);
+    if (file) fs.unlinkSync(file);
   } catch {
     // ignore
   }
 }
 
-/**
- * Read all live peer markers, excluding self. Prunes markers whose pid is dead.
- * Does NOT socket-probe (that's deferred to connect time) — this is the fast
- * path for the statusbar count + the look-out panel.
- */
+/** Read validated peer markers, excluding self. */
 export function listPeersFromRegistry(
   registryDir: string,
   selfSessionId: string,
-): PeerInfo[] {
+): RegistryPeer[] {
   let files: string[];
   try {
     files = fs.readdirSync(registryDir).filter((f) => f.endsWith(".json"));
@@ -129,7 +147,7 @@ export function listPeersFromRegistry(
     return [];
   }
 
-  const peers: PeerInfo[] = [];
+  const peers: RegistryPeer[] = [];
   for (const f of files) {
     let info: PeerInfo;
     try {
@@ -137,11 +155,9 @@ export function listPeersFromRegistry(
     } catch {
       continue;
     }
-    if (!info || info.sessionId === selfSessionId) continue;
-
-    // Liveness pruning is deferred to pruneDeadPeers() — that's where the
-    // POSIX/Windows dispatch lives (Windows can't trust kill(pid,0)).
-    peers.push(info);
+    if (!info || !isSafeSessionId(info.sessionId) || f !== `${info.sessionId}.json`) continue;
+    if (info.sessionId === selfSessionId) continue;
+    peers.push({ ...info, markerFile: path.join(registryDir, f) });
   }
   return peers;
 }
@@ -183,7 +199,12 @@ export function cleanupGhostMarkers(registryDir: string, pid: number, keepSessio
     } catch {
       continue;
     }
-    if (info.pid === pid && info.sessionId !== keepSessionId) {
+    if (
+      info.pid === pid &&
+      isSafeSessionId(info.sessionId) &&
+      f === `${info.sessionId}.json` &&
+      info.sessionId !== keepSessionId
+    ) {
       try {
         fs.unlinkSync(path.join(registryDir, f));
       } catch {
@@ -193,6 +214,7 @@ export function cleanupGhostMarkers(registryDir: string, pid: number, keepSessio
   }
 }
 
-function markerPath(registryDir: string, sessionId: string): string {
+function markerPath(registryDir: string, sessionId: string): string | undefined {
+  if (!isSafeSessionId(sessionId)) return undefined;
   return path.join(registryDir, `${sessionId}.json`);
 }

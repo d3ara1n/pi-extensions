@@ -36,7 +36,7 @@ pi install npm:@d3ara1n/pi-peek-agent
 
 Or add to `~/.pi/agent/settings.json`:
 
-```jsonc
+```json
 {
   "extensions": [
     "/absolute/path/to/pi-extensions/packages/pi-model-roles",
@@ -54,16 +54,18 @@ Or add to `~/.pi/agent/settings.json`:
 
 Optional, in `~/.pi/agent/settings.json` under `peek`:
 
-```jsonc
+```json
 {
   "peek": {
-    "registryDir": "~/.pi/peek/registry",  // marker directory
-    "heartbeatMs": 15000,                    // refresh lastSeen interval
-    "askTimeoutMs": 30000,                   // peek() sync wait timeout
-    "role": "utility"                        // model role for consult (e.g. "default" for higher quality)
+    "registryDir": "~/.pi/peek/registry",
+    "heartbeatMs": 15000,
+    "askTimeoutMs": 30000,
+    "role": "utility"
   }
 }
 ```
+
+`registryDir` accepts a leading `~`. `heartbeatMs` and `askTimeoutMs` must be positive finite numbers; invalid values fall back to their defaults.
 
 ## Naming
 

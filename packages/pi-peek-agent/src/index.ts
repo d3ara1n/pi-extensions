@@ -232,6 +232,7 @@ export default function registerPeekAgentExtension(pi: ExtensionAPI): void {
   let server: PeekServer | null = null;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
   let latestCtx: ExtensionContext | null = null;
+  let activeRegistryDir: string | null = null;
 
   pi.on("session_start", async (_event, ctx) => {
     // Identity follows the SESSION, not the process or a random roll:
@@ -248,6 +249,7 @@ export default function registerPeekAgentExtension(pi: ExtensionAPI): void {
 
     const config = loadAgentConfig(cwd);
     const registryDir = resolveRegistryDir(config.registryDir);
+    activeRegistryDir = registryDir;
 
     const api = initPeekAgentAPI({
       self: {
@@ -335,7 +337,7 @@ export default function registerPeekAgentExtension(pi: ExtensionAPI): void {
     const api = tryGetPeekAgentAPI();
     if (api) {
       try {
-        removeSelfMarker(api.getSelfInfo().sessionId, resolveRegistryDir());
+        removeSelfMarker(api.getSelfInfo().sessionId, activeRegistryDir ?? resolveRegistryDir());
       } catch {
         // ignore
       }
@@ -347,6 +349,7 @@ export default function registerPeekAgentExtension(pi: ExtensionAPI): void {
     if (latestCtx?.hasUI) {
       latestCtx.ui.setStatus("peek-agent", undefined);
     }
+    activeRegistryDir = null;
   });
 
   registerPeekTools(pi);

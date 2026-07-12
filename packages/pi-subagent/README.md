@@ -94,6 +94,8 @@ Edit `~/.pi/agent/settings.json`:
 
 All fields are optional. Defaults: `timeout: 1500` (seconds; 25 min; active time — the clock pauses while the child is inside a nested `delegate` call, so delegate-capable roles need no extra headroom), `maxConcurrency: 4`, `maxDepth: 3`, `maxTurns: 0` (unlimited), `maxCost: 0` (unlimited), `history.enabled: true`, `summary.role: "utility"`, `summary.enabled: true`.
 
+All numeric limits accept `0` for unlimited: `timeout`, `maxConcurrency`, `maxDepth`, `maxTurns`, and `maxCost`. Negative values are normalized to `0`; non-numeric or non-finite values fall back to their defaults. `maxConcurrency: 0` runs delegates without queuing, and `maxDepth: 0` permits unrestricted nesting.
+
 ### Agent Overrides
 
 Override, disable, or add subagent roles via `agentOverrides`. Built-in and custom roles are treated equally — all descriptions, examples, and decision triggers feed into the LLM's prompt dynamically.
@@ -129,7 +131,7 @@ Override, disable, or add subagent roles via `agentOverrides`. Built-in and cust
 
 **Required fields for custom roles:** `role`, `description`, `examples`, `decisionTrigger`, `tools`, `systemPrompt`.
 
-**Optional fields:** `subagentRoles` (roles this role can spawn via delegate), `timeout` (per-role timeout override in seconds of active time; the clock pauses while the child delegates), `maxTurns` / `maxCost` (per-role budget overrides; 0 = unlimited), `fallbackRole` (backup pi-model-roles role on provider errors).
+**Optional fields:** `subagentRoles` (roles this role can spawn via delegate), `timeout` (per-role active-time timeout in seconds; unset uses the global setting, `0` is unlimited, negative values normalize to `0`), `maxTurns` / `maxCost` (per-role budget overrides; unset uses the global setting, `0` is unlimited, negative values normalize to `0`), `fallbackRole` (backup pi-model-roles role on provider errors).
 
 Invalid custom roles (missing required fields) are silently skipped with an error notification at session start.
 
@@ -194,7 +196,7 @@ Each path is injected as an independent `@file` attachment the subagent reads di
 
 ### Budget enforcement
 
-`maxTurns` / `maxCost` cap a run. When exceeded, the child is killed and the last completed output is returned with `stopReason: "budget_exceeded"` (shown in the expanded TUI). Defaults are unlimited (0); set global defaults in config or per-role via `agentOverrides`.
+`maxTurns` / `maxCost` cap a run. When exceeded, the child is killed and the last completed output is returned with `stopReason: "budget_exceeded"` (shown in the expanded TUI). Defaults are unlimited (`0`); set global defaults in config or per-role overrides in `agentOverrides`. Negative values are normalized to `0`.
 
 ### Oversized outputs
 

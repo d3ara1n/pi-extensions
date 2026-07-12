@@ -5,8 +5,8 @@
  *   node --test packages/pi-subagent/src/utils.test.ts
  *
  * These guard the bug fixes introduced during the improvement rounds:
- * path-injection (sanitizeFilename), concurrency/abort/negative-active
- * (AsyncSemaphore), provider-error word list (isProviderError), unknown-tool
+ * path-injection (sanitizeFilename), concurrency/abort/negative-active/unlimited
+ * semantics (AsyncSemaphore), provider-error word list (isProviderError), unknown-tool
  * formatting (previewArgs), output truncation fallback (truncateOutput).
  */
 
@@ -145,6 +145,40 @@ describe("AsyncSemaphore", () => {
     c.abort();
     await assert.rejects(p);
     assert.equal((s as any).waiters.length, 0);
+  });
+  test("unlimited max (0) never queues or reports capacity", async () => {
+    const s = new AsyncSemaphore(0);
+    assert.equal(s.isLimited, false);
+    assert.equal(s.isAtCapacity, false);
+
+    let acquired = 0;
+    await Promise.all(
+      Array.from({ length: 10 }, () =>
+        s.acquire().then(() => {
+          acquired++;
+        }),
+      ),
+    );
+
+    assert.equal(acquired, 10);
+    assert.equal((s as any).waiters.length, 0);
+    assert.equal(s.isAtCapacity, false);
+  });
+  test("positive max reports capacity and retains FIFO queueing", async () => {
+    const s = new AsyncSemaphore(1);
+    await s.acquire();
+    assert.equal(s.isAtCapacity, true);
+
+    const order: number[] = [];
+    const p1 = s.acquire().then(() => order.push(1));
+    const p2 = s.acquire().then(() => order.push(2));
+    assert.equal((s as any).waiters.length, 2);
+
+    s.release();
+    await p1;
+    s.release();
+    await p2;
+    assert.deepEqual(order, [1, 2]);
   });
   test("releases queued waiters in FIFO order", async () => {
     const s = new AsyncSemaphore(1);

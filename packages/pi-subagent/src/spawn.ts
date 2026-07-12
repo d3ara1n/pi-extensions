@@ -163,7 +163,7 @@ export async function spawnSubagent(
   // budget instead of racing the parent's wall clock. `graceMs` is the
   // accumulated paused time — display only; the verdict is always
   // "active elapsed >= budget" (pausing grants no extra active time).
-  const budgetMs = options.timeoutMs ?? 0;
+  const budgetMs = Number.isFinite(options.timeoutMs) ? Math.max(0, options.timeoutMs ?? 0) : 0;
   let activeElapsedAccum = 0; // settled active ms (excludes suspended spans)
   let segmentStart = 0; // wall-clock start of the current active segment; 0 = no active segment
   let isSuspended = false; // true while a child `delegate` call is in flight
@@ -275,8 +275,8 @@ export async function spawnSubagent(
     // Kill the child when the configured turn/cost budget is exceeded.
     // Called after each assistant message_end (usage already accumulated).
     const checkBudget = () => {
-      const mt = options.maxTurns ?? 0;
-      const mc = options.maxCost ?? 0;
+      const mt = Number.isFinite(options.maxTurns) ? Math.max(0, options.maxTurns ?? 0) : 0;
+      const mc = Number.isFinite(options.maxCost) ? Math.max(0, options.maxCost ?? 0) : 0;
       if (budgetExceeded || wasTimeout) return;
       if ((mt > 0 && result.usage.turns >= mt) || (mc > 0 && result.usage.cost >= mc)) {
         budgetExceeded = true;
@@ -400,45 +400,55 @@ export async function spawnSubagent(
     childEnv.PI_SUBAGENT_DEPTH = String(options.depth ?? 0);
 
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let escalationTimer: ReturnType<typeof setTimeout> | undefined;
     let proc: ChildProcess | undefined;
+    let processExited = false;
+    let terminationRequested = false;
+
+    const clearEscalationTimer = () => {
+      if (!escalationTimer) return;
+      clearTimeout(escalationTimer);
+      escalationTimer = undefined;
+    };
 
     // Shared kill helper used by abort, budget, and timeout paths.
-    // Centralizes reason → stopReason mapping and the SIGTERM → 5s → SIGKILL escalation.
-    const escalationTimers: ReturnType<typeof setTimeout>[] = [];
+    // A single termination request sends SIGTERM once. SIGKILL is sent only if
+    // the process has not emitted exit/close after the grace period.
     const killProc = (reason: "abort" | "budget" | "timeout") => {
+      if (terminationRequested || processExited) return;
+      terminationRequested = true;
       if (reason === "abort") wasAborted = true;
       else if (reason === "budget") {
         result.stopReason = "budget_exceeded";
         // Human-readable so the caller/TUI never falls back to raw stderr noise.
-        const mt = options.maxTurns ?? 0;
-        const mc = options.maxCost ?? 0;
+        const mt = Number.isFinite(options.maxTurns) ? Math.max(0, options.maxTurns ?? 0) : 0;
         const why =
           mt > 0 && result.usage.turns >= mt
             ? `${result.usage.turns} turns`
             : `$${result.usage.cost.toFixed(4)}`;
         result.errorMessage = `Budget exceeded (${why}; partial output returned)`;
-      } else if (reason === "timeout") {
+      } else {
         result.stopReason = "timeout";
         wasTimeout = true;
         // Human-readable message so the caller/TUI never falls back to the
         // raw stderr (which is full of TUI teardown escape sequences).
-        const secs = Math.round((options.timeoutMs ?? 0) / 1000);
+        const secs = Math.round(budgetMs / 1000);
         result.errorMessage = `Timed out after ${secs}s (completed ${result.usage.turns} turn${result.usage.turns === 1 ? "" : "s"})`;
       }
+
       try {
-        proc?.kill("SIGTERM");
+        if (!proc || !proc.kill("SIGTERM")) return;
       } catch {
-        /* ignore */
+        return;
       }
-      escalationTimers.push(
-        setTimeout(() => {
-          try {
-            if (proc && !proc.killed) proc.kill("SIGKILL");
-          } catch {
-            /* ignore */
-          }
-        }, 5000),
-      );
+      escalationTimer = setTimeout(() => {
+        if (processExited) return;
+        try {
+          proc?.kill("SIGKILL");
+        } catch {
+          /* ignore */
+        }
+      }, 5000);
     };
 
     /** Pause the active-time clock (called on child `delegate` start). */
@@ -503,9 +513,15 @@ export async function spawnSubagent(
         result.stderr += data.toString();
       });
 
+      p.on("exit", () => {
+        processExited = true;
+        clearEscalationTimer();
+      });
+
       p.on("close", (code, signal) => {
+        processExited = true;
         if (timeoutHandle) clearTimeout(timeoutHandle);
-        for (const t of escalationTimers) clearTimeout(t);
+        clearEscalationTimer();
         if (onAbort && options.signal) options.signal.removeEventListener("abort", onAbort);
         if (buffer.trim()) processLine(buffer);
 
@@ -524,8 +540,9 @@ export async function spawnSubagent(
       });
 
       p.on("error", (err) => {
+        processExited = true;
         if (timeoutHandle) clearTimeout(timeoutHandle);
-        for (const t of escalationTimers) clearTimeout(t);
+        clearEscalationTimer();
         if (onAbort && options.signal) options.signal.removeEventListener("abort", onAbort);
         // Surface the real cause (e.g. ENOENT when pi is not in PATH) instead of "unknown error".
         result.errorMessage = err?.message || String(err);

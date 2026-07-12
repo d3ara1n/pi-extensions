@@ -4,15 +4,15 @@
 
 /** Configuration for the subagent extension. */
 export interface SubagentConfig {
-  /** Per-subagent timeout in seconds of active time. The clock pauses while the child is inside a nested `delegate` call, so no widening is needed for delegate-capable roles. */
+  /** Per-subagent active-time timeout in seconds. `0` means unlimited; negative values are normalized to `0`. The clock pauses while the child is inside a nested `delegate` call, so no widening is needed for delegate-capable roles. */
   timeout: number;
-  /** Max number of subagents allowed to run concurrently. Extras queue with a TUI hint. */
+  /** Max concurrent subagents. `0` means unlimited; negative values are normalized to `0`. Extras queue with a TUI hint when this is positive. */
   maxConcurrency: number;
-  /** Max subagent nesting depth (the top-level session is depth 0). */
+  /** Max subagent nesting depth (the top-level session is depth 0). `0` means unlimited; negative values are normalized to `0`. */
   maxDepth: number;
-  /** Default turn budget (0 = unlimited). Per-role maxTurns overrides this. */
+  /** Default assistant-turn budget. `0` means unlimited; negative values are normalized to `0`. Per-role maxTurns overrides this. */
   maxTurns: number;
-  /** Default cost budget in USD (0 = unlimited). Per-role maxCost overrides this. */
+  /** Default cumulative cost budget in USD. `0` means unlimited; negative values are normalized to `0`. Per-role maxCost overrides this. */
   maxCost: number;
   /** Persist each delegate run to .pi/subagent/history/{sessionId}/{id}.json for auditing. */
   history: SubagentHistoryConfig;
@@ -61,11 +61,11 @@ export interface SubagentRole {
   tools: string[];
   /** If this role has `delegate`, restrict which roles it may spawn. undefined = no restriction. */
   subagentRoles?: string[];
-  /** Per-role timeout override in seconds. Falls back to config.timeout when unset. */
+  /** Per-role active-time timeout override in seconds. `0` means unlimited; negative values are normalized to `0`. Falls back to config.timeout when unset. */
   timeout?: number;
-  /** Max assistant turns before the run is killed (0 = use config default; unset = unlimited). */
+  /** Max assistant turns before the run is killed. `0` means unlimited; negative values are normalized to `0`. */
   maxTurns?: number;
-  /** Max cumulative cost (USD) before the run is killed (0 = use config default; unset = unlimited). */
+  /** Max cumulative cost in USD. `0` means unlimited; negative values are normalized to `0`. */
   maxCost?: number;
   /** Fallback pi-model-roles role name when this role's model is unavailable (provider error). Defaults to "default". */
   fallbackRole?: string;

@@ -40,6 +40,8 @@ import {
   sanitizeFilename,
   isProviderError,
   effectiveTimeout,
+  normalizeNonNegativeInteger,
+  normalizeNonNegativeNumber,
 } from "./utils.ts";
 import * as os from "node:os";
 import * as fs from "node:fs";
@@ -436,8 +438,8 @@ export default function subagentExtension(pi: ExtensionAPI) {
         };
       }
 
-      // Guard against unbounded subagent nesting
-      if (CURRENT_DEPTH >= config.maxDepth) {
+      // Guard against bounded subagent nesting. A configured depth of 0 is unlimited.
+      if (config.maxDepth > 0 && CURRENT_DEPTH >= config.maxDepth) {
         return {
           content: [
             {
@@ -472,8 +474,8 @@ export default function subagentExtension(pi: ExtensionAPI) {
           details: { mode: "single", results },
         });
       };
-      // Emit a "queued" placeholder before acquiring (no model info needed yet)
-      if (onUpdate) {
+      // Emit a queued placeholder only when this call will actually wait.
+      if (onUpdate && gate.isAtCapacity) {
         const queued: SubagentResult = {
           role: params.role,
           task: params.task,
@@ -553,6 +555,11 @@ export default function subagentExtension(pi: ExtensionAPI) {
         // Total active-time budget for this run (ms). The clock pauses while the
         // child delegates, so this caps *active* time, not wall time.
         const timeoutBudgetMs = effectiveTimeout(roleDef, config.timeout) * 1000;
+        const maxTurns = normalizeNonNegativeInteger(
+          roleDef.maxTurns ?? config.maxTurns,
+          config.maxTurns,
+        );
+        const maxCost = normalizeNonNegativeNumber(roleDef.maxCost ?? config.maxCost, config.maxCost);
 
         // Throttled progress: coalesces bursty thinking/tool events so the TUI
         // repaints at most ~every PROGRESS_THROTTLE_MS, always keeping the latest state.
@@ -650,8 +657,8 @@ export default function subagentExtension(pi: ExtensionAPI) {
           contextFiles: params.files,
           subagentRoles: roleDef.subagentRoles,
           timeoutMs: timeoutBudgetMs,
-          maxTurns: roleDef.maxTurns ?? config.maxTurns,
-          maxCost: roleDef.maxCost ?? config.maxCost,
+          maxTurns,
+          maxCost,
           depth: CURRENT_DEPTH + 1,
           signal,
           onProgress: emitProgress,
@@ -676,8 +683,8 @@ export default function subagentExtension(pi: ExtensionAPI) {
               contextFiles: params.files,
               subagentRoles: roleDef.subagentRoles,
               timeoutMs: timeoutBudgetMs,
-              maxTurns: roleDef.maxTurns ?? config.maxTurns,
-              maxCost: roleDef.maxCost ?? config.maxCost,
+              maxTurns,
+              maxCost,
               depth: CURRENT_DEPTH + 1,
               signal,
               onProgress: emitProgress,
@@ -1007,7 +1014,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
         try {
           const cfg = loadSubagentConfig(ctx.cwd);
           lines.push(
-            `[\u2713] config: timeout=${cfg.timeout}s concurrency=${cfg.maxConcurrency} depth=${cfg.maxDepth} turns=${cfg.maxTurns || "∞"} cost=$${cfg.maxCost || "∞"} summary=${cfg.summary.enabled ? cfg.summary.role : "off"} history=${cfg.history.enabled}`,
+            `[\u2713] config: timeout=${cfg.timeout || "∞"}s concurrency=${cfg.maxConcurrency || "∞"} depth=${cfg.maxDepth || "∞"} turns=${cfg.maxTurns || "∞"} cost=$${cfg.maxCost || "∞"} summary=${cfg.summary.enabled ? cfg.summary.role : "off"} history=${cfg.history.enabled}`,
           );
         } catch {
           lines.push("[\u2717] config: failed to load");
@@ -1068,7 +1075,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
       const allowed = process.env.PI_SUBAGENT_ALLOWED;
       if (allowed) lines.push(`[i] PI_SUBAGENT_ALLOWED: ${allowed}`);
       lines.push(
-        `[i] depth: ${CURRENT_DEPTH}/${config.maxDepth}  concurrency: ${config.maxConcurrency}`,
+        `[i] depth: ${CURRENT_DEPTH}/${config.maxDepth || "∞"}  concurrency: ${config.maxConcurrency || "∞"}`,
       );
 
       const summary = allOk ? "All checks passed" : "Some checks failed";

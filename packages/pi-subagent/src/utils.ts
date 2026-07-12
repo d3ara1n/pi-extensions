@@ -219,11 +219,24 @@ export function previewArgs(args: Record<string, unknown>): string {
   return argsStr.length > 50 ? argsStr.slice(0, 50) + "..." : argsStr;
 }
 
+// ── Numeric configuration ─────────────────────────────────────
+
+/** Normalize a finite numeric limit: invalid values use the default; negatives become 0 (unlimited). */
+export function normalizeNonNegativeNumber(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(0, value);
+}
+
+/** Normalize a count limit to a non-negative integer. */
+export function normalizeNonNegativeInteger(value: unknown, fallback: number): number {
+  return Math.floor(normalizeNonNegativeNumber(value, fallback));
+}
+
 // ── Concurrency gate ───────────────────────────────────────────────
 
 /**
  * Promise-based semaphore capping concurrent subagent spawns.
- * acquire() resolves immediately while under the limit, otherwise queues.
+ * A max of 0 means unlimited concurrency, so acquire() never queues.
  * Pass an AbortSignal to cancel while waiting (rejects and removes the waiter).
  */
 export class AsyncSemaphore {
@@ -231,10 +244,16 @@ export class AsyncSemaphore {
   private waiters: Array<() => void> = [];
   private max: number;
   constructor(max: number) {
-    this.max = max;
+    this.max = normalizeNonNegativeInteger(max, 0);
+  }
+  get isLimited(): boolean {
+    return this.max > 0;
+  }
+  get isAtCapacity(): boolean {
+    return this.isLimited && this.active >= this.max;
   }
   async acquire(signal?: AbortSignal): Promise<void> {
-    if (this.active < this.max) {
+    if (!this.isAtCapacity) {
       this.active++;
       return;
     }
@@ -262,6 +281,7 @@ export class AsyncSemaphore {
   }
   release(): void {
     this.active = Math.max(0, this.active - 1);
+    if (!this.isLimited) return;
     const next = this.waiters.shift();
     if (next) next();
   }
@@ -274,9 +294,10 @@ export class AsyncSemaphore {
  * No widening for delegate-capable roles: the parent's active-time clock
  * pauses while the child is inside a nested `delegate` call, so the base
  * budget is already enough. An explicit roleDef.timeout always wins.
+ * Non-finite values fall back to the base timeout; negative values become 0 (unlimited).
  */
 export function effectiveTimeout(roleDef: SubagentRole, baseTimeoutSec: number): number {
-  return roleDef.timeout ?? baseTimeoutSec;
+  return normalizeNonNegativeNumber(roleDef.timeout, normalizeNonNegativeNumber(baseTimeoutSec, 0));
 }
 
 // ── Output truncation ────────────────────────────────────────

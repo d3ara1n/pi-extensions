@@ -10,6 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { SubagentConfig } from "./types.ts";
 import { DEFAULT_CONFIG } from "./types.ts";
+import { normalizeNonNegativeInteger, normalizeNonNegativeNumber } from "./utils.ts";
 
 function getAgentDir(): string {
   const envDir = process.env.PI_AGENT_DIR;
@@ -45,11 +46,11 @@ export function loadSubagentConfig(cwd?: string): SubagentConfig {
   const rawSummary = raw?.summary;
   const rawHistory = raw?.history;
   return {
-    timeout: raw.timeout ?? DEFAULT_CONFIG.timeout,
-    maxConcurrency: raw.maxConcurrency ?? DEFAULT_CONFIG.maxConcurrency,
-    maxDepth: raw.maxDepth ?? DEFAULT_CONFIG.maxDepth,
-    maxTurns: raw.maxTurns ?? DEFAULT_CONFIG.maxTurns,
-    maxCost: raw.maxCost ?? DEFAULT_CONFIG.maxCost,
+    timeout: normalizeNonNegativeNumber(raw.timeout, DEFAULT_CONFIG.timeout),
+    maxConcurrency: normalizeNonNegativeInteger(raw.maxConcurrency, DEFAULT_CONFIG.maxConcurrency),
+    maxDepth: normalizeNonNegativeInteger(raw.maxDepth, DEFAULT_CONFIG.maxDepth),
+    maxTurns: normalizeNonNegativeInteger(raw.maxTurns, DEFAULT_CONFIG.maxTurns),
+    maxCost: normalizeNonNegativeNumber(raw.maxCost, DEFAULT_CONFIG.maxCost),
     history: {
       enabled: rawHistory?.enabled ?? DEFAULT_CONFIG.history.enabled,
     },

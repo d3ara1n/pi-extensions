@@ -112,7 +112,7 @@ Edit `~/.pi/agent/settings.json`:
 |-------|---------|-------------|
 | `enabled` | `true` | Global on/off |
 | `sideAgentRole` | `"utility"` | pi-model-roles role for the side agent |
-| `maxSelectedSkills` | `5` | Max skills the side agent can select |
+| `maxSelectedSkills` | `5` | Max skills the side agent can select; `0` means unlimited. Negative values are normalized to `0` |
 | `modules.skillRouter` | `true` | Enable/disable skill routing |
 | `modules.modelRouter` | `false` | Enable/disable model routing (disabled by default to avoid cache inefficiency and extra costs) |
 | `modules.shortCircuit` | `true` | Enable/disable the short-circuit layer |

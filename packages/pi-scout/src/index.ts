@@ -342,6 +342,23 @@ export default function scoutExtension(pi: ExtensionAPI) {
       userMessage,
     );
 
+    // Validate and normalize side-agent output at the application boundary.
+    // The parser intentionally accepts loose model text; only known, visible
+    // roles and loaded skills may affect the main agent.
+    if (decision.role && !visibleRoles[decision.role]) {
+      decision.role = null;
+      decision.source = "error";
+      decision.reasoning = "side agent selected an unknown or hidden role";
+    }
+    const knownSkills = new Set(skillEntries.map((skill) => skill.name));
+    const selectedSkills = Array.from(
+      new Set(decision.skills.filter((name) => knownSkills.has(name))),
+    );
+    decision.skills =
+      config.maxSelectedSkills > 0
+        ? selectedSkills.slice(0, config.maxSelectedSkills)
+        : selectedSkills;
+
     // Enforce module toggles at the application layer, regardless of what
     // the side agent returned. A disabled module's decision field is zeroed
     // so the status bar, /scout command, and apply logic all see clean

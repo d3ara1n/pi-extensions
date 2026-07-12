@@ -8,7 +8,7 @@ export interface ScoutConfig {
   enabled: boolean;
   /** pi-model-roles role name to use for the side agent */
   sideAgentRole: string;
-  /** Maximum number of skills the side agent can select */
+  /** Maximum number of skills the side agent can select; 0 = unlimited. */
   maxSelectedSkills: number;
   /** Module toggles */
   modules: {

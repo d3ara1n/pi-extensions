@@ -43,10 +43,15 @@ export function loadScoutConfig(cwd?: string): ScoutConfig {
   const raw = projectRaw ?? globalRaw;
   if (!raw) return DEFAULT_CONFIG;
 
+  const maxSelectedSkills =
+    typeof raw.maxSelectedSkills === "number" && Number.isFinite(raw.maxSelectedSkills)
+      ? Math.max(0, Math.floor(raw.maxSelectedSkills))
+      : DEFAULT_CONFIG.maxSelectedSkills;
+
   return {
     enabled: raw.enabled ?? DEFAULT_CONFIG.enabled,
     sideAgentRole: raw.sideAgentRole ?? DEFAULT_CONFIG.sideAgentRole,
-    maxSelectedSkills: raw.maxSelectedSkills ?? DEFAULT_CONFIG.maxSelectedSkills,
+    maxSelectedSkills,
     modules: {
       skillRouter: raw.modules?.skillRouter ?? DEFAULT_CONFIG.modules.skillRouter,
       modelRouter: raw.modules?.modelRouter ?? DEFAULT_CONFIG.modules.modelRouter,

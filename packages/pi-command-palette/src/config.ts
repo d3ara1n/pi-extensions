@@ -6,7 +6,7 @@
  *      `Ctrl+Shift+P` before it reaches the session (e.g. Termius on Windows/WSL2).
  *   2. `settings.json` `commandPalette.shortcut` (a present project
  *      `commandPalette` block replaces the global block)
- *   3. default `"ctrl+alt+p"`
+ *   3. default `"ctrl+shift+p"`
  *
  * Why not a CLI flag? Flags are applied to the extension runtime AFTER extensions
  * load, so `pi.getFlag()` only returns the registered default at `registerShortcut()`
@@ -19,7 +19,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { KeyId } from "@earendil-works/pi-tui";
 
-export const DEFAULT_SHORTCUT = "ctrl+alt+p";
+export const DEFAULT_SHORTCUT = "ctrl+shift+p";
 
 function getAgentDir(): string {
   const envDir = process.env.PI_AGENT_DIR;

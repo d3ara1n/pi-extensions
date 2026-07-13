@@ -1,6 +1,6 @@
 # pi-command-palette
 
-Global command palette for [Pi Coding Agent](https://pi.dev) — press **Ctrl+Alt+P** to search and run commands from anywhere.
+Global command palette for [Pi Coding Agent](https://pi.dev) — press **Ctrl+Shift+P** to search and run commands from anywhere.
 
 ## Why?
 
@@ -30,7 +30,7 @@ Or add to `~/.pi/agent/settings.json`:
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+Alt+P` _(default, configurable)_ | Open command palette |
+| `Ctrl+Shift+P` _(default, configurable)_ | Open command palette |
 
 The palette lists:
 
@@ -50,7 +50,7 @@ The "Model: Switch Model" action opens a secondary overlay listing all models wi
 
 ## Configuration
 
-The default shortcut is `Ctrl+Alt+P`. This avoids pi's built-in `Ctrl+P` / `Ctrl+Shift+P` model cycling shortcuts while keeping the palette mnemonic. If it conflicts with your terminal, override it via either of the following (evaluated in order, first match wins).
+The default shortcut is `Ctrl+Shift+P`, matching VS Code's Command Palette for familiar muscle memory. If it conflicts with your terminal or other shortcuts, override it via either of the following (evaluated in order, first match wins).
 
 ### 1. Environment variable
 

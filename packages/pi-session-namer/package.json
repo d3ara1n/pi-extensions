@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-session-namer",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "Auto-name pi sessions using a cheap side agent — generates concise titles from the first user message",
   "main": "src/index.ts",

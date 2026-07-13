@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-peek-user",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "description": "Local /peek overlay for pi — ask your own session a question without disturbing the main agent (read-after-burn)",
   "main": "src/index.ts",

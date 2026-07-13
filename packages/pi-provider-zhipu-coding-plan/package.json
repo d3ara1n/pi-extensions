@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-provider-zhipu-coding-plan",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "type": "module",
   "description": "Zhipu AI Coding Plan provider for pi — static GLM model list and usage quota reporting",
   "keywords": [

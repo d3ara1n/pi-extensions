@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
 import { CardEditor, type FrameProvider, type SpinnerPhase } from "./card-editor";
-import { loadEditorShellConfig, type EditorShellConfig, type EditorShellIcons } from "./config";
+import { DEFAULT_CONFIG, loadEditorShellConfig, type EditorShellConfig, type EditorShellIcons } from "./config";
 
 /**
  * pi-editor-shell — Replaces pi's default editor and status bar with a
@@ -205,7 +205,7 @@ export default function (pi: ExtensionAPI) {
   // The factory may run again when pi rebuilds the editor (model switch,
   // reload, …), so always drive whichever instance is current.
   let editor: CardEditor | undefined;
-  let config: EditorShellConfig = { pinnedStatus: [], icons: {} };
+  let config: EditorShellConfig = { ...DEFAULT_CONFIG };
   // Resolved icons for the current session: built-in defaults merged with
   // the user's overrides. Re-computed at session_start.
   let icons: EditorShellIcons = { ...DEFAULT_ICONS };
@@ -281,7 +281,11 @@ export default function (pi: ExtensionAPI) {
         return ` ${texts.map((s) => theme.fg("muted", s)).join(theme.fg("dim", " · "))} `;
       };
 
-      const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "no model";
+      const model = ctx.model
+        ? config.modelDisplay === "name"
+          ? ctx.model.name
+          : `${ctx.model.provider}/${ctx.model.id}`
+        : "no model";
       const thinking = pi.getThinkingLevel();
       const thinkingColor = THINKING_TOKEN[thinking] ?? "muted";
 
@@ -378,6 +382,7 @@ export default function (pi: ExtensionAPI) {
 
       lines.push("[editor-shell config]");
       lines.push(`  pinnedStatus: [${config.pinnedStatus.join(", ")}]`);
+      lines.push(`  modelDisplay: ${config.modelDisplay}`);
 
       lines.push("");
       lines.push("[extension statuses]");

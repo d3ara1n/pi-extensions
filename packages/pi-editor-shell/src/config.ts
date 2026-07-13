@@ -22,6 +22,9 @@ export interface EditorShellIcons {
   folder: string;
 }
 
+/** How the model is shown in the top-left border slot. */
+export type ModelDisplay = "name" | "provider-id";
+
 export interface EditorShellConfig {
   /**
    * Status keys to pin to the shell's top-right corner.
@@ -34,6 +37,13 @@ export interface EditorShellConfig {
    * for a Nerd Font glyph, or `"🤖"` for an emoji, etc.
    */
   icons: Partial<EditorShellIcons>;
+  /**
+   * What to show as the model label in the top-left border.
+   * - `"name"` — `model.name` (friendlier; falls back to the id when a model
+   *   has no name, so it never goes blank).
+   * - `"provider-id"` — `provider/id`.
+   */
+  modelDisplay: ModelDisplay;
 }
 
 const ICON_KEYS: ReadonlyArray<keyof EditorShellIcons> = [
@@ -59,6 +69,7 @@ function filterIcons(obj: Record<string, unknown>): Partial<EditorShellIcons> {
 export const DEFAULT_CONFIG: EditorShellConfig = {
   pinnedStatus: [],
   icons: {},
+  modelDisplay: "name",
 };
 
 function getAgentDir(): string {
@@ -91,6 +102,11 @@ export function loadEditorShellConfig(cwd?: string): EditorShellConfig {
 
   const pinned = raw.pinnedStatus;
   const iconsRaw = raw.icons;
+  const modelDisplayRaw = raw.modelDisplay;
+  const modelDisplay =
+    modelDisplayRaw === "name" || modelDisplayRaw === "provider-id"
+      ? modelDisplayRaw
+      : DEFAULT_CONFIG.modelDisplay;
   return {
     pinnedStatus: Array.isArray(pinned)
       ? pinned.filter((k): k is string => typeof k === "string")
@@ -99,5 +115,6 @@ export function loadEditorShellConfig(cwd?: string): EditorShellConfig {
       iconsRaw && typeof iconsRaw === "object"
         ? filterIcons(iconsRaw as Record<string, unknown>)
         : {},
+    modelDisplay,
   };
 }

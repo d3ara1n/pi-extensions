@@ -4,7 +4,7 @@ Replaces pi's default editor and status bar with a unified rounded-corner shell 
 
 ## What shows up where
 
-- **Top border** — `  provider/model ·  thinking-level ` (left) + pinned extension statuses (right, via `pinnedStatus` config)
+- **Top border** — `  model ·  thinking-level ` (left) + pinned extension statuses (right, via `pinnedStatus` config)
 - **Bottom border** — `  ctx NN%/NNk|N.NM · ⚡ cacheRead (total)  hitRate% ` (left) + `  ~/Projects (main +2 ~1) ` (right, shows git branch + dirty state when in a repo)
 - **Below shell** — Auto-wrapping extension status line (all `setStatus` entries not pinned to the top)
 - **Border color** follows pi's thinking-level / bash-mode indicator automatically.
@@ -37,6 +37,25 @@ In `~/.pi/agent/settings.json` under the `editorShell` key:
 | `cache` | `⚡` | oct-zap |
 | `hitRate` | `` | fa-bullseye |
 | `folder` | `` | fa-folder_open |
+
+### Model display
+
+How the model is labeled in the top-left border (`"name"` by default):
+
+```json
+{
+  "editorShell": {
+    "modelDisplay": "name"
+  }
+}
+```
+
+| Value | Example |
+|-------|---------|
+| `"name"` (default) | `Claude Opus 4.8 (Yanproxy)` |
+| `"provider-id"` | `yanproxy/anthropic/claude-opus-4-8` |
+
+`"name"` uses `model.name`; a model with no name falls back to its id, so the slot never goes blank.
 
 ## Commands
 

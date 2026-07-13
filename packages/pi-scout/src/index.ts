@@ -24,6 +24,33 @@ import { evaluateShortCircuit } from "./short-circuit.ts";
 
 const STATUS_KEY = "scout";
 
+/** Widget key for the pending-prompt preview shown while the side agent runs. */
+const PENDING_WIDGET_KEY = "scout-pending";
+
+/** Collapse a prompt to one line, truncated for the pending widget. */
+function previewPrompt(text: string, max = 72): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? oneLine.slice(0, max - 1) + "…" : oneLine;
+}
+
+/** Widget lines shown above the editor while the side agent runs.
+ *
+ * pi renders the native user bubble only after `before_agent_start`
+ * returns, so during the side-agent wait the chat is blank. This widget
+ * mirrors the user's prompt so they get immediate feedback; it is
+ * cleared in `finally` once the side agent returns, handing off to pi's
+ * own user bubble.
+ */
+function buildPendingWidget(prompt: string, modelLabel: string, theme: any): string[] {
+  return [
+    theme.fg("accent", "◎") +
+      theme.fg("dim", " scout analyzing via ") +
+      theme.fg("accent", modelLabel) +
+      theme.fg("dim", "…"),
+    theme.fg("dim", "  › ") + theme.fg("muted", previewPrompt(prompt)),
+  ];
+}
+
 /** Status-bar prefix: icon in its state color, the "scout:" label always dim. */
 function scoutPrefix(icon: string, color: string, theme: any): string {
   return theme.fg(color, icon) + theme.fg("dim", " scout:") + " ";
@@ -293,15 +320,6 @@ export default function scoutExtension(pi: ExtensionAPI) {
       return;
     }
 
-    // Update status: resolving
-    ctx.ui.setStatus(
-      STATUS_KEY,
-      scoutPrefix("◎", "accent", theme) +
-        theme.fg("dim", "via ") +
-        theme.fg("accent", `${sideResolved.model.provider}/${sideResolved.model.id}`) +
-        theme.fg("dim", "..."),
-    );
-
     // 1. Build the skills list for the side agent prompt
     const skillsList = skills
       .map((s: any) => `- ${s.name}: ${s.description ?? "(no description)"}`)
@@ -335,12 +353,28 @@ export default function scoutExtension(pi: ExtensionAPI) {
 
     // 5. Call side agent
     const scoutSystemPrompt = buildScoutSystemPrompt(config, skillsList, rolesList);
-    const decision = await callSideAgent(
-      rolesApi,
-      config.sideAgentRole,
-      scoutSystemPrompt,
-      userMessage,
-    );
+    let decision: ScoutDecision;
+    try {
+      // Mirror the user's prompt above the editor while the side agent
+      // runs (see buildPendingWidget). Cleared in finally so the prompt
+      // isn't shown twice once pi renders its own user bubble.
+      ctx.ui.setWidget(
+        PENDING_WIDGET_KEY,
+        buildPendingWidget(
+          event.prompt,
+          `${sideResolved.model.provider}/${sideResolved.model.id}`,
+          theme,
+        ),
+      );
+      decision = await callSideAgent(
+        rolesApi,
+        config.sideAgentRole,
+        scoutSystemPrompt,
+        userMessage,
+      );
+    } finally {
+      ctx.ui.setWidget(PENDING_WIDGET_KEY, undefined);
+    }
 
     // Validate and normalize side-agent output at the application boundary.
     // The parser intentionally accepts loose model text; only known, visible

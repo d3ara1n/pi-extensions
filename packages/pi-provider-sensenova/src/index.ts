@@ -29,8 +29,18 @@ const MODELS = [
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, // free during beta
     contextWindow: 262_144,
     maxTokens: 65_536,
+    // sensenova reasons by default (~560 tokens / ~10s, enough to trip scout's
+    // 15s side-agent timeout); only reasoning_effort=none actually disables it.
+    thinkingLevelMap: {
+      off: "none",
+      minimal: null, // rejected with HTTP 400 — only low/medium/high/none valid
+      low: "low",
+      medium: "medium",
+      high: "high",
+    },
     compat: {
       supportsDeveloperRole: false, // uses `system` role, not `developer`
+      supportsReasoningEffort: true, // required for thinkingLevelMap to emit reasoning_effort
     },
   },
 ];

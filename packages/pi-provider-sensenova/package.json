@@ -2,7 +2,7 @@
   "name": "@d3ara1n/pi-provider-sensenova",
   "version": "1.1.0",
   "type": "module",
-  "description": "SenseNova (商汤日日新) provider for pi — registers sensenova-6.7-flash-lite model via OpenAI-compatible API",
+  "description": "SenseNova (商汤日日新) provider for pi — registers Token Plan chat models via OpenAI-compatible API",
   "keywords": [
     "pi-package",
     "pi",

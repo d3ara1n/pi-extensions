@@ -13,15 +13,19 @@ SenseNova (商汤日日新) provider for [Pi Coding Agent](https://pi.dev) — r
 | Model | Reasoning | Input | Context | Max Output |
 |---|---|---|---|---|
 | `sensenova-6.7-flash-lite` | Yes | text, image | 256K | 64K |
+| `deepseek-v4-flash` | Yes | text | 1M | 64K |
+| `glm-5.2` | Yes | text | 1M | 128K |
 
-`sensenova-6.7-flash-lite` is SenseTime's lightweight multimodal agent model for real-world workflows. This provider registers the model with:
+`sensenova-u1-fast` is intentionally not registered because it is an image-generation model served by a separate Images API, not Chat Completions.
 
-- **Text + image input**
-- **Reasoning enabled** in pi's model metadata
+This provider registers the chat models with:
+
 - **OpenAI-compatible chat/completions transport** via pi's built-in provider layer
 - **`system` role compatibility** (`supportsDeveloperRole: false`)
+- **Reasoning controls** via `reasoning_effort`; pi's `minimal` thinking level is omitted because SenseNova only accepts `low` / `medium` / `high` / `none`
+- **Tool calling and streaming usage** verified against the live API
 
-Other compatibility details such as tool-call streaming quirks, usage chunks, and overflow error text should be re-verified against the live API before changing compat flags; see [`PROVIDER.md`](../../PROVIDER.md).
+Other compatibility details such as overflow error text should be re-verified against the live API before changing compat flags; see [`PROVIDER.md`](../../PROVIDER.md).
 
 ## Installation
 

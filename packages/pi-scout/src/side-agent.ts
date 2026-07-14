@@ -2,11 +2,17 @@
  * Side agent invocation logic.
  *
  * Calls the side agent via model-roles' completeWithRole() (auth resolved
- * internally) and parses the <decision> response (line-based key: value).
+ * internally) and parses the <decision> response. Parsing is module-agnostic:
+ * it extracts any registered module's field by name and dispatches to that
+ * module's `parse()`, so new fields are recognized without edits here.
  */
 
 import type { ModelRolesAPI } from "@d3ara1n/pi-model-roles";
 import type { ScoutDecision } from "./types.ts";
+import { MODULES, emptyFields } from "./modules/registry.ts";
+
+/** Field names the parser recognizes (registered modules + "reasoning"). */
+const FIELD_RE = /^([A-Za-z_][\w-]*)\s*[:：]\s*(.*)$/;
 
 /**
  * Hard timeout (ms) for every side-agent call. Scout runs before each
@@ -63,6 +69,20 @@ export async function callSideAgent(
       cacheRetention: "short",
       signal,
     });
+
+    // Surface upstream errors honestly. Providers can return a result with
+    // stopReason "error" + errorMessage and empty content WITHOUT throwing
+    // (e.g. a gateway returning "all nodes failed to stream"). Without this
+    // check the empty content misleads as "unparseable response", hiding the
+    // real cause in the status bar.
+    if (result.stopReason === "error" || result.errorMessage) {
+      return {
+        fields: emptyFields(),
+        reasoning: `failed: ${shortError(result.errorMessage || "upstream error")}`,
+        source: "error",
+      };
+    }
+
     const text =
       result.content
         ?.filter((block: any) => block.type === "text")
@@ -76,7 +96,7 @@ export async function callSideAgent(
     const reasoning = signal.aborted
       ? `timed out (${SIDE_AGENT_TIMEOUT_MS / 1000}s)`
       : `failed: ${shortError(err)}`;
-    return { skills: [], role: null, reasoning, source: "error" };
+    return { fields: emptyFields(), reasoning, source: "error" };
   }
 }
 
@@ -88,16 +108,17 @@ export async function callSideAgent(
  *
  * 1. Extracts from <decision>...</decision> tags — precise, ignores
  *    any surrounding prose or markdown noise.
- * 2. Falls back to scanning the entire raw text for "skills:",
- *    "role:", "reasoning:" lines — handles models that ignore both
- *    the tag and JSON instructions.
- * 3. Returns "unparseable response" only when neither approach
- *    finds any decision fields.
+ * 2. Falls back to scanning the entire raw text for field lines — handles
+ *    models that ignore the tag instructions.
+ * 3. Returns "unparseable response" only when neither approach finds any
+ *    recognized field.
+ *
+ * Recognized fields come from the module registry, so a new module's field
+ * is parsed automatically once the module is registered.
  */
-function parseDecision(raw: string): ScoutDecision {
+export function parseDecision(raw: string): ScoutDecision {
   const fallback: ScoutDecision = {
-    skills: [],
-    role: null,
+    fields: emptyFields(),
     reasoning: "unparseable response",
     source: "error",
   };
@@ -105,11 +126,11 @@ function parseDecision(raw: string): ScoutDecision {
   const text = raw.trim();
   if (!text) return fallback;
 
-  // ── Stage 1: <decision> tag extraction ─────────────────
+  // ── Stage 1: <decision> tag extraction ──────────────────
   const tagMatch = text.match(/<decision>([\s\S]*?)<\/decision>/);
   if (tagMatch) {
-    const decision = parseTextFields(tagMatch[1]);
-    if (decision) return decision;
+    const fromTag = parseTextFields(tagMatch[1]);
+    if (fromTag) return fromTag;
   }
 
   // ── Stage 2: scan entire text for field lines ───────────
@@ -124,52 +145,40 @@ function parseDecision(raw: string): ScoutDecision {
  * Returns null if no recognized fields are found.
  */
 function parseTextFields(block: string): ScoutDecision | null {
-  const lines = block.split("\n");
-  let skillsRaw = "";
-  let roleRaw = "";
-  let reasoningRaw = "";
+  const fields: Record<string, unknown> = {};
+  let reasoning = "";
 
-  for (const line of lines) {
+  for (const line of block.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    // Match "key: value" (supports both ASCII and full-width colon)
-    const match = trimmed.match(/^(skills?|role|reasoning)\s*[:：]\s*(.*)$/i);
-    if (match) {
-      const key = match[1].toLowerCase();
-      const value = match[2].trim();
-      if (key.startsWith("skill")) skillsRaw = skillsRaw || value;
-      else if (key === "role") roleRaw = roleRaw || value;
-      else if (key === "reasoning") reasoningRaw = reasoningRaw || value;
+    const match = trimmed.match(FIELD_RE);
+    if (!match) continue;
+
+    const key = match[1].toLowerCase();
+    const value = match[2].trim();
+
+    const mod = MODULES.find((m) => m.field === key);
+    if (mod) {
+      if (fields[mod.field] === undefined) fields[mod.field] = mod.parse(value);
+    } else if (key === "reasoning") {
+      reasoning = reasoning || value;
     }
   }
 
-  // At least one field recognized — build decision
-  if (skillsRaw || roleRaw || reasoningRaw) {
-    const skills = parseSkillsField(skillsRaw);
-    const role = parseRoleField(roleRaw);
-    const reasoning = reasoningRaw || "no reasoning provided";
-    return { skills, role, reasoning, source: "side-agent" };
+  // At least one recognized field — build decision
+  if (Object.keys(fields).length > 0 || reasoning) {
+    // Fill any missing module fields with their disabled value so downstream
+    // code always sees a complete fields record.
+    for (const m of MODULES) {
+      if (fields[m.field] === undefined) fields[m.field] = m.disabledValue();
+    }
+    return {
+      fields,
+      reasoning: reasoning || "no reasoning provided",
+      source: "side-agent",
+    };
   }
 
   return null;
-}
-
-/** Parse the skills field: comma-separated names, "none" → empty. */
-function parseSkillsField(raw: string): string[] {
-  if (!raw || raw.toLowerCase() === "none") return [];
-  return raw
-    .split(/[,，、]/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-/** Parse the role field: "null" / "none" / "current" → null, otherwise the role name. */
-function parseRoleField(raw: string): string | null {
-  if (!raw) return null;
-  const lower = raw.toLowerCase().trim();
-  if (lower === "null" || lower === "none" || lower === "current" || lower === "keep") {
-    return null;
-  }
-  return raw.trim() || null;
 }

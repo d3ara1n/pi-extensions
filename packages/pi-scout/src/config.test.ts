@@ -10,6 +10,20 @@ import * as path from "node:path";
 import { test } from "node:test";
 import { loadScoutConfig } from "./config.ts";
 import { buildScoutSystemPrompt } from "./scout-prompt.ts";
+import type { ScoutConfig, ScoutContext } from "./types.ts";
+
+/** Minimal ScoutContext for prompt-only tests. */
+function makeCtx(config: ScoutConfig): ScoutContext {
+  return {
+    config,
+    pi: {} as any,
+    rolesApi: { getVisibleRoles: () => ({ heavy: { model: "m/h" } }) } as any,
+    skillEntries: [{ name: "skill-a", description: "desc", filePath: "/p" }],
+    currentRole: "default",
+    systemPrompt: "",
+    theme: { fg: (_c: string, s: string) => s } as any,
+  };
+}
 
 function withSettings(
   globalSettings: object,
@@ -62,22 +76,37 @@ test("project scout block replaces global fields before defaults fill gaps", () 
 });
 
 test("scout prompt exposes skills and roles only for their enabled modules", () => {
-  const base = {
+  const base: ScoutConfig = {
     enabled: true,
     sideAgentRole: "utility",
     maxSelectedSkills: 0,
     modules: { skillRouter: false, modelRouter: false, shortCircuit: true },
     shortCircuit: { trivialAck: true, maxAckLength: 12, ackPhrases: [] },
   };
-  const disabled = buildScoutSystemPrompt(base, "- skill-a", "- heavy");
+  const disabled = buildScoutSystemPrompt(makeCtx(base));
   assert.doesNotMatch(disabled, /## Available Skills|## Available Roles|skill-a|heavy/);
 
   const enabled = buildScoutSystemPrompt(
-    { ...base, modules: { ...base.modules, skillRouter: true, modelRouter: true } },
-    "- skill-a",
-    "- heavy",
+    makeCtx({ ...base, modules: { ...base.modules, skillRouter: true, modelRouter: true } }),
   );
   assert.match(enabled, /## Available Skills\n- skill-a/);
   assert.match(enabled, /## Available Roles\n- heavy/);
   assert.match(enabled, /Select at most 0 skills/);
+});
+
+test("model-router off leaks no role concept into the prompt", () => {
+  const base: ScoutConfig = {
+    enabled: true,
+    sideAgentRole: "utility",
+    maxSelectedSkills: 5,
+    modules: { skillRouter: true, modelRouter: false, shortCircuit: true },
+    shortCircuit: { trivialAck: true, maxAckLength: 12, ackPhrases: [] },
+  };
+  const prompt = buildScoutSystemPrompt(makeCtx(base));
+  // With model-router off, no role concept should appear anywhere — no format
+  // line, no rule, no Available Roles, no "model role"/"Current role:".
+  assert.doesNotMatch(prompt, /role/i);
+  // Skills are still routed.
+  assert.match(prompt, /## Available Skills/);
+  assert.match(prompt, /decide which skills to use/);
 });

@@ -1,8 +1,14 @@
 /**
  * Side agent prompt construction — system prompt and user message.
+ *
+ * Both are assembled by iterating the registered modules, so enabling /
+ * disabling a module (or adding a new one) needs no edits here. A disabled
+ * module contributes no format line, no rule, no candidate section, and no
+ * context line — the model is never even told the concept exists.
  */
 
-import type { ScoutConfig } from "./types.ts";
+import type { ScoutContext } from "./types.ts";
+import { enabledModules } from "./modules/registry.ts";
 
 /** Previous turn context for better routing decisions. */
 export interface PrevTurnContext {
@@ -13,17 +19,21 @@ export interface PrevTurnContext {
 /**
  * Build the user message for the side agent.
  *
- * Includes previous turn context (when available) so the side agent can
- * understand follow-up prompts like "continue", "change that", etc.
+ * Module context lines (e.g. "Current role: …") come first, then previous-turn
+ * context (when available) so the side agent can understand follow-ups like
+ * "continue", "change that", etc.
  */
 export function buildScoutUserMessage(
   userPrompt: string,
-  currentRole: string,
-  prevTurn?: PrevTurnContext,
+  prevTurn: PrevTurnContext | undefined,
+  ctx: ScoutContext,
 ): string {
   const parts: string[] = [];
 
-  parts.push(`Current role: ${currentRole}`);
+  for (const m of enabledModules(ctx.config)) {
+    const line = m.promptContextLine(ctx);
+    if (line) parts.push(line);
+  }
 
   if (prevTurn && (prevTurn.userPrompt || prevTurn.assistantSummary)) {
     parts.push(``);
@@ -48,61 +58,49 @@ export function buildScoutUserMessage(
  *
  * Stable per-session data (skills, roles) is embedded here rather than in the
  * user message so that the entire system prompt forms a large, cacheable prefix.
- * This is critical for Anthropic which requires a 1024-token minimum for
- * prompt caching to activate.
  */
-export function buildScoutSystemPrompt(
-  config: ScoutConfig,
-  skillsList: string,
-  rolesList: string,
-): string {
+export function buildScoutSystemPrompt(ctx: ScoutContext): string {
+  const mods = enabledModules(ctx.config);
   const parts: string[] = [];
 
-  parts.push(
-    `You are a scout. Analyze the user's request and decide which skills and model role to use.`,
-  );
+  const nouns = mods.map((m) => m.noun).join(" and ");
+  parts.push(`You are a scout. Analyze the user's request and decide which ${nouns} to use.`);
   parts.push(``);
+
+  // ── Response Format ───────────────────────────────────────────
   parts.push(`## Response Format`);
   parts.push(`Put your decision inside <decision> tags. Use exactly this line format:`);
   parts.push(`<decision>`);
-  parts.push(`skills: skill-name-1, skill-name-2`);
-  parts.push(`role: role-name-or-null`);
+  for (const m of mods) parts.push(m.formatLine(ctx));
   parts.push(`reasoning: one sentence explanation`);
   parts.push(`</decision>`);
   parts.push(``);
+
+  // ── Response Rules ────────────────────────────────────────────
   parts.push(`## Response Rules`);
-  parts.push(`- skills: comma-separated skill names, or "none" if no skills needed`);
-  parts.push(`- role: role name from the available list, or "null" to keep current`);
+  for (const m of mods) parts.push(m.responseRule);
   parts.push(`- reasoning: one short sentence`);
   parts.push(`- NOTHING outside the <decision> tags. No quotes, no JSON, no markdown.`);
   parts.push(``);
+
+  // ── Rules ─────────────────────────────────────────────────────
   parts.push(`## Rules`);
-  parts.push(`- Select at most ${config.maxSelectedSkills} skills. Select 0 if none are relevant.`);
-  parts.push(`- Only select skills that will materially help with the task.`);
-  parts.push(`- If the task is trivial (simple question, acknowledgment), select 0 skills.`);
-  parts.push(`- "role" should be null if the current role is appropriate.`);
-  parts.push(`- Only suggest a role change when the task clearly benefits from a different model.`);
-  parts.push(`- Be conservative: prefer fewer skills and no role change when uncertain.`);
+  parts.push(`- Be conservative: prefer fewer selections when uncertain.`);
   parts.push(
     `- Use the Previous Turn context to understand follow-up requests (e.g. "continue", "change that", "no, the other one").`,
   );
-
-  // Stable prefix ends here. Sections below are injected conditionally per
-  // module toggle: a disabled module contributes no candidates, so the side
-  // agent has nothing to choose from for it (and the application layer zeros
-  // out its field regardless). The longer section (skills) comes first so
-  // toggling the later module (roles) only invalidates the cache tail —
-  // Anthropic prefix-cache matches the longest common prefix.
-  if (config.modules.skillRouter) {
-    parts.push(``);
-    parts.push(`## Available Skills`);
-    parts.push(skillsList || "(none)");
+  for (const m of mods) {
+    for (const rule of m.rules(ctx)) parts.push(rule);
   }
 
-  if (config.modules.modelRouter) {
-    parts.push(``);
-    parts.push(`## Available Roles`);
-    parts.push(rolesList);
+  // ── Available sections (registry order = cache-friendly) ──────
+  for (const m of mods) {
+    const candidates = m.candidates(ctx);
+    if (candidates != null) {
+      parts.push(``);
+      parts.push(`## ${m.sectionTitle}`);
+      parts.push(candidates);
+    }
   }
 
   return parts.join("\n");

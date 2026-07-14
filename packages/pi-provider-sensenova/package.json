@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-provider-sensenova",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "type": "module",
   "description": "SenseNova (商汤日日新) provider for pi — registers Token Plan chat models via OpenAI-compatible API",
   "keywords": [

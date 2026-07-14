@@ -52,12 +52,23 @@ export async function generateSessionName(
     { signal },
   );
 
+  // Surface upstream errors explicitly so callers can notify. pi-ai returns
+  // provider rejections as stopReason "error" + errorMessage with empty
+  // content, which would otherwise silently degrade to "New session".
+  if (result.stopReason === "error" || result.errorMessage) {
+    throw new Error(result.errorMessage || "side agent returned an error");
+  }
+
   const raw =
     result.content
       ?.filter((block: any) => block.type === "text")
       ?.map((block: any) => block.text)
       ?.join("")
       ?.trim() ?? "";
+
+  if (!raw) {
+    throw new Error("side agent returned empty content");
+  }
 
   return cleanSessionName(raw, config.maxLength);
 }

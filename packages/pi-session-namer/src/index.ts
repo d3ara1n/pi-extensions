@@ -66,15 +66,17 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
         );
 
         pi.setSessionName(name);
-      } catch {
-        // Side agent failed (often a timeout on the cheap utility model) —
-        // fall back to a truncated prompt title and surface it in the TUI.
+      } catch (err) {
+        // Side agent failed (upstream error, empty response, or timeout on
+        // the cheap utility model) — fall back to a truncated prompt title
+        // and surface the reason in the TUI.
+        const reason = err instanceof Error ? err.message : String(err);
         const fallback = event.prompt
           .slice(0, config.maxLength || undefined)
           .replace(/\n/g, " ")
           .trim();
         pi.setSessionName(fallback || "New session");
-        ctx.ui.notify("Session naming failed — using fallback title.", "warning");
+        ctx.ui.notify(`Session naming failed (${reason}) — using fallback title.`, "warning");
       }
     })().catch(() => {
       ctx.ui.notify("Session naming encountered an error.", "warning");
@@ -142,15 +144,20 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
         return;
       }
 
-      const name = await generateSessionName(
-        rolesApi,
-        config.sideAgentRole,
-        config,
-        lastUserPrompt,
-      );
+      try {
+        const name = await generateSessionName(
+          rolesApi,
+          config.sideAgentRole,
+          config,
+          lastUserPrompt,
+        );
 
-      pi.setSessionName(name);
-      ctx.ui.notify(`Session renamed: ${name}`, "info");
+        pi.setSessionName(name);
+        ctx.ui.notify(`Session renamed: ${name}`, "info");
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        ctx.ui.notify(`Rename failed: ${reason}`, "warning");
+      }
     },
   });
 }

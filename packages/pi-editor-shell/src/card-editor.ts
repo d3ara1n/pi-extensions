@@ -34,12 +34,12 @@ export type SpinnerPhase = "thinking" | "outputting" | "toolcall" | "exec";
 /** Spinner frames keyed by agent phase, chosen for semantic fit:
  *  thinking  — ●/○ pulse, doubled frames to halve the tempo
  *  outputting — braille sand-pile (dots accumulate bottom-up, then clear)
- *  toolcall  — ▓▒░ breathing light (single char, fades in/out)
+ *  toolcall  — shade ramp breathing (░▒▓█▓▒, symmetric incl. full block)
  *  exec      — ◜◝◞◟ arc rotation (tool spinning, mechanical) */
 const SPINNERS: Record<SpinnerPhase, readonly string[]> = {
   thinking: ["●", "●", "○", "○"],
   outputting: ["⡀", "⣀", "⣄", "⣤", "⣦", "⣶", "⣷", "⣿"],
-  toolcall: ["▓", "▒", "░", "░", "▒"],
+  toolcall: ["░", "▒", "▓", "█", "▓", "▒"],
   exec: ["◜", "◝", "◞", "◟"],
 };
 

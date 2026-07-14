@@ -29,12 +29,6 @@ interface SideAgentContext {
   messages: Array<{ role: "user"; content: string; timestamp: number }>;
 }
 
-/** Short, status-bar-friendly message extracted from an unknown error. */
-function shortError(err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err);
-  return msg.length > 80 ? msg.slice(0, 77) + "..." : msg;
-}
-
 /**
  * Call the side agent and return its decision.
  *
@@ -78,7 +72,8 @@ export async function callSideAgent(
     if (result.stopReason === "error" || result.errorMessage) {
       return {
         fields: emptyFields(),
-        reasoning: `failed: ${shortError(result.errorMessage || "upstream error")}`,
+        reasoning: "upstream error",
+        errorDetail: result.errorMessage || "upstream error",
         source: "error",
       };
     }
@@ -92,11 +87,21 @@ export async function callSideAgent(
     return parseDecision(text);
   } catch (err) {
     // Surface the failure category in the status bar; scout falls back to a
-    // safe no-op decision either way.
-    const reasoning = signal.aborted
-      ? `timed out (${SIDE_AGENT_TIMEOUT_MS / 1000}s)`
-      : `failed: ${shortError(err)}`;
-    return { fields: emptyFields(), reasoning, source: "error" };
+    // safe no-op decision either way. The full cause (if any) goes to notify
+    // via errorDetail — the status line is too short for it.
+    if (signal.aborted) {
+      return {
+        fields: emptyFields(),
+        reasoning: `timed out (${SIDE_AGENT_TIMEOUT_MS / 1000}s)`,
+        source: "error",
+      };
+    }
+    return {
+      fields: emptyFields(),
+      reasoning: "failed",
+      errorDetail: err instanceof Error ? err.message : String(err),
+      source: "error",
+    };
   }
 }
 

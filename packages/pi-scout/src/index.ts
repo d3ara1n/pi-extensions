@@ -21,7 +21,13 @@ import { callSideAgent } from "./side-agent.ts";
 import { buildScoutSystemPrompt, buildScoutUserMessage } from "./scout-prompt.ts";
 import { resetSkillCache } from "./skill-inject.ts";
 import { evaluateShortCircuit } from "./short-circuit.ts";
-import { MODULES, enabledModules, emptyFields } from "./modules/registry.ts";
+import { MODULES, emptyFields } from "./modules/registry.ts";
+import {
+  scoutPrefix,
+  formatDecisionStatus,
+  normalizeDecision,
+  applyDecision,
+} from "./engine.ts";
 
 const STATUS_KEY = "scout";
 
@@ -50,88 +56,6 @@ function buildPendingWidget(prompt: string, modelLabel: string, theme: any): str
       theme.fg("dim", "…"),
     theme.fg("dim", "  › ") + theme.fg("muted", previewPrompt(prompt)),
   ];
-}
-
-/** Status-bar prefix: icon in its state color, the "scout:" label always dim. */
-function scoutPrefix(icon: string, color: string, theme: any): string {
-  return theme.fg(color, icon) + theme.fg("dim", " scout:") + " ";
-}
-
-/** Build a one-line status summary from a scout decision. */
-function formatDecisionStatus(decision: ScoutDecision, ctx: ScoutContext): string {
-  const theme = ctx.theme;
-  if (decision.source === "error") {
-    return scoutPrefix("✗", "warning", theme) + theme.fg("warning", decision.reasoning);
-  }
-
-  if (decision.source === "short-circuit") {
-    return scoutPrefix("✓", "success", theme) + theme.fg("dim", `(skipped) ${decision.reasoning}`);
-  }
-
-  const parts: string[] = [];
-  for (const m of enabledModules(ctx.config)) {
-    const segment = m.formatStatus(decision.fields[m.field] as never, ctx);
-    if (segment) parts.push(segment);
-  }
-
-  if (parts.length === 0) {
-    return scoutPrefix("✓", "success", theme) + theme.fg("dim", "no changes");
-  }
-
-  return scoutPrefix("✓", "success", theme) + parts.join(theme.fg("dim", " | "));
-}
-
-/**
- * Validate + zero a parsed decision against the registry.
- *
- * Enabled modules validate/normalize their field (and may flag an error);
- * disabled modules are zeroed to their disabled value so downstream code
- * always sees a complete fields record. Pure — no side effects.
- */
-function normalizeDecision(decision: ScoutDecision, ctx: ScoutContext): ScoutDecision {
-  const fields: Record<string, unknown> = { ...decision.fields };
-  let source = decision.source;
-  let reasoning = decision.reasoning;
-
-  for (const m of MODULES) {
-    if (ctx.config.modules[m.key]) {
-      const { value, error } = m.validate(fields[m.field] as never, ctx);
-      fields[m.field] = value;
-      if (error && source !== "error") {
-        source = "error";
-        reasoning = error;
-      }
-    } else {
-      fields[m.field] = m.disabledValue();
-    }
-  }
-
-  return { fields, reasoning, source };
-}
-
-/**
- * Apply a decision via the registry: each enabled module runs its side
- * effects and may transform the system prompt. The prompt is threaded
- * through modules in registry order. Apply-time failures mark the decision
- * as an error and zero the offending field.
- *
- * @returns the final (possibly transformed) system prompt
- */
-async function applyDecision(decision: ScoutDecision, ctx: ScoutContext): Promise<string> {
-  let systemPrompt = ctx.systemPrompt;
-
-  for (const m of MODULES) {
-    if (!ctx.config.modules[m.key]) continue;
-    const res = await m.apply(decision.fields[m.field] as never, { ...ctx, systemPrompt });
-    if (res?.systemPrompt !== undefined) systemPrompt = res.systemPrompt;
-    if (res?.error) {
-      decision.fields[m.field] = m.disabledValue();
-      decision.source = "error";
-      decision.reasoning = res.error;
-    }
-  }
-
-  return systemPrompt;
 }
 
 export default function scoutExtension(pi: ExtensionAPI) {
@@ -405,6 +329,12 @@ export default function scoutExtension(pi: ExtensionAPI) {
 
     // Show result in status bar
     ctx.ui.setStatus(STATUS_KEY, formatDecisionStatus(decision, scoutCtx));
+
+    // Surface the full error cause via notify — the status line only carries
+    // the short category (see formatDecisionStatus / decision.reasoning).
+    if (decision.source === "error" && decision.errorDetail) {
+      ctx.ui.notify(`scout: ${decision.errorDetail}`, "warning");
+    }
 
     // Return modified system prompt
     if (systemPrompt !== event.systemPrompt) {

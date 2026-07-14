@@ -149,8 +149,13 @@ export interface ScoutModule<V = unknown> {
 export interface ScoutDecision {
   /** Per-module outputs, keyed by module `field`. */
   fields: Record<string, unknown>;
-  /** Brief reasoning */
+  /** Brief reasoning — shown in the status bar (keep it short). */
   reasoning: string;
+  /** Full error detail for notify when `source === "error"`. The status bar
+   *  shows only `reasoning`; this carries the longer cause (e.g. an upstream
+   *  gateway message) so it can be surfaced via notify without overflowing
+   *  the tiny status line. */
+  errorDetail?: string;
   /** Where the decision came from — controls status-bar presentation.
    *  "error" renders as a warning (✗) in the status bar instead of polluting the terminal. */
   source?: "side-agent" | "short-circuit" | "error";

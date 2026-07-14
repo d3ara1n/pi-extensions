@@ -12,7 +12,7 @@ function fakeRolesApi(completeWithRole: () => Promise<any>): any {
   return { completeWithRole };
 }
 
-test("upstream error (stopReason error, no throw) surfaces the real reason", async () => {
+test("upstream error (stopReason error, no throw) carries detail for notify", async () => {
   const api = fakeRolesApi(async () => ({
     stopReason: "error",
     errorMessage: "服务内部错误（上游原因：all nodes failed to stream）",
@@ -21,10 +21,10 @@ test("upstream error (stopReason error, no throw) surfaces the real reason", asy
 
   const decision = await callSideAgent(api, "utility", "sys", "user");
 
+  // Status stays short; the long cause lives in errorDetail for notify.
   assert.equal(decision.source, "error");
-  assert.match(decision.reasoning, /failed:/);
-  assert.match(decision.reasoning, /all nodes failed to stream/);
-  assert.doesNotMatch(decision.reasoning, /unparseable/);
+  assert.equal(decision.reasoning, "upstream error");
+  assert.match(decision.errorDetail ?? "", /all nodes failed to stream/);
 });
 
 test("upstream error with only stopReason (no message) still reports error", async () => {
@@ -33,18 +33,19 @@ test("upstream error with only stopReason (no message) still reports error", asy
   const decision = await callSideAgent(api, "utility", "sys", "user");
 
   assert.equal(decision.source, "error");
-  assert.match(decision.reasoning, /failed:/);
+  assert.equal(decision.reasoning, "upstream error");
 });
 
 test("empty content without an error flag stays 'unparseable response'", async () => {
   // A model that returns truly empty content (no stopReason error) is a
-  // genuine parse failure, not an upstream error.
+  // genuine parse failure, not an upstream error — no errorDetail to notify.
   const api = fakeRolesApi(async () => ({ stopReason: "stop", content: [] }));
 
   const decision = await callSideAgent(api, "utility", "sys", "user");
 
   assert.equal(decision.source, "error");
   assert.equal(decision.reasoning, "unparseable response");
+  assert.equal(decision.errorDetail, undefined);
 });
 
 test("valid <decision> parses normally", async () => {

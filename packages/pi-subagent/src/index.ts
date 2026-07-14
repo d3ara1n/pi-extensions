@@ -294,6 +294,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
         };
       }
 
+      const rethrowToToolRuntime = Symbol("pi-subagent-rethrow");
       try {
         // Resolve model AFTER acquiring so the queued period stays zero-cost
         let rolesApi: ModelRolesAPI;
@@ -521,11 +522,9 @@ export default function subagentExtension(pi: ExtensionAPI) {
         if (result.exitCode !== 0 || result.errorMessage) {
           const failedText = `Subagent (${params.role}) failed: ${result.errorMessage || result.stderr || "unknown error"}\n\nPartial output:\n${result.output}`;
           emitFinal([result], failedText);
-          return {
-            content: [{ type: "text", text: failedText }],
-            details: { mode: "single", results: [result] },
-            isError: true,
-          };
+          const err = new Error(failedText) as Error & { [rethrowToToolRuntime]?: true };
+          err[rethrowToToolRuntime] = true;
+          throw err;
         }
 
         // Build concise output for the main model with usage info
@@ -545,13 +544,10 @@ export default function subagentExtension(pi: ExtensionAPI) {
           details: { mode: "single", results: [result] },
         };
       } catch (err: any) {
+        if (err?.[rethrowToToolRuntime]) throw err;
         const errorText = `Subagent (${params.role}) error: ${err.message || err}`;
         emitFinal([], errorText);
-        return {
-          content: [{ type: "text", text: errorText }],
-          details: { mode: "single", results: [] },
-          isError: true,
-        };
+        throw new Error(errorText);
       } finally {
         // Cancel any trailing throttled onUpdate regardless of how we exited
         // (success / fallback / budget / error). A stale "still running" progress

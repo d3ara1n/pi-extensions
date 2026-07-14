@@ -12,6 +12,7 @@ export const BUILTIN_ROLES: Record<string, SubagentRole> = {
   explorer: {
     role: "fast",
     fallbackRole: "default",
+    timeout: 900,
     description:
       "READ-ONLY codebase exploration — locate files, grep symbols, trace imports, explain structures. Tools: read, find, grep. NO bash, NO edits, NO web access.",
     examples: ["Find where auth middleware is implemented", "Map the routing structure"],
@@ -31,6 +32,7 @@ export const BUILTIN_ROLES: Record<string, SubagentRole> = {
   reviewer: {
     role: "heavy",
     fallbackRole: "default",
+    timeout: 3600,
     description:
       "READ-ONLY code review & analysis — audit code, assess architecture, review diffs. Tools: read, bash, grep, find. Has bash (git diff/log, test runs). NO edits, NO web access.",
     examples: [
@@ -52,6 +54,7 @@ export const BUILTIN_ROLES: Record<string, SubagentRole> = {
   },
   worker: {
     role: "default",
+    timeout: 2400,
     description:
       "the ONLY role that can MODIFY files — edit, write, refactor, fix, implement. Tools: read, bash, edit, write, grep, find, delegate. Can delegate to explorer/researcher.",
     examples: ["Rename all snake_case fields to camelCase", "Add input validation to POST /login"],
@@ -77,6 +80,7 @@ export const BUILTIN_ROLES: Record<string, SubagentRole> = {
   researcher: {
     role: "fast",
     fallbackRole: "default",
+    timeout: 2400,
     description:
       "the ONLY role with WEB ACCESS — search docs, fetch pages, analyze GitHub repos. Tools: web_search, fetch_content, read, bash, delegate. Can clone repos & delegate to explorer.",
     examples: ["Find the React 19 migration guide", "Check GitHub issue #1234 for context"],

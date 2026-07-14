@@ -4,8 +4,6 @@
 
 /** Configuration for the subagent extension. */
 export interface SubagentConfig {
-  /** Per-subagent active-time timeout in seconds. `0` means unlimited; negative values are normalized to `0`. The clock pauses while the child is inside a nested `delegate` call, so no widening is needed for delegate-capable roles. */
-  timeout: number;
   /** Max concurrent subagents. `0` means unlimited; negative values are normalized to `0`. Extras queue with a TUI hint when this is positive. */
   maxConcurrency: number;
   /** Max subagent nesting depth (the top-level session is depth 0). `0` means unlimited; negative values are normalized to `0`. */
@@ -35,7 +33,6 @@ export interface SubagentSummaryConfig {
 }
 
 export const DEFAULT_CONFIG: SubagentConfig = {
-  timeout: 1500,
   maxConcurrency: 4,
   maxDepth: 3,
   maxTurns: 0,
@@ -61,7 +58,7 @@ export interface SubagentRole {
   tools: string[];
   /** If this role has `delegate`, restrict which roles it may spawn. undefined = no restriction. */
   subagentRoles?: string[];
-  /** Per-role active-time timeout override in seconds. `0` means unlimited; negative values are normalized to `0`. Falls back to config.timeout when unset. */
+  /** Per-role active-time timeout in seconds. `0` or unset means unlimited; negative values are normalized to `0`. */
   timeout?: number;
   /** Max assistant turns before the run is killed. `0` means unlimited; negative values are normalized to `0`. */
   maxTurns?: number;

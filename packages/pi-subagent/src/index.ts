@@ -23,8 +23,6 @@ import {
   AsyncSemaphore,
   isProviderError,
   effectiveTimeout,
-  normalizeNonNegativeInteger,
-  normalizeNonNegativeNumber,
 } from "./utils.ts";
 import { persistSubagentHistory } from "./history.ts";
 import { compressOutput, generateSummary } from "./output.ts";
@@ -336,12 +334,9 @@ export default function subagentExtension(pi: ExtensionAPI) {
         const startTime = Date.now();
         // Total active-time budget for this run (ms). The clock pauses while the
         // child delegates, so this caps *active* time, not wall time.
-        const timeoutBudgetMs = effectiveTimeout(roleDef, config.timeout) * 1000;
-        const maxTurns = normalizeNonNegativeInteger(
-          roleDef.maxTurns ?? config.maxTurns,
-          config.maxTurns,
-        );
-        const maxCost = normalizeNonNegativeNumber(roleDef.maxCost ?? config.maxCost, config.maxCost);
+        const timeoutBudgetMs = effectiveTimeout(roleDef) * 1000;
+        const maxTurns = roleDef.maxTurns ?? config.maxTurns;
+        const maxCost = roleDef.maxCost ?? config.maxCost;
 
         // Throttled progress: coalesces bursty thinking/tool events so the TUI
         // repaints at most ~every PROGRESS_THROTTLE_MS, always keeping the latest state.
@@ -592,7 +587,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
         try {
           const cfg = loadSubagentConfig(ctx.cwd);
           lines.push(
-            `[\u2713] config: timeout=${cfg.timeout || "∞"}s concurrency=${cfg.maxConcurrency || "∞"} depth=${cfg.maxDepth || "∞"} turns=${cfg.maxTurns || "∞"} cost=$${cfg.maxCost || "∞"} summary=${cfg.summary.enabled ? cfg.summary.role : "off"} history=${cfg.history.enabled}`,
+            `[\u2713] config: concurrency=${cfg.maxConcurrency || "∞"} depth=${cfg.maxDepth || "∞"} turns=${cfg.maxTurns || "∞"} cost=$${cfg.maxCost || "∞"} summary=${cfg.summary.enabled ? cfg.summary.role : "off"} history=${cfg.history.enabled}`,
           );
         } catch {
           lines.push("[\u2717] config: failed to load");

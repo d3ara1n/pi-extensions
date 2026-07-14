@@ -291,13 +291,10 @@ export class AsyncSemaphore {
 
 /**
  * Effective per-role timeout in SECONDS (convert to ms at the spawn boundary).
- * No widening for delegate-capable roles: the parent's active-time clock
- * pauses while the child is inside a nested `delegate` call, so the base
- * budget is already enough. An explicit roleDef.timeout always wins.
- * Non-finite values fall back to the base timeout; negative values become 0 (unlimited).
+ * `0` or unset means unlimited; non-finite and negative values normalize to 0.
  */
-export function effectiveTimeout(roleDef: SubagentRole, baseTimeoutSec: number): number {
-  return normalizeNonNegativeNumber(roleDef.timeout, normalizeNonNegativeNumber(baseTimeoutSec, 0));
+export function effectiveTimeout(roleDef: SubagentRole): number {
+  return normalizeNonNegativeNumber(roleDef.timeout, 0);
 }
 
 // ── Output truncation ────────────────────────────────────────

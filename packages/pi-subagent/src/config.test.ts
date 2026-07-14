@@ -47,7 +47,6 @@ describe("loadSubagentConfig", () => {
     const { agentDir } = makeRoot();
     writeSettings(agentDir, {
       subagent: {
-        timeout: 0,
         maxConcurrency: -1,
         maxDepth: -2,
         maxTurns: 0,
@@ -56,7 +55,6 @@ describe("loadSubagentConfig", () => {
     });
 
     const config = loadSubagentConfig();
-    assert.equal(config.timeout, 0);
     assert.equal(config.maxConcurrency, 0);
     assert.equal(config.maxDepth, 0);
     assert.equal(config.maxTurns, 0);
@@ -69,11 +67,10 @@ describe("loadSubagentConfig", () => {
     // would serialize it as null. Exercise both non-finite and wrong-type inputs.
     writeSettingsText(
       agentDir,
-      '{"subagent":{"timeout":1e999,"maxConcurrency":-1e999,"maxDepth":{},"maxTurns":false,"maxCost":"NaN"}}',
+      '{"subagent":{"maxConcurrency":-1e999,"maxDepth":{},"maxTurns":false,"maxCost":"NaN"}}',
     );
 
     const config = loadSubagentConfig();
-    assert.equal(config.timeout, DEFAULT_CONFIG.timeout);
     assert.equal(config.maxConcurrency, DEFAULT_CONFIG.maxConcurrency);
     assert.equal(config.maxDepth, DEFAULT_CONFIG.maxDepth);
     assert.equal(config.maxTurns, DEFAULT_CONFIG.maxTurns);
@@ -96,7 +93,6 @@ describe("loadSubagentConfig", () => {
     const { agentDir, projectDir } = makeRoot();
     writeSettings(agentDir, {
       subagent: {
-        timeout: 999,
         maxConcurrency: 8,
         maxDepth: 7,
         maxTurns: 6,
@@ -107,11 +103,10 @@ describe("loadSubagentConfig", () => {
       },
     });
     writeSettings(path.join(projectDir, ".pi"), {
-      subagent: { timeout: 12, summary: { role: "project-summary" } },
+      subagent: { summary: { role: "project-summary" } },
     });
 
     const config = loadSubagentConfig(projectDir);
-    assert.equal(config.timeout, 12);
     assert.equal(config.maxConcurrency, DEFAULT_CONFIG.maxConcurrency);
     assert.equal(config.maxDepth, DEFAULT_CONFIG.maxDepth);
     assert.equal(config.maxTurns, DEFAULT_CONFIG.maxTurns);

@@ -248,17 +248,18 @@ describe("effectiveTimeout", () => {
       timeout,
     }) as unknown as SubagentRole;
 
-  test("non-delegate role uses base timeout", () => {
-    assert.equal(effectiveTimeout(role(["read", "grep"]), 600), 600);
+  test("role without timeout is unlimited", () => {
+    assert.equal(effectiveTimeout(role(["read", "grep"])), 0);
   });
-  test("delegate role uses base timeout (no widening — active-time clock pauses for nested delegate)", () => {
-    assert.equal(effectiveTimeout(role(["read", "delegate"]), 600), 600);
+  test("delegate-capable role without timeout is also unlimited", () => {
+    assert.equal(effectiveTimeout(role(["read", "delegate"])), 0);
   });
-  test("explicit roleDef.timeout is always honored (no widening)", () => {
-    assert.equal(effectiveTimeout(role(["read", "delegate"], 300), 600), 300);
+  test("explicit role timeout is honored", () => {
+    assert.equal(effectiveTimeout(role(["read", "delegate"], 300)), 300);
   });
-  test("explicit timeout on non-delegate also honored", () => {
-    assert.equal(effectiveTimeout(role(["read"]), 600), 600);
+  test("negative and non-finite values normalize to unlimited", () => {
+    assert.equal(effectiveTimeout(role(["read"], -1)), 0);
+    assert.equal(effectiveTimeout(role(["read"], Number.POSITIVE_INFINITY)), 0);
   });
 });
 

@@ -30,12 +30,12 @@ This means:
 
 ## Built-in Roles
 
-| Role | Model Role | Tools | Can Delegate To | Description |
-|------|-----------|-------|-----------------|-------------|
-| `explorer` | fast | read, find, grep | — | Fast code search (read-only, no bash) |
-| `reviewer` | heavy | read, bash, grep, find | — | Deep code review (read-only, bash for git/log) |
-| `worker` | default | read, bash, edit, write, grep, find, delegate | explorer, researcher | Implementation — the only role that can modify files |
-| `researcher` | fast | web_search, fetch_content, read, bash, delegate | explorer | Web research + GitHub repo analysis |
+| Role | Model Role | Timeout | Tools | Can Delegate To | Description |
+|------|-----------|---------|-------|-----------------|-------------|
+| `explorer` | fast | 900s | read, find, grep | — | Fast code search (read-only, no bash) |
+| `reviewer` | heavy | 3600s | read, bash, grep, find | — | Deep code review (read-only, bash for git/log) |
+| `worker` | default | 2400s | read, bash, edit, write, grep, find, delegate | explorer, researcher | Implementation — the only role that can modify files |
+| `researcher` | fast | 2400s | web_search, fetch_content, read, bash, delegate | explorer | Web research + GitHub repo analysis |
 
 **Nested delegation**: `worker` and `researcher` can spawn their own subagents. This keeps the main model's context clean — a worker can explore unfamiliar code via an `explorer` subagent without returning intermediate results to the main model.
 
@@ -76,7 +76,6 @@ Edit `~/.pi/agent/settings.json`:
 ```json
 {
   "subagent": {
-    "timeout": 1500,
     "maxConcurrency": 4,
     "maxDepth": 3,
     "maxTurns": 0,
@@ -92,9 +91,11 @@ Edit `~/.pi/agent/settings.json`:
 }
 ```
 
-All fields are optional. Defaults: `timeout: 1500` (seconds; 25 min; active time — the clock pauses while the child is inside a nested `delegate` call, so delegate-capable roles need no extra headroom), `maxConcurrency: 4`, `maxDepth: 3`, `maxTurns: 0` (unlimited), `maxCost: 0` (unlimited), `history.enabled: true`, `summary.role: "utility"`, `summary.enabled: true`.
+All fields are optional. Defaults: `maxConcurrency: 4`, `maxDepth: 3`, `maxTurns: 0` (unlimited), `maxCost: 0` (unlimited), `history.enabled: true`, `summary.role: "utility"`, `summary.enabled: true`.
 
-All numeric limits accept `0` for unlimited: `timeout`, `maxConcurrency`, `maxDepth`, `maxTurns`, and `maxCost`. Negative values are normalized to `0`; non-numeric or non-finite values fall back to their defaults. `maxConcurrency: 0` runs delegates without queuing, and `maxDepth: 0` permits unrestricted nesting.
+Timeouts are defined per role. Built-in defaults are `explorer: 900`, `reviewer: 3600`, `worker: 2400`, and `researcher: 2400` seconds. The timeout is active time — the clock pauses while the child is inside a nested `delegate` call, so delegate-capable roles need no extra headroom.
+
+All numeric limits accept `0` for unlimited: `maxConcurrency`, `maxDepth`, `maxTurns`, `maxCost`, and per-role `timeout`. Negative values are normalized to `0`; non-numeric or non-finite values fall back to their defaults. `maxConcurrency: 0` runs delegates without queuing, and `maxDepth: 0` permits unrestricted nesting.
 
 ### Agent Overrides
 
@@ -131,7 +132,7 @@ Override, disable, or add subagent roles via `agentOverrides`. Built-in and cust
 
 **Required fields for custom roles:** `role`, `description`, `examples`, `decisionTrigger`, `tools`, `systemPrompt`.
 
-**Optional fields:** `subagentRoles` (roles this role can spawn via delegate), `timeout` (per-role active-time timeout in seconds; unset uses the global setting, `0` is unlimited, negative values normalize to `0`), `maxTurns` / `maxCost` (per-role budget overrides; unset uses the global setting, `0` is unlimited, negative values normalize to `0`), `fallbackRole` (backup pi-model-roles role on provider errors).
+**Optional fields:** `subagentRoles` (roles this role can spawn via delegate), `timeout` (per-role active-time timeout in seconds; unset or `0` is unlimited, negative values normalize to `0`), `maxTurns` / `maxCost` (per-role budget overrides; unset uses the top-level `maxTurns` / `maxCost` setting, `0` is unlimited, negative values normalize to `0`), `fallbackRole` (backup pi-model-roles role on provider errors).
 
 Invalid custom roles (missing required fields) are silently skipped with an error notification at session start.
 

@@ -46,7 +46,6 @@ export function loadSubagentConfig(cwd?: string): SubagentConfig {
   const rawSummary = raw?.summary;
   const rawHistory = raw?.history;
   return {
-    timeout: normalizeNonNegativeNumber(raw.timeout, DEFAULT_CONFIG.timeout),
     maxConcurrency: normalizeNonNegativeInteger(raw.maxConcurrency, DEFAULT_CONFIG.maxConcurrency),
     maxDepth: normalizeNonNegativeInteger(raw.maxDepth, DEFAULT_CONFIG.maxDepth),
     maxTurns: normalizeNonNegativeInteger(raw.maxTurns, DEFAULT_CONFIG.maxTurns),

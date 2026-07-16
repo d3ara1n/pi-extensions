@@ -59,7 +59,7 @@ Optional, in `~/.pi/agent/settings.json` under `peek`:
   "peek": {
     "registryDir": "~/.pi/peek/registry",
     "heartbeatMs": 15000,
-    "askTimeoutMs": 30000,
+    "askTimeoutMs": 120000,
     "role": "utility"
   }
 }

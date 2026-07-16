@@ -20,7 +20,7 @@ export interface AgentConfig {
   registryDir?: string;
   /** How often to refresh our own marker's lastSeen. Default 15s. */
   heartbeatMs?: number;
-  /** askPeer synchronous wait timeout. Default 30s. */
+  /** askPeer synchronous wait timeout. Default 120s. */
   askTimeoutMs?: number;
 }
 
@@ -28,7 +28,7 @@ export const DEFAULT_AGENT_CONFIG: Required<
   Pick<AgentConfig, "heartbeatMs" | "askTimeoutMs">
 > = {
   heartbeatMs: 15_000,
-  askTimeoutMs: 30_000,
+  askTimeoutMs: 120_000,
 };
 
 // ---------------------------------------------------------------------------

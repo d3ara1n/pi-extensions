@@ -270,7 +270,7 @@ function makeConnection(socket: net.Socket): PeerConnection {
       const result = new Promise<string>((resolve, reject) => {
         pending.set(id, { resolve: (data) => resolve(data.answer), reject });
       });
-      const timeoutMs = opts.timeoutMs ?? 30_000;
+      const timeoutMs = opts.timeoutMs ?? 120_000;
       const timer = setTimeout(() => {
         const p = pending.get(id);
         if (p) {

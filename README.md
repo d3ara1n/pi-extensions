@@ -10,7 +10,6 @@ A collection of small extensions for [Pi Coding Agent](https://pi.dev).
 | [`pi-context-include`](./packages/pi-context-include) | `@path` syntax for AGENTS.md — include files by reference |
 | [`pi-provider-agnes`](./packages/pi-provider-agnes) | Agnes AI provider — token-billing + token-plan variants sharing the same text models |
 | [`pi-provider-sensenova`](./packages/pi-provider-sensenova) | SenseNova (商汤日日新) Token Plan provider — chat models via OpenAI-compatible API |
-| [`pi-provider-zhipu-coding-plan`](./packages/pi-provider-zhipu-coding-plan) | Zhipu AI Coding Plan provider — static GLM model list, report usage quota |
 | [`pi-usage-block`](./packages/pi-usage-block) | Usage quota status block for powerline and pi-editor-shell |
 | [`pi-editor-shell`](./packages/pi-editor-shell) | Unified rounded-corner editor shell — embeds model, context, cache, git, and pinned extension status info in the editor border |
 | [`pi-scout`](./packages/pi-scout) <sup>†</sup> | Per-turn side agent — lazy skill injection, automatic model routing, and trivial-ack short-circuit (skips the side model on `好的`/`ok`/`はい`) |

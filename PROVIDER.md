@@ -43,4 +43,4 @@
 ## 参考
 
 - pi provider API 文档：`@earendil-works/pi-coding-agent` 的 `docs/custom-provider.md`
-- 本仓库现有 provider：`packages/pi-provider-agnes`（简单）、`packages/pi-provider-zhipu-coding-plan`（含 compat + 配额上报）、`packages/pi-provider-sensenova`（最简）
+- 本仓库现有 provider：`packages/pi-provider-agnes`（简单）、`packages/pi-provider-sensenova`（最简）

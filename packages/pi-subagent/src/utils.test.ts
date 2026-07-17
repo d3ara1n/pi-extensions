@@ -21,8 +21,49 @@ import {
   formatTokens,
   effectiveTimeout,
   elapsedSeconds,
+  hasFailedSubagentResult,
 } from "./utils.ts";
 import type { SubagentResult, SubagentRole } from "./types.ts";
+
+describe("subagent failure details", () => {
+  const baseResult = (overrides: Partial<SubagentResult> = {}): SubagentResult => ({
+    role: "worker",
+    task: "test task",
+    exitCode: 0,
+    messages: [],
+    output: "ok",
+    stderr: "",
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cost: 0,
+      contextTokens: 0,
+      turns: 0,
+    },
+    activityLog: [],
+    ...overrides,
+  });
+
+  test("detects failed delegate results for tool_result error marking", () => {
+    assert.equal(
+      hasFailedSubagentResult({ mode: "single", results: [baseResult({ exitCode: 1 })] }),
+      true,
+    );
+    assert.equal(
+      hasFailedSubagentResult({ mode: "single", results: [baseResult({ stopReason: "timeout" })] }),
+      true,
+    );
+  });
+
+  test("does not mark successful or malformed details as failed", () => {
+    assert.equal(hasFailedSubagentResult({ mode: "single", results: [baseResult()] }), false);
+    assert.equal(hasFailedSubagentResult({ mode: "single", results: [] }), false);
+    assert.equal(hasFailedSubagentResult(undefined), false);
+    assert.equal(hasFailedSubagentResult({}), false);
+  });
+});
 
 // ── sanitizeFilename: guards the path-injection fix ──
 describe("sanitizeFilename", () => {

@@ -23,6 +23,7 @@ import {
   AsyncSemaphore,
   isProviderError,
   effectiveTimeout,
+  hasFailedSubagentResult,
 } from "./utils.ts";
 import { persistSubagentHistory } from "./history.ts";
 import { compressOutput, generateSummary } from "./output.ts";
@@ -169,6 +170,11 @@ export default function subagentExtension(pi: ExtensionAPI) {
     rebuildGuidelines(availableRoles);
   });
 
+  pi.on("tool_result", (event) => {
+    if (event.toolName !== "delegate") return;
+    if (hasFailedSubagentResult(event.details)) return { isError: true };
+  });
+
   pi.registerTool({
     name: "delegate",
     label: "Delegate to subagent",
@@ -218,16 +224,9 @@ export default function subagentExtension(pi: ExtensionAPI) {
 
       // Guard against bounded subagent nesting. A configured depth of 0 is unlimited.
       if (config.maxDepth > 0 && CURRENT_DEPTH >= config.maxDepth) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Cannot delegate: maximum nesting depth (${config.maxDepth}) reached (current depth ${CURRENT_DEPTH}). Return a result to the caller instead of delegating further.`,
-            },
-          ],
-          details: undefined as any,
-          isError: true,
-        };
+        throw new Error(
+          `Cannot delegate: maximum nesting depth (${config.maxDepth}) reached (current depth ${CURRENT_DEPTH}). Return a result to the caller instead of delegating further.`,
+        );
       }
 
       // Throttle state hoisted to the execute scope so the finally block can clear it.
@@ -285,16 +284,9 @@ export default function subagentExtension(pi: ExtensionAPI) {
       try {
         await gate.acquire(signal);
       } catch {
-        return {
-          content: [
-            { type: "text", text: `Subagent (${params.role}) was cancelled while queued.` },
-          ],
-          details: { mode: "single", results: [] },
-          isError: true,
-        };
+        throw new Error(`Subagent (${params.role}) was cancelled while queued.`);
       }
 
-      const rethrowToToolRuntime = Symbol("pi-subagent-rethrow");
       try {
         // Resolve model AFTER acquiring so the queued period stays zero-cost
         let rolesApi: ModelRolesAPI;
@@ -522,9 +514,10 @@ export default function subagentExtension(pi: ExtensionAPI) {
         if (result.exitCode !== 0 || result.errorMessage) {
           const failedText = `Subagent (${params.role}) failed: ${result.errorMessage || result.stderr || "unknown error"}\n\nPartial output:\n${result.output}`;
           emitFinal([result], failedText);
-          const err = new Error(failedText) as Error & { [rethrowToToolRuntime]?: true };
-          err[rethrowToToolRuntime] = true;
-          throw err;
+          return {
+            content: [{ type: "text", text: failedText }],
+            details: { mode: "single", results: [result] },
+          };
         }
 
         // Build concise output for the main model with usage info
@@ -544,7 +537,6 @@ export default function subagentExtension(pi: ExtensionAPI) {
           details: { mode: "single", results: [result] },
         };
       } catch (err: any) {
-        if (err?.[rethrowToToolRuntime]) throw err;
         const errorText = `Subagent (${params.role}) error: ${err.message || err}`;
         emitFinal([], errorText);
         throw new Error(errorText);

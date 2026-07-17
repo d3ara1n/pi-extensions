@@ -4,7 +4,13 @@
  */
 
 import * as os from "node:os";
-import type { ActivityEntry, SubagentRole, SubagentResult, ToolStatus } from "./types.ts";
+import type {
+  ActivityEntry,
+  SubagentDetails,
+  SubagentRole,
+  SubagentResult,
+  ToolStatus,
+} from "./types.ts";
 
 /** Max output chars fed to the main model and the expanded TUI. Larger outputs are compressed (or truncated) to fit. */
 export const MAX_OUTPUT_CHARS = 50_000;
@@ -192,6 +198,11 @@ export function isFailedResult(r: SubagentResult): boolean {
     r.stopReason === "aborted" ||
     r.stopReason === "timeout"
   );
+}
+
+export function hasFailedSubagentResult(details: unknown): boolean {
+  const d = details as SubagentDetails | undefined;
+  return Array.isArray(d?.results) && d.results.some(isFailedResult);
 }
 
 /** Heuristic: does this result look like a provider-side failure worth retrying on the fallback role? */

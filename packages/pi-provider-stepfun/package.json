@@ -1,0 +1,26 @@
+{
+  "name": "@d3ara1n/pi-provider-stepfun",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "StepFun (阶跃星辰) provider for pi — Step 3.x Flash models via OpenAI-compatible API",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-extension"
+  ],
+  "main": "src/index.ts",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/d3ara1n/pi-extensions",
+    "directory": "packages/pi-provider-stepfun"
+  }
+}

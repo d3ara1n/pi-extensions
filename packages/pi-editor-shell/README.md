@@ -93,5 +93,4 @@ Or add to `~/.pi/agent/settings.json`:
 
 ## Dependencies
 
-- [`@earendil-works/pi-coding-agent`](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
-- [`@earendil-works/pi-tui`](https://www.npmjs.com/package/@earendil-works/pi-tui)
+None.

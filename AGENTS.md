@@ -139,16 +139,16 @@ const roles: ModelRolesAPI = getModelRolesAPI();  // 完整类型推导
 
 ### README 与依赖文档规范
 
-**每个包 README 必须包含 `## Installation` 和 `## Dependencies`。** 即使是纯依赖库扩展（不注册 tool/command，只注册 hook），也要有 Install 段告诉用户如何安装。
+**每个包 README 必须包含 `## Installation` 和 `## Dependencies`。** 即使是只给其他插件消费的基础设施扩展（不注册 tool/command，只注册 hook），也要有 Install 段告诉用户如何加载。
 
 **Extension vs Library 判定：**
 
-- **Extension** — `package.json` 中有 `"pi": { "extensions": [...] }`，注册了 hook/tool/command。**必须**出现在用户 `settings.json` 的 `extensions` 数组里
-- **Library** — 无 `pi.extensions` 入口，仅导出类型/函数供其他插件 import（如 `pi-usage-block-core`）
+- **Extension** — 包含必须由 pi 加载的资源，例如 `pi.extensions`、skills、prompts 或 themes。即使扩展只注册 hook、不直接提供用户命令或工具，也属于 extension，必须由用户显式安装和加载
+- **Library** — 不包含任何 pi 可加载资源，只导出类型、函数或共享状态供其他包 import（如 `pi-usage-block-core`）。它作为普通 npm 依赖自动安装，不需要加入 pi 配置
 
-**npm 依赖 ≠ pi 加载。** npm 的 `dependencies` 只保证包安装到 `node_modules/`，不会让 pi 加载其 extension 入口。如果扩展 A 依赖扩展 B（如 `pi-peek-user` 依赖 `pi-peek`），两者**都必须**在 `settings.json` 的 `extensions` 数组里。
+**npm 依赖 ≠ pi 加载。** npm 的 `dependencies` 会在安装主包时安装到 `node_modules/`，但不会让 pi 加载依赖包声明的 extension/skill/prompt/theme 资源。如果扩展 A 依赖扩展 B（如 `pi-peek-user` 依赖 `pi-peek`），两者**都必须**在 `settings.json` 的 `extensions` 数组里；如果 A 只依赖纯 npm 库 C，则 C 只需在 `dependencies` 和 README 的 Dependencies 中声明。
 
-**主 README 的依赖标注：** Extensions 表格用统一角标（`<sup>†</sup>` / `<sup>‡</sup>`）标记有依赖的行，表后一行解释所有角标含义。
+**主 README 的依赖标注：** Extensions 表格用统一角标（`<sup>†</sup>` / `<sup>‡</sup>`）标记需要用户额外显式安装 extension 依赖的行，表后一行解释所有角标含义。纯 npm 库依赖不需要角标。
 
 **各包 README 的 Dependencies 格式：**
 
@@ -158,7 +158,7 @@ const roles: ModelRolesAPI = getModelRolesAPI();  // 完整类型推导
 - [`@d3ara1n/pi-xxx`](../pi-xxx) — 用途描述
 ```
 
-只列 pi 插件依赖，不列框架级依赖（`pi-ai`、`pi-coding-agent`、`pi-tui` 等随 pi 附带的包）。
+列出本仓库中的直接 `@d3ara1n/pi-*` 依赖，包括必须显式加载的 extension 依赖、由 npm 自动安装的纯库依赖、以及可选集成依赖（需明确标记 optional）。不列框架级 peer dependencies（`pi-ai`、`pi-coding-agent`、`pi-tui`、`typebox` 等随 pi 附带的包）。
 
 **Installation 章节格式固定：**
 
@@ -180,9 +180,10 @@ Or add to `~/.pi/agent/settings.json`:
 ```
 ```
 
-- **依赖插件必须显式列出所有依赖的安装命令**：`pi install` 不会自动安装依赖。如果插件 A 依赖插件 B，README 的 Installation 里必须同时列出 A 和 B 的安装命令。如果 B 还依赖了 C，那么 C 的安装命令也需要包含。此时 A 的安装命令就包含了 C/B/A。
-- **纯库**：README 里写自己的安装命令，但依赖它的插件必须显式声明先装依赖库
-- **可选依赖**：如果依赖是可选的，主包安装命令只写自己，可选依赖单独用文字说明
+- **Extension 依赖**：消费者 README 的 Installation 必须按依赖优先顺序递归列出所有需要 pi 加载的 extension 的 `pi install` 命令；本地路径示例也必须列出这些 extension
+- **纯 npm 库依赖**：只在 Dependencies 中声明，不在消费者的 Installation 中增加独立 `pi install`；安装主包时 npm 会自动安装它，也不要把它加入 `settings.json` 的 `extensions`
+- **纯库自身 README**：Installation 使用 `npm install`，并明确说明它不是 standalone pi extension
+- **可选 extension 依赖**：不放进主安装命令，单独说明如何安装和启用
 
 ### Provider 开发
 

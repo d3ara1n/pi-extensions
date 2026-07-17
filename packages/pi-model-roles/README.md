@@ -16,6 +16,10 @@ must be listed in pi's `extensions` array alongside every consumer so its
 `session_start` hook initializes the shared API. Installing it as an npm
 dependency alone does not load the extension.
 
+## Dependencies
+
+None.
+
 ## Installation
 
 ```bash
@@ -98,6 +102,11 @@ used directly by name (e.g. as `sideAgentRole` in scout config) and resolved via
 | `thinking` | `string` | | `"off"` `"minimal"` `"low"` `"medium"` `"high"` `"xhigh"` |
 | `description` | `string` | | Human-readable description |
 | `hidden` | `boolean` | `false` | Hide from user-facing listings |
+
+## Tools and Commands
+
+- `list_models` — lists available `provider/model-id` values from pi's model registry
+- `/roles` — shows configured roles and their resolved models
 
 ## API (for extension authors)
 

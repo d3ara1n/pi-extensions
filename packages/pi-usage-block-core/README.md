@@ -16,10 +16,10 @@ None.
 ## Installation
 
 ```bash
-pi install npm:@d3ara1n/pi-usage-block-core
+npm install @d3ara1n/pi-usage-block-core
 ```
 
-> This package is a **library**, not a standalone extension. You don't need to install it directly unless you're building a provider or UI plugin. For writing a provider end-to-end, see [`@d3ara1n/pi-usage-block`](../pi-usage-block#building-a-usage-provider).
+> This package is a **library**, not a standalone pi extension. It is installed automatically when used by a provider or UI plugin dependency; install it directly only when building against its API. For writing a provider end-to-end, see [`@d3ara1n/pi-usage-block`](../pi-usage-block#building-a-usage-provider).
 
 ## Types
 

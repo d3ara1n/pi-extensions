@@ -132,6 +132,10 @@ Edit `~/.pi/agent/settings.json`:
 | `/scout:model-router on/off` | Toggle model-router module |
 | `/scout:short-circuit on/off` | Toggle short-circuit module |
 
+## Tools
+
+- `list_skills` — lists every discovered skill with its name and description, including skills not selected for the current turn
+
 ## Performance
 
 Side agent adds ~0.5–2s latency per non-short-circuited turn. The prompt asks the side agent for compact JSON, but the current implementation does not enforce a hard output-token cap; malformed or oversized output is rejected and the main turn continues without applying that decision.

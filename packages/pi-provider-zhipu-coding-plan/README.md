@@ -4,17 +4,17 @@ Zhipu AI Coding Plan provider for [Pi Coding Agent](https://pi.dev) — ships a 
 
 ## Features
 
-- **Usage quota reporting** — displays token usage percentage and reset countdown in the status bar
+- **Usage quota reporting** — registers token usage percentage and reset countdown data for display plugins
 - **No manual config** — reads API key from `~/.pi/agent/auth.json` (set via `/login`)
 
 ## Dependencies
 
-- [`@d3ara1n/pi-usage-block-core`](../pi-usage-block-core) — registers the Zhipu quota provider
+- [`@d3ara1n/pi-usage-block-core`](../pi-usage-block-core) — shared usage types and registry for quota reporting
+- [`@d3ara1n/pi-usage-block`](../pi-usage-block) — optional, displays the registered quota in the status bar
 
 ## Installation
 
 ```bash
-pi install npm:@d3ara1n/pi-usage-block-core
 pi install npm:@d3ara1n/pi-provider-zhipu-coding-plan
 ```
 
@@ -46,7 +46,7 @@ Or manually add to `~/.pi/agent/auth.json`:
 
 ## Models
 
-Supported models span the GLM-4.5 through GLM-5.2 series (text only). Model metadata (context window, max tokens, compatibility flags) is maintained statically in `KNOWN_MODELS`.
+Supported models span the GLM-4.5 through GLM-5.2 series, including `glm-5v-turbo` with image input. Model metadata (context window, max tokens, compatibility flags) is maintained statically in `KNOWN_MODELS`.
 
 ## Compatibility Notes
 

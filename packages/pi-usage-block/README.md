@@ -11,6 +11,7 @@ Only shows usage when the active model's provider has a matching usage provider 
 
 ## Dependencies
 
+- [`@d3ara1n/pi-usage-block-core`](../pi-usage-block-core) — shared usage types and registry
 - [`@d3ara1n/pi-editor-shell`](../pi-editor-shell) — optional, for editor shell pinned status integration
 
 ## Installation
@@ -171,7 +172,7 @@ A usage provider is a plugin that registers itself with the shared `usageRegistr
 ```json
 {
   "dependencies": {
-    "@d3ara1n/pi-usage-block-core": "^3.0.0"
+    "@d3ara1n/pi-usage-block-core": "^3.1.0"
   }
 }
 ```

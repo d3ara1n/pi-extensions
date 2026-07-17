@@ -47,6 +47,12 @@ This means:
 - **Collapsed result**: `✓ explorer · Found login, registration, and token logic` + recent tool calls + usage stats
 - **Expanded result** (Ctrl+O): Full task text, all tool calls, final output as rendered Markdown, and usage details
 
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `/subagent:doctor` | Diagnose pi invocation, model-role resolution, configuration, and role references |
+
 ## Dependencies
 
 - [`@d3ara1n/pi-model-roles`](../pi-model-roles) — model role resolution

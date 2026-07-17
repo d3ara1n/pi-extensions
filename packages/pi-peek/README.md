@@ -1,8 +1,8 @@
 # @d3ara1n/pi-peek
 
-Core capability library for [pi](https://github.com/earendil-works/pi) — serialize the main conversation and answer questions about it via the utility model, read-after-burn.
+Core capability extension for [pi](https://github.com/earendil-works/pi) — serialize the main conversation and answer questions about it via the utility model, read-after-burn.
 
-**Pure library**: registers tracker hooks but **no tools, no commands**. It is consumed by [`pi-peek-user`](../pi-peek-user) (local `/peek` overlay) and [`pi-peek-agent`](../pi-peek-agent) (cross-instance mesh). Installing this alone does nothing user-visible.
+**Core extension**: registers tracker hooks but **no tools, no commands**. It is consumed by [`pi-peek-user`](../pi-peek-user) (local `/peek` overlay) and [`pi-peek-agent`](../pi-peek-agent) (cross-instance mesh). Installing this alone does nothing user-visible, but it must be loaded for consumers to work.
 
 ## What it does
 

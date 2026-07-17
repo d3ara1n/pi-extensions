@@ -63,7 +63,7 @@ export interface BalanceInfo {
 export interface QuotaProvider {
   /** Discriminator — always `"quota"`. */
   kind: "quota";
-  /** Unique identifier — must match the pi provider key, e.g. "zhipu-coding" */
+  /** Unique identifier — must match the pi provider key, e.g. "openai" */
   id: string;
   /** Display name, e.g. "Zhipu Coding Plan" */
   name: string;

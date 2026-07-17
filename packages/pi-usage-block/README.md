@@ -30,7 +30,7 @@ Or add to `~/.pi/agent/settings.json`:
 }
 ```
 
-Works out of the box for the bundled providers below. For other providers, install a matching usage provider plugin (e.g. `@d3ara1n/pi-provider-zhipu-coding-plan`).
+Works out of the box for the bundled providers below. For other providers, see [Building a Usage Provider](#building-a-usage-provider).
 
 ## Bundled providers
 
@@ -46,6 +46,8 @@ The following pi providers are supported out of the box — no extra plugin need
 | OpenRouter | balance $ | `GET openrouter.ai/api/v1/credits` |
 | DeepSeek | balance $ | `GET api.deepseek.com/user/balance` |
 | OpenCode Go | dollar quota % | `GET opencode.ai/zen/go/v1/usage` |
+| Z.AI | quota % | `GET api.z.ai/api/monitor/usage/quota/limit` |
+| Z.AI Coding CN | quota % | `GET open.bigmodel.cn/api/monitor/usage/quota/limit` |
 
 > **Not supported:** Google Gemini and Mistral don't surface response headers in pi's call path. Groq's rate-limit headers are undocumented/unstable, and Fireworks only exposes limit (no remaining/reset).
 
@@ -155,7 +157,7 @@ The active provider is marked with `*(active)*`.
 ```
 **Usage — all providers**
 
-Zhipu Coding Plan *(active)* (api)      🟢 43% ↺3h34m
+Z.AI *(active)* (api)                    🟢 43% ↺3h34m
 OpenAI (headers)                         🔴 89% ↺1h
 Anthropic (headers)                      —
 DeepSeek (api)                           🟢 $32.50
@@ -183,10 +185,10 @@ The usage provider's `id` **must match** the pi provider key (the first argument
 
 ```ts
 // pi provider registration — this key is the shared identity
-pi.registerProvider("zhipu-coding", { ... });
+pi.registerProvider("my-provider", { ... });
 
 // usage provider registration — same key
-usageRegistry.register({ kind: "quota", id: "zhipu-coding", ... });
+usageRegistry.register({ kind: "quota", id: "my-provider", ... });
 ```
 
 This is how `pi-usage-block` knows which usage data belongs to the active provider.

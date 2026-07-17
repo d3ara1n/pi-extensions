@@ -10,8 +10,10 @@
  *   response headers. Each provider's reset format differs (Go duration,
  *   RFC 3339, epoch seconds, remaining seconds), which is exactly why parsing
  *   is per-provider code rather than a declarative mapping.
- * - balance (OpenRouter / DeepSeek): poll a prepaid balance endpoint using the
- *   provider's own API key (resolved via modelRegistry.getApiKeyForProvider).
+ * - api polling — using the provider's own API key (resolved via
+ *   modelRegistry.getApiKeyForProvider):
+ *   - balance (OpenRouter / DeepSeek): prepaid account balance endpoint
+ *   - quota (OpenCode Go, Z.AI / Z.AI Coding CN): coding-plan quota endpoint
  */
 import type {
   UsageProvider,
@@ -164,9 +166,24 @@ async function getDispatcher(): Promise<any> {
   return dispatcher;
 }
 
-async function fetchJson(url: string, apiKey: string): Promise<any> {
+/**
+ * Fetch JSON from a provider endpoint.
+ * `auth: "raw"` sends the API key verbatim (no `Bearer ` prefix) — needed by
+ * Zhipu/Z.AI's internal monitor API, which is not a standard OpenAI-style
+ * endpoint and rejects Bearer auth.
+ */
+async function fetchJson(
+  url: string,
+  apiKey: string,
+  auth: "bearer" | "raw" = "bearer",
+): Promise<any> {
   const d = await getDispatcher();
-  const opts: any = { headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" } };
+  const opts: any = {
+    headers: {
+      Authorization: auth === "raw" ? apiKey : `Bearer ${apiKey}`,
+      Accept: "application/json",
+    },
+  };
   if (d) opts.dispatcher = d;
   const res = await fetch(url, opts);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -212,6 +229,34 @@ async function opencodeGoUsage(apiKey: string): Promise<QuotaWindow[]> {
     });
   }
   return windows;
+}
+
+/**
+ * Zhipu / Z.AI coding plan: GET {host}/api/monitor/usage/quota/limit.
+ *
+ * Polls the subscription-UI's internal quota endpoint (undocumented but
+ * stable; used by z.ai/bigmodel.cn's own dashboards). Returns one
+ * {@link QuotaWindow} per TOKENS_LIMIT — a 5h rolling window, and on Pro
+ * plans a weekly one too. `percentage` is consumed-as-% (so limit=100);
+ * `nextResetTime` is epoch milliseconds. Auth is the raw API key.
+ *
+ * `host` is `https://api.z.ai` (international, provider "zai") or
+ * `https://open.bigmodel.cn` (China mainland, provider "zai-coding-cn").
+ */
+async function zhipuCodingQuota(host: string, apiKey: string): Promise<QuotaWindow[]> {
+  const data = await fetchJson(`${host}/api/monitor/usage/quota/limit`, apiKey, "raw");
+  const limits = data?.data?.limits;
+  if (!Array.isArray(limits)) return [];
+  return limits
+    .filter((l: any) => l?.type === "TOKENS_LIMIT" && typeof l.percentage === "number")
+    .map((l: any) => ({
+      // unit 3 = hours (5h window); weekly windows use a different unit.
+      period: l.number && l.unit ? `${l.number}${l.unit === 3 ? "h" : "w"}` : "",
+      used: l.percentage,
+      limit: 100,
+      unit: "tokens" as const,
+      resetAt: l.nextResetTime ? new Date(l.nextResetTime) : undefined,
+    }));
 }
 
 // ── Registry of built-in definitions ──────────────────────────────────────
@@ -282,6 +327,20 @@ export const BUILTIN_PROVIDERS: BuiltinDef[] = [
     build: ({ apiKey }) => ({
       kind: "quota", id: "opencode-go", name: "OpenCode Go", source: "api",
       fetchUsage: () => opencodeGoUsage(apiKey),
+    }),
+  },
+  {
+    id: "zai",
+    build: ({ apiKey }) => ({
+      kind: "quota", id: "zai", name: "Z.AI", source: "api",
+      fetchUsage: () => zhipuCodingQuota("https://api.z.ai", apiKey),
+    }),
+  },
+  {
+    id: "zai-coding-cn",
+    build: ({ apiKey }) => ({
+      kind: "quota", id: "zai-coding-cn", name: "Z.AI Coding CN", source: "api",
+      fetchUsage: () => zhipuCodingQuota("https://open.bigmodel.cn", apiKey),
     }),
   },
 ];

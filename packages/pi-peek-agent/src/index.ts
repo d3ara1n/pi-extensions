@@ -36,128 +36,26 @@ export type {
 // the same session always gets the same name. ~3600 distinct combos:
 // birthday-paradox collision only beyond ~70 sessions.
 const ADJECTIVES = [
-  "Swift",
-  "Calm",
-  "Bold",
-  "Quiet",
-  "Bright",
-  "Lone",
-  "Keen",
-  "Merry",
-  "Brisk",
-  "Steady",
-  "Frost",
-  "Sunny",
-  "Dark",
-  "Wild",
-  "Wise",
-  "Vivid",
-  "Amber",
-  "Jade",
-  "Onyx",
-  "Coral",
-  "Azure",
-  "Ruby",
-  "Indigo",
-  "Olive",
-  "Crisp",
-  "Warm",
-  "Cool",
-  "Sharp",
-  "Soft",
-  "Deep",
-  "High",
-  "Still",
-  "Lunar",
-  "Solar",
-  "Cosmic",
-  "Misty",
-  "Clear",
-  "Rapid",
-  "Slow",
-  "Gold",
-  "Silver",
-  "Bronze",
-  "Iron",
-  "Steel",
-  "Glass",
-  "Stone",
-  "Mossy",
-  "Sandy",
-  "Stormy",
-  "Fair",
-  "Pale",
-  "Rich",
-  "Pure",
-  "Vast",
-  "Dry",
-  "Wet",
-  "Grand",
-  "Prime",
-  "Noble",
-  "Mellow",
+	"Amber", "Azure", "Bold", "Brave", "Bright", "Brisk", "Bronze", "Calm",
+	"Clear", "Cool", "Coral", "Cosmic", "Crisp", "Dark", "Deep", "Dry",
+	"Fair", "Fierce", "Fresh", "Frost", "Glass", "Gold", "Grand", "Hard",
+	"High", "Indigo", "Iron", "Jade", "Keen", "Lone", "Lunar", "Mellow",
+	"Merry", "Misty", "Mossy", "Neon", "Noble", "Olive", "Onyx", "Pale",
+	"Prime", "Pure", "Quiet", "Rapid", "Rich", "Ruby", "Sandy", "Sharp",
+	"Silver", "Slow", "Soft", "Solar", "Steady", "Steel", "Still", "Stone",
+	"Stormy", "Sunny", "Swift", "Vast", "Vivid", "Warm", "Wet", "Wild",
+	"Wise",
 ];
 const NOUNS = [
-  "Fox",
-  "Badger",
-  "Hare",
-  "Otter",
-  "Falcon",
-  "Heron",
-  "Lynx",
-  "Magpie",
-  "Newt",
-  "Owl",
-  "Pika",
-  "Raven",
-  "Stoat",
-  "Wren",
-  "Robin",
-  "Finch",
-  "Pine",
-  "Birch",
-  "Cedar",
-  "Maple",
-  "Elm",
-  "Ash",
-  "Reed",
-  "Fern",
-  "Wolf",
-  "Bear",
-  "Hawk",
-  "Doe",
-  "Seal",
-  "Crane",
-  "Moth",
-  "Bee",
-  "Oak",
-  "Willow",
-  "Aspen",
-  "Spruce",
-  "Laurel",
-  "Iris",
-  "Lotus",
-  "Flax",
-  "Tide",
-  "Gale",
-  "Meadow",
-  "Grove",
-  "Crag",
-  "Marsh",
-  "Ridge",
-  "Dune",
-  "Creek",
-  "Pond",
-  "River",
-  "Cliff",
-  "Peak",
-  "Vale",
-  "Glen",
-  "Brook",
-  "Orchid",
-  "Clover",
-  "Sage",
-  "Juniper",
+	"Ash", "Aspen", "Badger", "Bear", "Bee", "Birch", "Brook", "Cedar",
+	"Cliff", "Clover", "Crag", "Crane", "Creek", "Dick", "Doe", "Dune",
+	"Elm", "Falcon", "Fern", "Finch", "Flax", "Fox", "Gale", "Glen",
+	"Grove", "Hare", "Hawk", "Heron", "Holly", "Iris", "Juniper", "Lark",
+	"Laurel", "Lotus", "Lynx", "Magpie", "Maple", "Marsh", "Meadow", "Moth",
+	"Newt", "Oak", "Orchid", "Otter", "Owl", "Peak", "Pika", "Pine",
+	"Pond", "Pussy", "Raven", "Reed", "Ridge", "River", "Robin", "Sage",
+	"Seal", "Spruce", "Stoat", "Thyme", "Tide", "Vale", "Willow", "Wolf",
+	"Wren",
 ];
 
 /**
@@ -362,5 +260,72 @@ export default function registerPeekAgentExtension(pi: ExtensionAPI): void {
     activeRegistryDir = null;
   });
 
-  registerPeekTools(pi);
+	// ── /peek-agent:rename ── overrides the display name at runtime ────
+	pi.registerCommand("peek-agent:rename", {
+		description: "Rename this peek-agent instance (overrides hash-derived name)",
+		handler: async (argsStr, ctx) => {
+			const newName = (argsStr ?? "").trim();
+			if (!newName) {
+				ctx.ui.notify("Usage: /peek-agent:rename <new-name>", "warning");
+				return;
+			}
+			const api = tryGetPeekAgentAPI();
+			if (!api) {
+				ctx.ui.notify("peek-agent not initialized yet", "error");
+				return;
+			}
+			api.setName(newName);
+			const count = await api.countPeers();
+			const theme = ctx.ui.theme;
+			if (theme) {
+				ctx.ui.setStatus("peek-agent",
+					`${theme.fg("dim", "peek")} ${theme.fg("accent", newName)} ${theme.fg("success", `(${count})`)}`);
+			}
+			ctx.ui.notify(`peek-agent renamed to ${newName}`, "info");
+		},
+	});
+
+	// ── /peek-agent:status ── debug: show self info + peer list ────────
+	pi.registerCommand("peek-agent:status", {
+		description: "Show peek-agent status: self info, registry dir, and online peers",
+		handler: async (_argsStr, ctx) => {
+			const api = tryGetPeekAgentAPI();
+			if (!api) {
+				ctx.ui.notify("peek-agent not initialized yet", "error");
+				return;
+			}
+			const self = api.getSelfInfo();
+			const peers = await api.listPeers();
+			const cfg = loadAgentConfig(ctx.cwd);
+
+			const lines = [
+				`peek-agent        ${self.name}`,
+				`session id        ${self.sessionId}`,
+				`pid               ${self.pid}`,
+				`socket            ${self.sockPath}`,
+				`model             ${self.model}`,
+				`cwd               ${self.cwd}`,
+				`git branch        ${self.gitBranch ?? "(none)"}`,
+				`since             ${self.since}`,
+				`last seen         ${self.lastSeen}`,
+				`status            ${self.status?.activity ?? "idle"}`,
+				`registry dir      ${resolveRegistryDir(cfg.registryDir)}`,
+				``,
+				`peers             ${peers.length} online`,
+			];
+
+			for (const p of peers) {
+				const branch = p.gitBranch ? ` (${p.gitBranch})` : "";
+				const act = p.status?.activity ? ` · ${p.status.activity}` : "";
+				const ambig = p.ambiguous ? " ⚠" : "";
+				const isSelf = p.sessionId === self.sessionId ? " ← self" : "";
+				lines.push(`  ${p.name}${branch}${act}${ambig}${isSelf}`);
+				lines.push(`    ${p.cwd}`);
+			}
+
+			ctx.ui.notify(lines.join("\n"), "info");
+		},
+	});
+
+	registerPeekTools(pi);
 }

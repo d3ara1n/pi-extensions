@@ -296,3 +296,22 @@ export function posixUnder(posixTarget: string, posixRoot: string): boolean {
 
 - `pi-access-denied` 的 `posixUnder` — `underRoot` 的内部实现，仅测试单独验证 → `@internal`
 - `pi-context-include` 的 `extractReferences` — 生产代码也调用，但消费者不应直接使用 → `@internal`
+
+### 跨 workspace 包依赖必须用 `"*"`，不能用 `workspace:*` 或 `^x.y.z`
+
+npm **从未实现** `workspace:` 协议（npm/cli#8845，文档写了但解析器不支持），`^x.y.z` 会触发 registry lookup 导致每次 `npm install` 后 lockfile 版号抖动。
+
+**正确做法**：本仓库的跨包依赖统一写 `"*"`，npm workspaces 按包名本地 resolve，不查 registry。
+
+```jsonc
+// ✅ 正确
+{ "dependencies": { "@d3ara1n/pi-model-roles": "*" } }
+
+// ❌ 错误 — npm 直接报 EUNSUPPORTEDPROTOCOL
+{ "dependencies": { "@d3ara1n/pi-model-roles": "workspace:*" } }
+
+// ❌ 错误 — lockfile 抖动
+{ "dependencies": { "@d3ara1n/pi-model-roles": "^0.1.0" } }
+```
+
+**新建包时必须遵循此规则**，否则回归 lockfile 抖动问题。

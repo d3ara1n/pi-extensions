@@ -137,6 +137,8 @@ export interface PeekAgentAPI {
   askPeer(peer: PeerInfo, question: string, opts?: AskPeerOptions): Promise<string>;
   /** Count of live peers (for the statusbar widget). */
   countPeers(): Promise<number>;
+  /** Override the display name (updates self + widget + registry). */
+  setName(name: string): void;
 }
 
 /** Global key for the PeekAgentAPI singleton. */

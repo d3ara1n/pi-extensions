@@ -40,6 +40,10 @@ export function initPeekAgentAPI(deps: PeekAgentDeps): PeekAgentAPI {
       state.self.model = modelId;
     },
 
+    setName(name: string): void {
+      state.self.name = name || state.self.name;
+    },
+
     getSelfInfo(): PeerInfo {
       // Fresh tracker snapshot on every read (status changes continuously).
       let status;

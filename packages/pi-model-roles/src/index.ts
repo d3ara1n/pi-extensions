@@ -6,9 +6,17 @@
  * and keep the singleton current.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { keyHint, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { initModelRolesAPI, getModelRolesAPI, updateCurrentModel } from "./api.ts";
+
+/** How many model IDs to show in the collapsed tool result before truncating. */
+const COLLAPSED_PREVIEW = 3;
+
+interface ListModelsDetails {
+  models: string[];
+}
 
 export { getModelRolesAPI } from "./api.ts";
 export type {
@@ -47,9 +55,27 @@ export default function registerModelRolesExtension(pi: ExtensionAPI): void {
       const api = getModelRolesAPI();
       const models = api.listModels();
       return {
+        // Full list sent to the LLM — UI truncation is purely cosmetic.
         content: [{ type: "text", text: models.join("\n") }],
-        details: undefined as any,
+        details: { models } satisfies ListModelsDetails,
       };
+    },
+    renderResult(result, { expanded }, theme) {
+      const details = result.details as ListModelsDetails | undefined;
+      const models = details?.models ?? [];
+      const count = models.length;
+
+      const shown = expanded ? models : models.slice(0, COLLAPSED_PREVIEW);
+      const omitted = count - shown.length;
+
+      let text = theme.fg("success", `${count} models`);
+      for (const m of shown) {
+        text += `\n  ${theme.fg("dim", m)}`;
+      }
+      if (omitted > 0) {
+        text += `\n  ${theme.fg("muted", `… +${omitted} more (${keyHint("app.tools.expand", "expand")})`)}`;
+      }
+      return new Text(text, 0, 0);
     },
   });
 

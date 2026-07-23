@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-peek-agent",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "type": "module",
   "description": "Cross-instance peek for pi — UDS mesh + peer discovery + LLM tools (peek, peek_list) for agent-to-agent coordination",
   "main": "src/index.ts",

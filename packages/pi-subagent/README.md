@@ -41,13 +41,13 @@ Observations on how main models behave with this plugin, one family per subsecti
 | Role | Model Role | Timeout | Tools | Can Delegate To | Description |
 |------|-----------|---------|-------|-----------------|-------------|
 | `explorer` | fast | 900s | read, find, grep, bash | — | Fast code exploration incl. git history inspection (read-only) |
-| `reviewer` | heavy | 3600s | read, bash, grep, find | — | Deep code review, runs git/tests for evidence (read-only) |
+| `reviewer` | heavy | 3600s | read, bash, grep, find, subagent_delegate | explorer, researcher | Deep code review, runs git/tests for evidence (read-only); delegates exploration & web verification |
 | `worker` | default | 2400s | all (no whitelist) | explorer, researcher | Implementation — the only role that can modify files; full tool access (web, MCP, everything) |
-| `researcher` | fast | 2400s | web_search, fetch_content, source_check, get_search_content, read, bash, edit, write, delegate | explorer | Web research + GitHub repo analysis; writes artifacts only inside its temp dir |
+| `researcher` | fast | 2400s | web_search, fetch_content, source_check, get_search_content, read, bash, edit, write, subagent_delegate | explorer | Web research + GitHub repo analysis; writes artifacts only inside its temp dir |
 
 **Web tool naming**: `researcher`'s web tools use the community-standard names (`web_search`, `fetch_content`, `source_check`, `get_search_content`) shared by the most popular Pi web extensions — [pi-web-access](https://github.com/nicobailon/pi-web-access), `pi-web-tools`, `pi-browse`, and others. Install any of those and the researcher gets web access out of the box. If your web extension uses different tool names (e.g. `websearch`/`webfetch`) or you renamed the tools via a `toolNames` config, override `researcher.tools` in `agentOverrides` to match.
 
-**Nested delegation**: `worker` and `researcher` can spawn their own subagents. This keeps the main model's context clean — a worker can explore unfamiliar code via an `explorer` subagent without returning intermediate results to the main model.
+**Nested delegation**: `worker`, `reviewer`, and `researcher` can spawn their own subagents. This keeps the caller's context clean — a worker can explore unfamiliar code via an `explorer` subagent without returning intermediate results, and a reviewer can verify third-party library behavior via a `researcher` subagent without leaving the diff.
 
 **Parallel execution**: To run multiple subagents concurrently, emit multiple `subagent_delegate` calls in a single turn. Pi's framework executes them in parallel automatically, with each subagent getting its own TUI progress display.
 
@@ -172,7 +172,7 @@ Override, disable, or add subagent roles via `agentOverrides`. Built-in and cust
 
 Configuring both on the same role is an error — the role is skipped with an error notification at session start.
 
-**Optional fields:** `subagentRoles` (roles this role can spawn via delegate), `timeout` (per-role active-time timeout in seconds; unset or `0` is unlimited, negative values normalize to `0`), `maxTurns` / `maxCost` (per-role budget overrides; unset uses the top-level `maxTurns` / `maxCost` setting, `0` is unlimited, negative values normalize to `0`), `fallbackRole` (backup pi-model-roles role the whole run is retried on after a provider error; unset means no retry — see [Fallback observability](#fallback-observability)).
+**Optional fields:** `subagentRoles` (roles this role can spawn via delegate; absent means any available role, mirroring the `tools` default — declare it explicitly when a restricted role grants `subagent_delegate`), `timeout` (per-role active-time timeout in seconds; unset or `0` is unlimited, negative values normalize to `0`), `maxTurns` / `maxCost` (per-role budget overrides; unset uses the top-level `maxTurns` / `maxCost` setting, `0` is unlimited, negative values normalize to `0`), `fallbackRole` (backup pi-model-roles role the whole run is retried on after a provider error; unset means no retry — see [Fallback observability](#fallback-observability)).
 
 Invalid custom roles (missing required fields) are skipped with an error notification at session start.
 

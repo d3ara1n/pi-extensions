@@ -134,6 +134,8 @@ Timeouts are defined per role. Built-in defaults are `explorer: 900`, `reviewer:
 
 Override, disable, or add subagent roles via `agentOverrides`. Built-in and custom roles are treated equally — all descriptions, examples, and decision triggers feed into the LLM's prompt dynamically.
 
+The built-in roles are defined in [`src/roles.ts`](src/roles.ts) — read them as reference templates when overriding. Each entry shows the exact shape and wording of every field (`role`, `description`, `examples`, `decisionTrigger`, `tools`/`subagentRoles`, `systemPrompt`, `timeout`, `fallbackRole`), so you can copy the built-in closest to what you want, paste it under `agentOverrides`, and adjust from a known-good starting point rather than writing a role from scratch.
+
 ```json
 {
   "subagent": {

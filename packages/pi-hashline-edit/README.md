@@ -42,6 +42,10 @@ Hashline replaces the edit protocol the main model was trained on, so real-world
 
 **The intended pairing.** Strong and follows the schema as given (tested: GLM 5.2): the occasional not-found / whitespace friction of built-in string-replace disappears — 100% in testing. Capable models never needed the wording in the first place: GLM used `insert_after` correctly even when the tool description didn't explain the op at all. The mismatch lives in the model, not the tool.
 
+### GPT family
+
+**No reservations.** Structured ops are home turf for this family (tested: GPT 5.6 sol/terra/luna): no fabricated or mistyped anchors observed, and `insert_after` was never misused — the anchor-line-into-`body` duplication (see DeepSeek above) never occurred. The few rejected anchors were the *expected* kind: a size-changing `edit` invalidating the hashes of the lines below it between edits — the documented hash-drift tradeoff rather than a model error, and exactly what the self-healing rescan exists to rescue. Even those ran fewer than expected; small-sample observation, take it directionally.
+
 ## Gotchas (vs. the built-in `read`/`edit`)
 
 Once hashline overrides the built-ins, a few things behave differently:

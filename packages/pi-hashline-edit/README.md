@@ -71,6 +71,65 @@ A separate, location-blind tool for transforms `edit` can't express: replace **a
 - **Chain edits without re-reading**: a successful `edit` returns `Updated anchors` for the lines it produced (and the line that shifted into a deletion gap), so the next edit can cite them directly.
 - **No legacy compatibility on `edit`**: `edit` accepts only structured hashline ops; sending legacy `oldText`/`newText` is rejected at the schema layer (never silently degrades) — so you always know whether hashline is actually in use. Bulk/regex replacement is a *separate* tool, `replace`, not an `edit` mode (see below).
 
+## Why line hashes, not file tags
+
+### The short version
+
+This plugin is a line-hash editor: every line comes back tagged with a content hash that folds in its line number, and you edit by citing that `LINE#HASH`. That is, deliberately, the *original* hashline idea — the one omp shipped in February 2026 and then walked away from. omp's current engine anchors on a **whole-file** hash instead, and has since mid-2026. I looked at that route and stayed on the line-hash one on purpose. What follows is my case for that choice, stated as a tradeoff rather than a verdict — the honest limitations, including the ones that argue for the other route, come right after.
+
+### Where this comes from
+
+The idea that a model should edit by pointing at a **stable, verifiable anchor** instead of retyping code it already saw is not mine — it is can1357's, argued in [*The Harness Problem*](https://blog.can.ac/2026/02/12/the-harness-problem/) (2026-02-12), and omp's first implementation was exactly this shape: every read line tagged with a short per-line content hash, edits expressed as structured `old`/`new` ops. That first design had a real problem, and omp and I fixed it in opposite directions.
+
+**Identical lines collide.** A per-line *content* hash gives every `}`, every `)`, every blank line the same hash — and a hash that is not unique is not an anchor. omp's fix was to stop hashing lines and hash the **whole file** instead: a 4-hex file tag, with no per-line hash in `read` output at all. My fix was to fold the line number into each line's hash, so two identical lines at different positions can never share one — unique by construction, no file-level state required.
+
+That single divergence cascades into everything else. (It also means the picture most people have of "hashline" is the line-hash one: omp's own docs site still describes per-line anchors that its current implementation no longer emits.)
+
+### The case against the file-tag route
+
+I can't speak to omp's motives for the switch — collision-proofing a per-line hash is hard, and the file tag sidesteps it entirely. But the clearest *payoff* I see in a whole-file tag is one my design gives up: **awareness of edits made by anyone else.** If another process touches the file, its whole-file tag changes, the next anchored edit is rejected, and the model is forced to re-read fresh state. For a swarm of agents editing one tree, that is a genuinely good property. It costs three things I wasn't willing to pay:
+
+- **The tag can't tell whether the model actually *read* a line.** A whole-file hash proves the file is byte-for-byte what it was — not that the model ever saw the specific line it is now rewriting. To stop hallucinated edits on never-displayed lines, omp carries a separate `seenLines` guard alongside the tag. A per-line hash *is* the proof of having-seen: you cannot cite `LINE#HASH` without having read that line's content. No side array needed.
+- **It needs out-of-band state.** A 16-bit file tag "is not meaningful outside that store" (omp's own words) — it can collide, so omp keeps a `SnapshotStore`, an LRU of recent file versions, to disambiguate. My hashes are content-derived and self-contained: an anchor is verified by rehashing the current line at that number, at apply time, against nothing but the file on disk. **This plugin has no SnapshotStore, no seenLines array, nothing to keep in sync.** That is the point, not an omission.
+- **The verification is coarse.** A whole-file tag couples every edit to the entire file: an unrelated change *anywhere* invalidates the tag and drags the whole patch through recovery. Line hashes verify only the lines you cite — an unrelated edit elsewhere never blocks you.
+
+### Why a JSON schema, not a text DSL
+
+The other visible difference: omp delivers edits as a **text patch language** (`PUT`/`CUT`/`REM`/`MV` today, `SWAP`/`DEL`/`INS` before that, JSON before *that*). This plugin uses **structured JSON ops**. Two reasons:
+
+- **Validation belongs to the tool, not the model.** A JSON schema rejects a malformed op at the parameter layer before any logic runs. A text DSL puts the burden of emitting exactly-correct syntax back on the model, and the error rate is high enough that the DSL route accretes layer after layer of lenient parsing and heuristic repair to compensate — omp has shipped both, including a documented incident where the repair silently dropped content. The whole reason to anchor by hash was to stop depending on the model reproducing text perfectly; a hand-written DSL quietly reintroduces that dependency on the other side of the call.
+- **The token savings aren't worth it.** A DSL saves a handful of structural characters per op. Against a higher malformed-edit rate and the cost of format churn — omp's patch syntax has broken compatibly five-plus times, stranding third-party ports on dead dialects — that saving is noise.
+
+### Compared by capability
+
+Not by version: omp's later generations refine the same whole-file-tag core, so the real comparison is *line-hash route* vs *file-tag route*.
+
+| Capability | This plugin (line-hash) | omp (file-tag) |
+|---|---|---|
+| Anchor identity | per-line `LINE#HASH`, line number folded in | whole-file 4-hex `#TAG`, bare line numbers |
+| Identical-line collisions | impossible by construction | n/a (no per-line hash); the file tag itself can collide in 16 bits |
+| Out-of-band state | **none** | `SnapshotStore` (LRU) + `seenLines` guard |
+| "Did the model read this line?" | proven by the anchor itself | needs the separate `seenLines` array |
+| Verification granularity | only the cited lines (surgical) | whole file — any drift enters recovery |
+| Concurrent external edits | not a goal; re-read to proceed | detected by design — tag change forces a re-read |
+| Wire format | JSON schema ops | text patch DSL |
+| Malformed edits | rejected at the schema layer | lenient parsing + heuristic repair |
+| Format stability | one schema | ≥5 breaking format generations |
+| Drift recovery | ±15-line rescan → fresh anchor, else re-read | line-remap replay, fail-closed |
+| Expressiveness | fine-grained ops + separate `replace` | syntax blocks, cross-file registers, `REM`/`MV` |
+| Read-time token cost | 2–4 chars per line | none at read time; cost moves to mismatch output |
+
+### Honest limitations
+
+Including the ones that argue *for* the route I didn't take.
+
+- **Hash drift after an edit.** Because the line number is part of the hash, inserting or deleting lines changes every subsequent line's hash. A successful edit hands back fresh anchors for the region it just produced, and the ±15-line rescan rescues nearby drift — but to cite lines well below a size-changing edit, you re-read. That is the price of stateless verification: I keep no snapshot that would track those shifts for you. I consider it a fair trade for having no out-of-band state to corrupt or resync; a clean core matters more to me than saving a read.
+- **No multi-agent story.** If several agents edit one tree, the file-tag route's external-edit detection is a real advantage this design does not have.
+- **Hash transcription is itself error-prone.** Anchoring assumes the model copies the hash verbatim. It doesn't always: *"It sees `483:d4` in the input, writes `483:3a` in the output. Every model does this, including Opus."* ([geometricagi, *AST Edits*](https://geometricagi.github.io/2026/04/02/ast-edits.html), 2026-04-02). This is a failure class the built-in string-replace does not have — see Model Compatibility above; on a model that hasn't internalized anchor discipline, turn the plugin off rather than fight it.
+- **The edit format may not be your bottleneck at all.** An independent benchmark ([nwyin, *edit-bench*](https://nwyin.com/blogs/hashline-vs-replace-edit-bench.html)) found the hashline-vs-replace delta to be language-dependent — a real penalty on Python, neutral on TypeScript, a wash on Rust — and concluded that *"edit format is not the bottleneck"*: model-to-model differences dwarf format-to-format ones. It also found that the whitespace near-miss anchoring is meant to kill barely occurs — fuzzy matching triggered 0 times across 114 successful edits.
+- **A silent success is worse than a loud failure.** Any anchor scheme is only as safe as its implementation. opencode's early hashline port returned `Updated` while writing to the wrong line ([issue #15424](https://github.com/anomalyco/opencode/issues/15424)) — a buggy anchor check manufactures false trust. This plugin's recovery is built to fail closed and hand back live content instead of guessing, but the warning generalizes.
+- **Model dependence is real and not universally in my favor.** omp routes kimi, mimo, deepseek-v4-flash and step-3.7-flash *away* from hashline by default (they miscount anchors or drop the tag header). My own field notes agree on Kimi and disagree on DeepSeek — same model, opposite conclusions in different environments. There is no globally best edit format; there is a model × task × implementation triple.
+
 ## Protocol
 
 `read` output (each line anchored):

@@ -74,8 +74,12 @@ const DEFAULT_ICONS: EditorShellIcons = {
  *  full pi-ai message union tree. */
 interface UsageSnap {
   input?: number;
+  output?: number;
   cacheRead?: number;
   cacheWrite?: number;
+  cost?: {
+    total?: number;
+  };
 }
 interface MsgSnap {
   role: string;
@@ -84,6 +88,7 @@ interface MsgSnap {
 interface EntrySnap {
   type: string;
   message?: MsgSnap;
+  usage?: UsageSnap;
 }
 
 /** Sum cache-related usage across all assistant messages on the session.
@@ -100,6 +105,25 @@ function sumSessionUsage(ctx: { sessionManager: { getEntries(): unknown[] } }): 
     cacheWrite += e.message.usage.cacheWrite ?? 0;
   }
   return { input, cacheRead, cacheWrite };
+}
+
+/** Sum billable usage across the full session, matching pi's built-in footer:
+ *  assistant responses, usage-bearing tool results, compactions, and branch
+ *  summaries. Providers without configured pricing report zero cost. */
+function sumSessionCost(ctx: { sessionManager: { getEntries(): unknown[] } }): number {
+  let total = 0;
+  for (const entry of ctx.sessionManager.getEntries()) {
+    const e = entry as EntrySnap;
+    let usage: UsageSnap | undefined;
+    if (e.type === "message" && (e.message?.role === "assistant" || e.message?.role === "toolResult")) {
+      usage = e.message.usage;
+    } else if (e.type === "compaction" || e.type === "branch_summary") {
+      usage = e.usage;
+    }
+    const cost = usage?.cost?.total;
+    if (typeof cost === "number" && Number.isFinite(cost)) total += cost;
+  }
+  return total;
 }
 
 /** Sum cache-read tokens across all assistant messages — session total for
@@ -260,13 +284,33 @@ export default function (pi: ExtensionAPI) {
   // entries every frame.
   let _cacheTotal = 0;
   let _latestUsage: UsageSnap | undefined;
+  // Latest completed response throughput. Timing begins with the first streamed
+  // content delta, excluding time-to-first-token; it is intentionally not
+  // reconstructed for resumed sessions because persisted messages have no end time.
+  let _streamStartedAt: number | undefined;
+  let _pendingResponseElapsedMs: number | undefined;
+  let _latestTps: number | undefined;
+  // Full-session billable cost, including tool/summarization usage. Zero means the
+  // provider supplied no priced usage, so the border omits the dollar segment.
+  let _sessionCost = 0;
 
   // ── Phase-aware spinner + lifecycle ────────────────────────────
   // Each event asks the editor for a phase; CardEditor.setSpinner is itself
   // a same-phase no-op, so rapid event streams never reset the animation.
+  pi.on("message_start", (event) => {
+    if (event.message.role !== "assistant") return;
+    _streamStartedAt = undefined;
+    _pendingResponseElapsedMs = undefined;
+  });
   pi.on("turn_start", () => editor?.setSpinner("thinking"));
   pi.on("message_update", (event) => {
     const t = event.assistantMessageEvent.type;
+    if (
+      _streamStartedAt == null &&
+      (t === "thinking_delta" || t === "text_delta" || t === "toolcall_delta")
+    ) {
+      _streamStartedAt = Date.now();
+    }
     let next: SpinnerPhase;
     if (t.startsWith("thinking_")) next = "thinking";
     else if (t.startsWith("text_")) next = "outputting";
@@ -274,22 +318,48 @@ export default function (pi: ExtensionAPI) {
     else return;
     editor?.setSpinner(next);
   });
+  pi.on("message_end", (event) => {
+    if (event.message.role !== "assistant") return;
+    const elapsedMs = _streamStartedAt == null ? 0 : Date.now() - _streamStartedAt;
+    _pendingResponseElapsedMs = elapsedMs > 0 ? elapsedMs : undefined;
+    _streamStartedAt = undefined;
+  });
   pi.on("tool_execution_start", () => editor?.setSpinner("exec"));
   pi.on("agent_end", (_event, ctx) => {
     // cacheRead totals + latest usage are stable once a turn finishes —
     // recompute here instead of on every render frame.
     _cacheTotal = sumCacheRead(ctx);
     _latestUsage = latestAssistantUsage(ctx);
+    _sessionCost = sumSessionCost(ctx);
     editor?.setSpinner(null);
   });
   pi.on("session_shutdown", () => {
+    _streamStartedAt = undefined;
+    _pendingResponseElapsedMs = undefined;
+    _latestTps = undefined;
+    _sessionCost = 0;
     editor?.setSpinner(null);
     editor = undefined;
+  });
+  pi.on("session_compact", (_event, ctx) => {
+    _sessionCost = sumSessionCost(ctx);
+    editor?.requestRender();
+  });
+  pi.on("session_tree", (_event, ctx) => {
+    _sessionCost = sumSessionCost(ctx);
+    editor?.requestRender();
   });
 
   // Refresh git dirty after every agent turn (tools may have changed files).
   // Async — never blocks the event loop; re-renders once settled.
-  pi.on("turn_end", () => {
+  pi.on("turn_end", (event) => {
+    if (event.message.role === "assistant") {
+      const output = (event.message as MsgSnap).usage?.output ?? 0;
+      const elapsedMs = _pendingResponseElapsedMs ?? 0;
+      _latestTps = elapsedMs > 0 && output > 0 ? output / (elapsedMs / 1000) : undefined;
+      _pendingResponseElapsedMs = undefined;
+      editor?.requestRender();
+    }
     if (_cwd) refreshGitDirty(_cwd, () => editor?.requestRender());
   });
 
@@ -301,6 +371,10 @@ export default function (pi: ExtensionAPI) {
     icons = { ...DEFAULT_ICONS, ...config.icons };
     _cacheTotal = sumCacheRead(ctx);
     _latestUsage = latestAssistantUsage(ctx);
+    _streamStartedAt = undefined;
+    _pendingResponseElapsedMs = undefined;
+    _latestTps = undefined;
+    _sessionCost = sumSessionCost(ctx);
     refreshGitDirty(ctx.cwd, () => editor?.requestRender());
 
     // Fresh segments on every render — reads live ctx state, so thinking /
@@ -348,6 +422,14 @@ export default function (pi: ExtensionAPI) {
         _cacheTotal > 0
           ? `${theme.fg("dim", " · ")}${theme.fg("warning", `${icons.cache} ${formatTokens(cacheReadNow)} (${formatTokens(_cacheTotal)})${hitRate != null ? ` ${icons.hitRate} ${hitRate.toFixed(1)}%` : ""}`)}`
           : "";
+      const tpsPart =
+        _latestTps != null
+          ? `${theme.fg("dim", " · ")}${theme.fg("success", `${_latestTps.toFixed(1)} t/s`)}`
+          : "";
+      const costPart =
+        _sessionCost > 0
+          ? `${theme.fg("dim", " · ")}${theme.fg("warning", `$${_sessionCost.toFixed(3)}`)}`
+          : "";
 
       // Git branch + dirty state — pi's format: ~/Projects (main).
       const cwdText = formatCwd(ctx.cwd);
@@ -364,7 +446,7 @@ export default function (pi: ExtensionAPI) {
         topLeft: ` ${theme.fg("accent", `${icons.model} ${model}`)}${theme.fg("dim", " · ")}${theme.fg(thinkingColor, `${icons.thinking} ${thinking}`)} `,
         topRight: buildPinned(),
         // Context in severity color; cwd stays muted so it never competes.
-        bottomLeft: ` ${theme.fg(contextToken(pct), `${icons.context} ${ctxText}`)}${cachePart} `,
+        bottomLeft: ` ${theme.fg(contextToken(pct), `${icons.context} ${ctxText}`)}${cachePart}${tpsPart}${costPart} `,
         bottomRight: theme.fg("muted", ` ${cwdDisplay} `),
       };
     };
@@ -418,7 +500,7 @@ export default function (pi: ExtensionAPI) {
 
   // ── Debug command ──────────────────────────────────────────────
   pi.registerCommand("editor-shell:status", {
-    description: "Show editor-shell debug state: status keys, pinned config, cache totals",
+    description: "Show editor-shell debug state: status keys, performance, and usage totals",
     handler: async (_args, ctx) => {
       // Refresh git dirty first so the status output reflects the current
       // working tree — the event-driven cache is otherwise only updated at
@@ -459,6 +541,10 @@ export default function (pi: ExtensionAPI) {
       lines.push(`  session cacheWrite: ${formatTokens(sess.cacheWrite ?? 0)}`);
       const sRate = cacheHitRate(sess);
       lines.push(`  session hit rate: ${sRate != null ? `${sRate.toFixed(1)}%` : "n/a"}`);
+      const sessionCost = sumSessionCost(ctx);
+      _sessionCost = sessionCost;
+      lines.push(`  session cost: ${sessionCost > 0 ? `$${sessionCost.toFixed(3)}` : "n/a"}`);
+      lines.push(`  latest response TPS: ${_latestTps != null ? `${_latestTps.toFixed(1)} t/s` : "n/a"}`);
       const latest = latestAssistantUsage(ctx);
       const now = latest?.cacheRead ?? 0;
       lines.push(`  this turn cacheRead: ${formatTokens(now)}`);

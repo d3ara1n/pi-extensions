@@ -5,7 +5,7 @@ Replaces pi's default editor and status bar with a unified rounded-corner shell 
 ## What shows up where
 
 - **Top border** — `  model ·  thinking-level ` (left) + pinned extension statuses (right, via `pinnedStatus` config)
-- **Bottom border** — `  ctx NN%/NNk|N.NM · ⚡ cacheRead (total)  hitRate% ` (left) + `  ~/Projects (main +2 ~1 *4) ` (right, shows git branch plus staged, unstaged, and untracked file counts when in a repo). Session hit rate via `/editor-shell:status`.
+- **Bottom border** — `  ctx NN%/NNk|N.NM · ⚡ cacheRead (total)  hitRate% · NN.N t/s · $N.NNN ` (left) + `  ~/Projects (main +2 ~1 *4) ` (right, shows git branch plus staged, unstaged, and untracked file counts when in a repo). TPS is measured for the latest completed response from its first streamed content delta, excluding time-to-first-token. Session cost includes assistant, tool, compaction, and branch-summary usage; the dollar segment is hidden when the provider reports no priced usage. Session hit rate via `/editor-shell:status`.
 - **Below shell** — Auto-wrapping extension status line (all `setStatus` entries not pinned to the top)
 - **Border color** follows pi's thinking-level / bash-mode indicator automatically.
 
@@ -61,7 +61,7 @@ How the model is labeled in the top-left border (`"name"` by default):
 
 | Command | Description |
 |---------|-------------|
-| `/editor-shell:status` | Show debug info: pinned config, all extension statuses with their keys, cache totals |
+| `/editor-shell:status` | Show debug info: pinned config, all extension statuses with their keys, cache totals, latest response TPS, and session cost |
 
 ## How it works
 

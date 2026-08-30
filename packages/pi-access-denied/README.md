@@ -1,5 +1,7 @@
 # pi-access-denied
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-access-denied)](https://www.npmjs.com/package/@d3ara1n/pi-access-denied) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-access-denied)](https://www.npmjs.com/package/@d3ara1n/pi-access-denied) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-access-denied)](https://www.npmjs.com/package/@d3ara1n/pi-access-denied)
+
 Behavior guard for `write` / `edit` / `bash` path choices. It nudges an agent back toward the project when it tries broad disk searches, reaches for stale sensitive-data locations, or writes persistent data outside the working directory.
 
 ## Why

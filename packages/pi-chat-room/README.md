@@ -1,5 +1,7 @@
 # @d3ara1n/pi-chat-room
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-chat-room)](https://www.npmjs.com/package/@d3ara1n/pi-chat-room) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-chat-room)](https://www.npmjs.com/package/@d3ara1n/pi-chat-room) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-chat-room)](https://www.npmjs.com/package/@d3ara1n/pi-chat-room)
+
 Agent-to-agent messaging for [pi](https://github.com/earendil-works/pi) — built on [`@d3ara1n/pi-mesh`](../pi-mesh). Exposes the `send_to` tool so agents can message each other; incoming messages arrive as user messages prefixed `[From: NAME]`.
 
 Role-agnostic and order-agnostic: it doesn't know "assistant" or "director" — it just delivers messages between named peers. Roles are declared via pi-mesh's `mesh_set_profile`.

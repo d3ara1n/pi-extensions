@@ -1,5 +1,7 @@
 # @d3ara1n/pi-provider-stepfun
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-provider-stepfun)](https://www.npmjs.com/package/@d3ara1n/pi-provider-stepfun) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-provider-stepfun)](https://www.npmjs.com/package/@d3ara1n/pi-provider-stepfun) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-provider-stepfun)](https://www.npmjs.com/package/@d3ara1n/pi-provider-stepfun)
+
 StepFun (阶跃星辰) provider for pi — registers two providers covering both billing channels via StepFun's OpenAI-compatible API.
 
 ## Providers

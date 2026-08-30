@@ -1,5 +1,7 @@
 # @d3ara1n/pi-context-include
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-context-include)](https://www.npmjs.com/package/@d3ara1n/pi-context-include) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-context-include)](https://www.npmjs.com/package/@d3ara1n/pi-context-include) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-context-include)](https://www.npmjs.com/package/@d3ara1n/pi-context-include)
+
 `@path` syntax for AGENTS.md — include files by reference.
 
 ## Features

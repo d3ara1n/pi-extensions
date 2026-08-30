@@ -1,5 +1,7 @@
 # @d3ara1n/pi-mesh
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-mesh)](https://www.npmjs.com/package/@d3ara1n/pi-mesh) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-mesh)](https://www.npmjs.com/package/@d3ara1n/pi-mesh) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-mesh)](https://www.npmjs.com/package/@d3ara1n/pi-mesh)
+
 Agent mesh for [pi](https://github.com/earendil-works/pi) — peer discovery and cross-instance transport. The neutral foundation that [`pi-peek-agent`](../pi-peek-agent) and [`pi-chat-room`](../pi-chat-room) build on.
 
 Self-sufficient: install alone to discover other pi instances and self-declare a role. Knows nothing about peek, chat, or any specific workflow — it just discovers named peers and carries typed bytes between them.

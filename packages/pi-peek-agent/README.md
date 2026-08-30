@@ -1,5 +1,7 @@
 # @d3ara1n/pi-peek-agent
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-peek-agent)](https://www.npmjs.com/package/@d3ara1n/pi-peek-agent) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-peek-agent)](https://www.npmjs.com/package/@d3ara1n/pi-peek-agent) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-peek-agent)](https://www.npmjs.com/package/@d3ara1n/pi-peek-agent)
+
 Cross-instance peek for [pi](https://github.com/earendil-works/pi) — ask another pi instance a question without disturbing its main conversation. Built on [`@d3ara1n/pi-mesh`](../pi-mesh) for discovery and transport.
 
 Adds the `peek` tool. Discovery, identity, and the socket mesh live in pi-mesh — load pi-mesh alongside this package.

@@ -1,5 +1,7 @@
 # @d3ara1n/pi-hashline-edit
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-hashline-edit)](https://www.npmjs.com/package/@d3ara1n/pi-hashline-edit) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-hashline-edit)](https://www.npmjs.com/package/@d3ara1n/pi-hashline-edit) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-hashline-edit)](https://www.npmjs.com/package/@d3ara1n/pi-hashline-edit)
+
 > Hashline-style file editing for [pi](https://github.com/earendil-works/pi-coding-agent) — line-anchored edits verified by content hash (replacing `oldText`/`newText` matching), plus a location-blind `replace` tool for bulk + regex transforms.
 
 Edits reference lines by `LINE#HASH` anchors (copied from `read`/`grep` output) instead of retyping the code to be changed — eliminating string-not-found loops and whitespace battles at the root.

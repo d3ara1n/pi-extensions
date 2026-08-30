@@ -1,5 +1,7 @@
 # @d3ara1n/pi-scout
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-scout)](https://www.npmjs.com/package/@d3ara1n/pi-scout) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-scout)](https://www.npmjs.com/package/@d3ara1n/pi-scout) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-scout)](https://www.npmjs.com/package/@d3ara1n/pi-scout)
+
 Every skill you install in pi gets advertised in the system prompt on every turn — the relevant ones and the irrelevant ones alike. As your skill collection grows, that list bloats the prompt, dilutes the main model's attention, and eats context.
 
 Scout runs a cheap side model **before each turn** to look at what you just asked and decide what the main model actually needs this turn: which skills are relevant, whether the task calls for a heavier or lighter model. The main model then starts with a focused prompt instead of the full skill dump.

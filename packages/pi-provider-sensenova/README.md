@@ -1,5 +1,7 @@
 # @d3ara1n/pi-provider-sensenova
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-provider-sensenova)](https://www.npmjs.com/package/@d3ara1n/pi-provider-sensenova) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-provider-sensenova)](https://www.npmjs.com/package/@d3ara1n/pi-provider-sensenova) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-provider-sensenova)](https://www.npmjs.com/package/@d3ara1n/pi-provider-sensenova)
+
 SenseNova (商汤日日新) provider for [Pi Coding Agent](https://pi.dev) — registers the SenseNova Token Plan models via OpenAI-compatible API.
 
 ## Provider

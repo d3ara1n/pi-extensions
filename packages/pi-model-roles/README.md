@@ -1,5 +1,7 @@
 # @d3ara1n/pi-model-roles
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-model-roles)](https://www.npmjs.com/package/@d3ara1n/pi-model-roles) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-model-roles)](https://www.npmjs.com/package/@d3ara1n/pi-model-roles) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-model-roles)](https://www.npmjs.com/package/@d3ara1n/pi-model-roles)
+
 Give pi's background sub-tasks — naming sessions, routing, side agents — their own model and thinking level, instead of running every throwaway job on your main (expensive) model.
 
 Named **roles** (`heavy`, `fast`, `utility`, …) each map to a model + thinking level. Other pi extensions ask model-roles "which model fits this job?" and get the right one back, auth already resolved.

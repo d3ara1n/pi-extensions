@@ -1,5 +1,7 @@
 # @d3ara1n/pi-provider-agnes
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-provider-agnes)](https://www.npmjs.com/package/@d3ara1n/pi-provider-agnes) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-provider-agnes)](https://www.npmjs.com/package/@d3ara1n/pi-provider-agnes) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-provider-agnes)](https://www.npmjs.com/package/@d3ara1n/pi-provider-agnes)
+
 Agnes AI provider for pi — registers two providers sharing the same text + image models but differing in billing model.
 
 ## Providers

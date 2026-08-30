@@ -1,5 +1,7 @@
 # @d3ara1n/pi-ask-user
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-ask-user)](https://www.npmjs.com/package/@d3ara1n/pi-ask-user) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-ask-user)](https://www.npmjs.com/package/@d3ara1n/pi-ask-user) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-ask-user)](https://www.npmjs.com/package/@d3ara1n/pi-ask-user)
+
 When the agent needs a decision from you — picking an approach, confirming a direction — a panel slides up from the bottom of pi and waits. **The transcript above stays visible**, so you can read the agent's reasoning while you choose instead of answering blind.
 ## Why this panel
 

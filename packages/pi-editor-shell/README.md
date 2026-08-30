@@ -1,5 +1,7 @@
 # pi-editor-shell
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-editor-shell)](https://www.npmjs.com/package/@d3ara1n/pi-editor-shell) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-editor-shell)](https://www.npmjs.com/package/@d3ara1n/pi-editor-shell) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-editor-shell)](https://www.npmjs.com/package/@d3ara1n/pi-editor-shell)
+
 Replaces pi's default editor and status bar with a unified rounded-corner shell drawn with box-drawing glyphs (`╭╮││╰╯`), with status info embedded in the border. The frame and spinner use only standard Unicode; the six border icons are Nerd Font glyphs (overridable — see [Configuration](#configuration)).
 
 ## What shows up where

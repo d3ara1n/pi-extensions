@@ -1,5 +1,7 @@
 # @d3ara1n/pi-peek-user
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-peek-user)](https://www.npmjs.com/package/@d3ara1n/pi-peek-user) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-peek-user)](https://www.npmjs.com/package/@d3ara1n/pi-peek-user) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-peek-user)](https://www.npmjs.com/package/@d3ara1n/pi-peek-user)
+
 `/peek` overlay for [pi](https://github.com/earendil-works/pi) — ask your own session a question without disturbing the main agent.
 
 Opens a centered overlay that serializes the current conversation and streams an answer from the `utility` model (read-after-burn). The main agent keeps running, completely unaware.

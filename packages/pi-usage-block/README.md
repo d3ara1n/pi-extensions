@@ -1,5 +1,7 @@
 # @d3ara1n/pi-usage-block
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-usage-block)](https://www.npmjs.com/package/@d3ara1n/pi-usage-block) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-usage-block)](https://www.npmjs.com/package/@d3ara1n/pi-usage-block) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-usage-block)](https://www.npmjs.com/package/@d3ara1n/pi-usage-block)
+
 Usage status bar block for [Pi Coding Agent](https://pi.dev) — displays usage for the **currently active** pi provider in the [powerline-footer](https://pi.dev/packages/pi-powerline-footer) custom items system.
 
 Supports two provider kinds (see [`@d3ara1n/pi-usage-block-core`](../pi-usage-block-core)):

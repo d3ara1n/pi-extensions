@@ -1,5 +1,7 @@
 # pi-command-palette
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-command-palette)](https://www.npmjs.com/package/@d3ara1n/pi-command-palette) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-command-palette)](https://www.npmjs.com/package/@d3ara1n/pi-command-palette) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-command-palette)](https://www.npmjs.com/package/@d3ara1n/pi-command-palette)
+
 Global command palette for [Pi Coding Agent](https://pi.dev) — press **Ctrl+Shift+P** to search and run commands from anywhere.
 
 ## Why?

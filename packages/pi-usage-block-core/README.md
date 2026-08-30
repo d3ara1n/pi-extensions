@@ -1,5 +1,7 @@
 # @d3ara1n/pi-usage-block-core
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-usage-block-core)](https://www.npmjs.com/package/@d3ara1n/pi-usage-block-core) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-usage-block-core)](https://www.npmjs.com/package/@d3ara1n/pi-usage-block-core) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-usage-block-core)](https://www.npmjs.com/package/@d3ara1n/pi-usage-block-core)
+
 Shared types and registry for usage reporting in [Pi Coding Agent](https://pi.dev).
 
 Provider-agnostic — any provider plugin can register itself, and any UI plugin (e.g. [`@d3ara1n/pi-usage-block`](../pi-usage-block)) can consume the data.

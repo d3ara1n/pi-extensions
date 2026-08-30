@@ -1,5 +1,7 @@
 # @d3ara1n/pi-session-namer
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-session-namer)](https://www.npmjs.com/package/@d3ara1n/pi-session-namer) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-session-namer)](https://www.npmjs.com/package/@d3ara1n/pi-session-namer) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-session-namer)](https://www.npmjs.com/package/@d3ara1n/pi-session-namer)
+
 Session naming for pi with layered correction paths.
 
 On the first user prompt of a new session, a lightweight side agent generates a

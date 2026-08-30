@@ -1,5 +1,7 @@
 # @d3ara1n/pi-peek
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-peek)](https://www.npmjs.com/package/@d3ara1n/pi-peek) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-peek)](https://www.npmjs.com/package/@d3ara1n/pi-peek) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-peek)](https://www.npmjs.com/package/@d3ara1n/pi-peek)
+
 Core capability extension for [pi](https://github.com/earendil-works/pi) — serialize the main conversation and answer questions about it via the utility model, read-after-burn.
 
 **Core extension**: registers tracker hooks but **no tools, no commands**. It is consumed by [`pi-peek-user`](../pi-peek-user) (local `/peek` overlay) and [`pi-peek-agent`](../pi-peek-agent) (cross-instance mesh). Installing this alone does nothing user-visible, but it must be loaded for consumers to work.

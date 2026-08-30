@@ -1,5 +1,7 @@
 # @d3ara1n/pi-subagent
 
+[![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-subagent)](https://www.npmjs.com/package/@d3ara1n/pi-subagent) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-subagent)](https://www.npmjs.com/package/@d3ara1n/pi-subagent) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-subagent)](https://www.npmjs.com/package/@d3ara1n/pi-subagent)
+
 Role-based subagent orchestration for [pi](https://github.com/earendil-works/pi).
 
 Provides a `subagent_delegate` tool that lets the main model offload tasks to specialized pi child processes with configurable model roles, real-time TUI progress, and AI-generated summaries. Runs can be foreground (blocking) or background (asynchronous, collected later via `subagent_wait`/`subagent_check`, cancellable via `subagent_cancel`). A centered live view (`/subagent:view`) shows every run's activity feed as it happens, with a per-run brief page for inputs and stats; mid-run corrections can be queued into a running subagent from the view's steer editor or via `subagent_steer`.

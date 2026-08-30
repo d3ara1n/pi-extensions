@@ -5,6 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { CardEditor, type FrameProvider, type SpinnerPhase } from "./card-editor.ts";
 import { DEFAULT_CONFIG, loadEditorShellConfig, type EditorShellConfig, type EditorShellIcons } from "./config.ts";
+import { calculateVisibleTextTps } from "./tps.ts";
 
 /**
  * pi-editor-shell — Replaces pi's default editor and status bar with a
@@ -75,6 +76,7 @@ const DEFAULT_ICONS: EditorShellIcons = {
 interface UsageSnap {
   input?: number;
   output?: number;
+  reasoning?: number;
   cacheRead?: number;
   cacheWrite?: number;
   cost?: {
@@ -83,7 +85,9 @@ interface UsageSnap {
 }
 interface MsgSnap {
   role: string;
+  content?: Array<{ type: string }>;
   usage?: UsageSnap;
+  stopReason?: string;
 }
 interface EntrySnap {
   type: string;
@@ -284,11 +288,11 @@ export default function (pi: ExtensionAPI) {
   // entries every frame.
   let _cacheTotal = 0;
   let _latestUsage: UsageSnap | undefined;
-  // Latest completed response throughput. Timing begins with the first streamed
-  // content delta, excluding time-to-first-token; it is intentionally not
-  // reconstructed for resumed sessions because persisted messages have no end time.
-  let _streamStartedAt: number | undefined;
-  let _pendingResponseElapsedMs: number | undefined;
+  // Latest reliable client-observed text throughput. TTFT is excluded; tool-call,
+  // failed, and statistically tiny responses do not replace the last valid sample.
+  // Persisted messages have no delta timestamps, so resumed sessions start empty.
+  let _firstTextDeltaAt: number | undefined;
+  let _lastTextDeltaAt: number | undefined;
   let _latestTps: number | undefined;
   // Full-session billable cost, including tool/summarization usage. Zero means the
   // provider supplied no priced usage, so the border omits the dollar segment.
@@ -299,17 +303,16 @@ export default function (pi: ExtensionAPI) {
   // a same-phase no-op, so rapid event streams never reset the animation.
   pi.on("message_start", (event) => {
     if (event.message.role !== "assistant") return;
-    _streamStartedAt = undefined;
-    _pendingResponseElapsedMs = undefined;
+    _firstTextDeltaAt = undefined;
+    _lastTextDeltaAt = undefined;
   });
   pi.on("turn_start", () => editor?.setSpinner("thinking"));
   pi.on("message_update", (event) => {
     const t = event.assistantMessageEvent.type;
-    if (
-      _streamStartedAt == null &&
-      (t === "thinking_delta" || t === "text_delta" || t === "toolcall_delta")
-    ) {
-      _streamStartedAt = Date.now();
+    if (t === "text_delta") {
+      const now = performance.now();
+      _firstTextDeltaAt ??= now;
+      _lastTextDeltaAt = now;
     }
     let next: SpinnerPhase;
     if (t.startsWith("thinking_")) next = "thinking";
@@ -317,12 +320,6 @@ export default function (pi: ExtensionAPI) {
     else if (t.startsWith("toolcall_")) next = "toolcall";
     else return;
     editor?.setSpinner(next);
-  });
-  pi.on("message_end", (event) => {
-    if (event.message.role !== "assistant") return;
-    const elapsedMs = _streamStartedAt == null ? 0 : Date.now() - _streamStartedAt;
-    _pendingResponseElapsedMs = elapsedMs > 0 ? elapsedMs : undefined;
-    _streamStartedAt = undefined;
   });
   pi.on("tool_execution_start", () => editor?.setSpinner("exec"));
   pi.on("agent_end", (_event, ctx) => {
@@ -334,8 +331,8 @@ export default function (pi: ExtensionAPI) {
     editor?.setSpinner(null);
   });
   pi.on("session_shutdown", () => {
-    _streamStartedAt = undefined;
-    _pendingResponseElapsedMs = undefined;
+    _firstTextDeltaAt = undefined;
+    _lastTextDeltaAt = undefined;
     _latestTps = undefined;
     _sessionCost = 0;
     editor?.setSpinner(null);
@@ -354,10 +351,18 @@ export default function (pi: ExtensionAPI) {
   // Async — never blocks the event loop; re-renders once settled.
   pi.on("turn_end", (event) => {
     if (event.message.role === "assistant") {
-      const output = (event.message as MsgSnap).usage?.output ?? 0;
-      const elapsedMs = _pendingResponseElapsedMs ?? 0;
-      _latestTps = elapsedMs > 0 && output > 0 ? output / (elapsedMs / 1000) : undefined;
-      _pendingResponseElapsedMs = undefined;
+      const message = event.message as MsgSnap;
+      const sample = calculateVisibleTextTps({
+        outputTokens: message.usage?.output,
+        reasoningTokens: message.usage?.reasoning,
+        firstTextDeltaAt: _firstTextDeltaAt,
+        lastTextDeltaAt: _lastTextDeltaAt,
+        hasToolCall: message.content?.some((part) => part.type === "toolCall") ?? false,
+        stopReason: message.stopReason,
+      });
+      if (sample != null) _latestTps = sample;
+      _firstTextDeltaAt = undefined;
+      _lastTextDeltaAt = undefined;
       editor?.requestRender();
     }
     if (_cwd) refreshGitDirty(_cwd, () => editor?.requestRender());
@@ -371,8 +376,8 @@ export default function (pi: ExtensionAPI) {
     icons = { ...DEFAULT_ICONS, ...config.icons };
     _cacheTotal = sumCacheRead(ctx);
     _latestUsage = latestAssistantUsage(ctx);
-    _streamStartedAt = undefined;
-    _pendingResponseElapsedMs = undefined;
+    _firstTextDeltaAt = undefined;
+    _lastTextDeltaAt = undefined;
     _latestTps = undefined;
     _sessionCost = sumSessionCost(ctx);
     refreshGitDirty(ctx.cwd, () => editor?.requestRender());
@@ -424,7 +429,7 @@ export default function (pi: ExtensionAPI) {
           : "";
       const tpsPart =
         _latestTps != null
-          ? `${theme.fg("dim", " · ")}${theme.fg("success", `${_latestTps.toFixed(1)} t/s`)}`
+          ? `${theme.fg("dim", " · ")}${theme.fg("warning", `${_latestTps.toFixed(1)} t/s`)}`
           : "";
       const costPart =
         _sessionCost > 0
@@ -544,7 +549,7 @@ export default function (pi: ExtensionAPI) {
       const sessionCost = sumSessionCost(ctx);
       _sessionCost = sessionCost;
       lines.push(`  session cost: ${sessionCost > 0 ? `$${sessionCost.toFixed(3)}` : "n/a"}`);
-      lines.push(`  latest response TPS: ${_latestTps != null ? `${_latestTps.toFixed(1)} t/s` : "n/a"}`);
+      lines.push(`  latest reliable text TPS: ${_latestTps != null ? `${_latestTps.toFixed(1)} t/s` : "n/a"}`);
       const latest = latestAssistantUsage(ctx);
       const now = latest?.cacheRead ?? 0;
       lines.push(`  this turn cacheRead: ${formatTokens(now)}`);

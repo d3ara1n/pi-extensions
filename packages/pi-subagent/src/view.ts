@@ -23,8 +23,8 @@
  * Steer input is modal so keys never conflict with the editor: browse mode
  * owns navigation; `s` opens the editor (Enter sends and returns to browse,
  *    Esc cancels and clears). Esc in browse closes the overlay; Tab cycles
- * the focused run and resets scrolls (activity re-pins, brief returns to
- * the top).
+ *    the focused run and resets its view — page back to activity, scrolls
+ *    re-pinned.
  *
  * Layout: a centered screen overlay (overlay:true) occupying most of the
  * terminal, framed with a thin border. An embedded Editor accepts steering
@@ -119,6 +119,19 @@ export function sortViewRuns(runs: RunHandle[]): RunHandle[] {
   return [...runs].sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id));
 }
 
+/**
+ * Drop terminal runs whose result is already in the conversation — delivered
+ * by subagent_check on the active branch (the same session-tree source of
+ * truth as the inbox reminder). Live runs and undelivered terminal runs
+ * stay: the view is for live watching and pending collection, not an
+ * archive.
+ */
+export function filterDeliveredRuns(runs: RunHandle[], delivered: Set<string>): RunHandle[] {
+  return runs.filter(
+    (r) => (r.state !== "finished" && r.state !== "failed") || !delivered.has(r.id),
+  );
+}
+
 export class SubagentViewPanel implements Component, Focusable {
   focused = true;
 
@@ -180,8 +193,8 @@ export class SubagentViewPanel implements Component, Focusable {
   }
 
   /** Resolve the focused run by id; stable across sort-order reshuffles
-   *  (e.g. a run finishing re-ranks the list). Scroll state resets only when
-   *  the focused run actually changes. */
+   *  (e.g. a run finishing re-ranks the list). The focused run's view state
+   *  (page + scrolls) resets only when the focused run actually changes. */
   private focusedRun(): RunHandle | undefined {
     const runs = sortViewRuns(this.runsProvider());
     if (runs.length === 0) {
@@ -192,12 +205,15 @@ export class SubagentViewPanel implements Component, Focusable {
     if (!run) {
       run = runs[0];
       this.focusId = run.id;
-      this.resetScrolls();
+      this.resetRunView();
     }
     return run;
   }
 
-  private resetScrolls(): void {
+  /** Reset the focused run's view state: page back to activity, activity
+   *  pinned to the end (auto-follow), brief at the top. */
+  private resetRunView(): void {
+    this.page = "activity";
     this.activityTop = null;
     this.briefTop = 0;
   }
@@ -206,10 +222,12 @@ export class SubagentViewPanel implements Component, Focusable {
     const runs = sortViewRuns(this.runsProvider());
     if (runs.length < 2) return;
     const idx = runs.findIndex((r) => r.id === this.focusId);
-    const next = runs[((idx >= 0 ? idx : 0) + 1) % runs.length];
+    // Focus id gone from the list: fall back to the first run, same as
+    // focusedRun() — not to the second.
+    const next = idx < 0 ? runs[0] : runs[(idx + 1) % runs.length];
     if (next.id === this.focusId) return;
     this.focusId = next.id;
-    this.resetScrolls();
+    this.resetRunView();
     this.tui.requestRender();
   }
 

@@ -37,6 +37,7 @@ import {
   formatBudgetNote,
   formatCheckText,
   formatCancelText,
+  formatRunLine,
   formatTimePart,
   freezeFrame,
   createThrottler,
@@ -654,13 +655,14 @@ describe("background run helpers", () => {
     assert.equal(describeCurrentActivity(withTool), "$ ls");
   });
 
-  test("formatUsageFooter renders turns, tokens, cost, and model", () => {
+  test("formatUsageFooter renders turns, elapsed, tokens, cost, and model", () => {
     assert.equal(formatUsageFooter(baseResult()), "");
     const r = baseResult({
+      elapsedMs: 135000,
       usage: { input: 1200, output: 300, cacheRead: 0, cacheWrite: 0, cost: 0.5, contextTokens: 0, turns: 2 },
       model: "test/model-x",
     });
-    assert.equal(formatUsageFooter(r), "\n\n--- 2 turns \u21911.2k \u2193300 $0.5000 test/model-x ---");
+    assert.equal(formatUsageFooter(r), "\n\n--- 2 turns ~135s \u21911.2k \u2193300 $0.5000 test/model-x ---");
   });
 
   test("formatUsageStats adds cache and peak-context figures the footer omits", () => {
@@ -671,7 +673,7 @@ describe("background run helpers", () => {
     );
     // Footer stays lean — no cache/context parts.
     assert.equal(
-      formatUsageFooter({ usage, model: "test/model-x" }),
+      formatUsageFooter(baseResult({ usage, model: "test/model-x" })),
       "\n\n--- 2 turns \u21911.2k \u2193300 $0.5000 test/model-x ---",
     );
   });
@@ -706,45 +708,84 @@ describe("background run helpers", () => {
     assert.match(formatCheckText("sub-1", "explorer", baseResult()), /^sub-1 \(explorer\): finished\n\nok$/);
   });
 
-  test("formatCheckText renders cancelled with the bare reason and partial output", () => {
+  test("formatCheckText running carries elapsed/budget in the head and a usage footer", () => {
+    const r = runningFrame();
+    r.startTime = Date.now() - 135000;
+    r.budgetMs = 300000;
+    r.usage = { input: 8000, output: 900, cacheRead: 0, cacheWrite: 0, cost: 0.02, contextTokens: 0, turns: 2 };
+    const text = formatCheckText("sub-1", "explorer", r);
+    assert.match(text, /^sub-1 \(explorer\): running — waiting for first event \(135s\/300s\)/);
+    assert.match(text, /\n\n--- 2 turns \u21918.0k \u2193900 \$0\.0200 ---$/);
+  });
+
+  test("formatRunLine is the shared roll-call line for wait and cancel", () => {
+    assert.equal(formatRunLine("sub-1", "explorer", queuedFrame()), "sub-1 (explorer): queued");
+    assert.equal(formatRunLine("sub-1", "explorer", baseResult()), "sub-1 (explorer): finished");
+    const finished = baseResult({
+      elapsedMs: 120000,
+      usage: { input: 12000, output: 1000, cacheRead: 0, cacheWrite: 0, cost: 0.01, contextTokens: 0, turns: 3 },
+    });
+    assert.equal(
+      formatRunLine("sub-1", "explorer", finished),
+      "sub-1 (explorer): finished (3 turns ~120s \u219112k \u21931.0k $0.0100)",
+    );
+  });
+
+  test("formatCheckText renders cancelled with reason, partial output, and usage", () => {
     assert.match(
       formatCheckText(
         "sub-1",
         "explorer",
-        baseResult({ exitCode: 1, stopReason: "cancelled", errorMessage: "user: wrong direction" }),
+        baseResult({
+          exitCode: 1,
+          stopReason: "cancelled",
+          errorMessage: "user: wrong direction",
+          elapsedMs: 45000,
+          usage: { input: 1000, output: 200, cacheRead: 0, cacheWrite: 0, cost: 0.1, contextTokens: 0, turns: 3 },
+        }),
       ),
-      /^sub-1 \(explorer\): cancelled — user: wrong direction\n\nPartial output:\nok$/,
+      /^sub-1 \(explorer\): cancelled — user: wrong direction\n\nPartial output:\nok\n\n--- 3 turns ~45s \u21911.0k \u2193200 \$0\.1000 ---$/,
+    );
+    // Queue-time cancel: never spawned — nothing to show past the head.
+    assert.equal(
+      formatCheckText(
+        "sub-2",
+        "worker",
+        baseResult({ exitCode: 1, stopReason: "cancelled", errorMessage: "still queued (user: x)" }),
+      ),
+      "sub-2 (worker): cancelled — never started",
     );
   });
 
   test("formatCancelText distinguishes never-started cancels from mid-run cancels", () => {
     // Never-started cancel (gate/model-resolution phase): terminal frame has
-    // NO elapsedMs — nothing ran. Mirrors the real terminal-frame shape:
-    // startTime never survives (live-frame-only field), duration freezes
-    // into elapsedMs.
-    assert.match(
-      formatCancelText("sub-1", "explorer", baseResult({ exitCode: -1, output: "", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 } })),
-      /^sub-1 \(explorer\): cancelled — never started, no partial output\. subagent_check\(sub-1\) clears the registry entry\.$/,
+    // no elapsedMs and zero usage — nothing ran. Mirrors the real terminal
+    // shape (run.ts settles aborts via inputFrame(1, false)).
+    assert.equal(
+      formatCancelText("sub-1", "explorer", baseResult({ exitCode: 1, stopReason: "cancelled", output: "" })),
+      "sub-1 (explorer): cancelled — never started",
     );
     // Mid-run cancel: real terminal shape — elapsedMs frozen, no startTime.
     const midRun = baseResult({
-      exitCode: -1,
+      exitCode: 1,
+      stopReason: "cancelled",
       elapsedMs: 45000,
       output: "partial findings",
       usage: { input: 1000, output: 200, cacheRead: 0, cacheWrite: 0, cost: 0.1, contextTokens: 0, turns: 3 },
     });
-    assert.match(
+    assert.equal(
       formatCancelText("sub-2", "worker", midRun),
-      /^sub-2 \(worker\): cancelled after 3 turns \(~45s\) — partial output \(16 chars\) kept in the registry; subagent_check\(sub-2\) returns it once\.$/,
+      "sub-2 (worker): cancelled (3 turns ~45s \u21911.0k \u2193200 $0.1000) — partial output kept; subagent_check(sub-2) returns it.",
     );
-    // Aborted before the first completed turn: "under a turn", not "0 turns".
+    // Aborted before the first completed turn: elapsed-only stats.
     const underATurn = baseResult({
-      exitCode: -1,
+      exitCode: 1,
+      stopReason: "cancelled",
       elapsedMs: 2000,
       output: "",
-      usage: { input: 1000, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0.05, contextTokens: 0, turns: 0 },
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
     });
-    assert.match(formatCancelText("sub-3", "worker", underATurn), /cancelled after under a turn \(~2s\)/);
+    assert.equal(formatCancelText("sub-3", "worker", underATurn), "sub-3 (worker): cancelled (~2s)");
   });
 
   test("formatCheckText flags budget-stopped runs as partial on the finished line", () => {

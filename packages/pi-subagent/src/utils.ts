@@ -45,9 +45,8 @@ export function formatInheritedConversationInput(chars: number, truncated: boole
 }
 
 /**
- * Usage parts shared by the TUI stats line and the LLM usage footer.
- * `withCache` adds the cache-read/write and peak-context figures (TUI only —
- * the LLM footer stays lean).
+ * Usage parts for the TUI stats line. `withCache` adds the
+ * cache-read/write and peak-context figures (TUI only).
  */
 function usageParts(usage: SubagentUsage, model: string | undefined, withCache: boolean): string[] {
   const parts: string[] = [];
@@ -61,6 +60,31 @@ function usageParts(usage: SubagentUsage, model: string | undefined, withCache: 
   }
   if (usage.cost) parts.push(`$${usage.cost.toFixed(4)}`);
   if (model) parts.push(model);
+  return parts;
+}
+/**
+ * Usage-stat segments for every LLM-facing run line: turns, elapsed,
+ * tokens, cost — model last when requested. Empty segments are omitted; an
+ * empty array means nothing measurable ran. `withElapsed` is off where
+ * elapsed already lives elsewhere in the same view (check's running head
+ * shows it as `42s/900s` next to the activity).
+ */
+function statsParts(
+  r: { usage: SubagentUsage; exitCode: number; startTime?: number; elapsedMs?: number },
+  opts: { withElapsed?: boolean; model?: string } = {},
+): string[] {
+  const parts: string[] = [];
+  if (r.usage.turns) parts.push(`${r.usage.turns} turn${r.usage.turns > 1 ? "s" : ""}`);
+  if (opts.withElapsed) {
+    const secs = elapsedSeconds(r);
+    if (secs != null && secs > 0) parts.push(`~${secs}s`);
+  }
+  if (r.usage.input) parts.push(`↑${formatTokens(r.usage.input)}`);
+  if (r.usage.output) parts.push(`↓${formatTokens(r.usage.output)}`);
+  if (r.usage.cost) parts.push(`$${r.usage.cost.toFixed(4)}`);
+  // The model is an annotation on the stats, never a stat itself — skip it
+  // when nothing measurable ran.
+  if (opts.model && parts.length > 0) parts.push(opts.model);
   return parts;
 }
 
@@ -602,10 +626,30 @@ export function describeCurrentActivity(r: { activityLog: ActivityEntry[] }): st
   return formatToolCall(last.toolName ?? "?", last.args ?? {}, (_color, text) => text);
 }
 
-/** Footer appended to terminal results for the main model: `\n\n--- 3 turns ↑12k ↓1k $0.01 model ---` (empty when nothing to show). */
-export function formatUsageFooter(r: { usage: SubagentUsage; model?: string }): string {
-  const parts = usageParts(r.usage, r.model, false);
+/**
+ * Terminal-result footer for full views (check, foreground delegate):
+ * `\n\n--- 3 turns ~45s ↑12k ↓1k $0.01 model ---` (empty when nothing to show).
+ */
+export function formatUsageFooter(r: SubagentResult): string {
+  const parts = statsParts(r, { withElapsed: true, model: r.model });
   return parts.length > 0 ? `\n\n--- ${parts.join(" ")} ---` : "";
+}
+
+/**
+ * One-line roll-call status shared by wait's per-run lines and cancel's
+ * confirmation: `id (role): state (stats)` — state plus usage stats (turns,
+ * elapsed, tokens, cost), nothing else; no output, no model, no notes.
+ * check is the complete view.
+ */
+export function formatRunLine(id: string, role: string, r: SubagentResult): string {
+  const state = r.stopReason === "cancelled" ? "cancelled" : deriveRunState(r);
+  const head = `${id} (${role}): ${state}`;
+  // Queue-time cancels never spawned: nothing measurable ran.
+  if (state === "cancelled" && r.elapsedMs == null && !r.usage.turns) {
+    return `${head} — never started`;
+  }
+  const parts = statsParts(r, { withElapsed: true });
+  return parts.length > 0 ? `${head} (${parts.join(" ")})` : head;
 }
 
 /** Fallback provenance note appended to terminal results (empty when no retry happened). */
@@ -631,27 +675,40 @@ export function formatCheckText(id: string, role: string, r: SubagentResult): st
   const state = deriveRunState(r);
   const head = `${id} (${role})`;
   if (state === "queued") return `${head}: queued — waiting for a concurrency slot.`;
-  if (state === "running") return `${head}: running — ${describeCurrentActivity(r)}`;
+  if (state === "running") {
+    // Elapsed/budget live in the head next to the activity (`42s/900s`); the
+    // footer carries turns/tokens/cost so elapsed is never shown twice.
+    const time = formatTimePart(r);
+    const parts = statsParts(r, { model: r.model });
+    return (
+      `${head}: running — ${describeCurrentActivity(r)}${time ? ` (${time})` : ""}` +
+      (parts.length > 0 ? `\n\n--- ${parts.join(" ")} ---` : "")
+    );
+  }
   if (r.stopReason === "cancelled") {
     // errorMessage is the bare abort reason ("user: ..." / "session shutdown")
     // — the "cancelled" prefix here is the only wrapper it gets.
-    return `${head}: cancelled — ${r.errorMessage || "no reason recorded"}\n\nPartial output:\n${r.output}${formatFallbackNote(r)}`;
+    if (r.elapsedMs == null && !r.usage.turns) return `${head}: cancelled — never started`;
+    return (
+      `${head}: cancelled — ${r.errorMessage || "no reason recorded"}\n\nPartial output:\n${r.output}` +
+      formatFallbackNote(r) +
+      formatUsageFooter(r)
+    );
   }
   if (state === "failed") {
-    return `${head}: failed — ${r.errorMessage || r.stderr || "unknown error"}\n\nPartial output:\n${r.output}${formatFallbackNote(r)}`;
+    return (
+      `${head}: failed — ${r.errorMessage || r.stderr || "unknown error"}\n\nPartial output:\n${r.output}` +
+      formatFallbackNote(r) +
+      formatUsageFooter(r)
+    );
   }
   return `${head}: finished\n\n${r.output}${formatBudgetNote(r)}${formatFallbackNote(r)}${formatUsageFooter(r)}`;
 }
 
 /**
- * Cancel confirmation text for the /subagent:cancel command: short, no output
- * dump — the partial output is check's job to return. Always points at check
- * so the user knows where the partial output lives.
- */
-/**
- * Compact stop summary shared by the cancel tool text and its TUI row:
- * `cancelled after 3 turns (~45s)` / `cancelled after under a turn (~2s)` /
- * `cancelled — never started` (never spawned: no elapsedMs on the frame).
+ * Compact stop summary for the cancel TUI row: `cancelled after 3 turns
+ * (~45s)` / `cancelled after under a turn (~2s)` / `cancelled — never
+ * started` (never spawned: no elapsedMs on the frame).
  */
 export function cancelStopSummary(r: SubagentResult): string {
   if (r.elapsedMs == null) return "cancelled — never started";
@@ -662,19 +719,15 @@ export function cancelStopSummary(r: SubagentResult): string {
 }
 
 /**
- * Cancel confirmation text: short, no output dump — the partial output is
- * check's job to return. Always points at check so the model fetches the
- * partial output it is entitled to.
+ * Cancel confirmation: the same roll-call line wait uses (state + usage
+ * stats) plus a pointer to check — cancel never dumps the partial output
+ * itself (layer contract: cancel intervenes, check fetches).
  */
 export function formatCancelText(id: string, role: string, r: SubagentResult): string {
-  const head = `${id} (${role})`;
-  if (r.elapsedMs == null) {
-    return `${head}: cancelled — never started, no partial output. subagent_check(${id}) clears the registry entry.`;
-  }
-  return (
-    `${head}: ${cancelStopSummary(r)} — partial output (${r.output.length} chars) ` +
-    `kept in the registry; subagent_check(${id}) returns it once.`
-  );
+  const line = formatRunLine(id, role, r);
+  return r.usage.turns > 0 || r.output.length > 0
+    ? `${line} — partial output kept; subagent_check(${id}) returns it.`
+    : line;
 }
 
 /** Freeze a live frame into a static snapshot: stop the elapsed clock and fold the open pause into grace. */

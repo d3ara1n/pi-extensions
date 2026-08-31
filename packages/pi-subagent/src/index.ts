@@ -30,6 +30,7 @@ import {
   formatCancelText,
   formatCheckText,
   formatFallbackNote,
+  formatRunLine,
   formatTimePart,
   formatUsageFooter,
   freezeFrame,
@@ -502,8 +503,9 @@ export default function subagentExtension(pi: ExtensionAPI) {
         // of collapsing to a bare error line.
         if (isFailedResult(result)) {
           const failedText =
-            `Subagent (${params.role}) failed: ${result.errorMessage || result.stderr || "unknown error"}\n\nPartial output:\n${result.output}` +
-            fallbackNote;
+            `${params.role}: failed — ${result.errorMessage || result.stderr || "unknown error"}\n\nPartial output:\n${result.output}` +
+            fallbackNote +
+            formatUsageFooter(result);
           emit([result], failedText);
           return {
             content: [{ type: "text", text: failedText }],
@@ -511,7 +513,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
           };
         }
 
-        const finalText = result.output + budgetNote + fallbackNote + formatUsageFooter(result);
+        const finalText = `${params.role}: finished\n\n${result.output}${budgetNote}${fallbackNote}${formatUsageFooter(result)}`;
         emit([result], finalText);
         return {
           content: [{ type: "text", text: finalText }],
@@ -548,7 +550,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
     name: "subagent_wait",
     label: "Wait for background subagents",
     description:
-      "Block until one or more background subagents (started via subagent_delegate with background: true) finish. Omit ids to wait for ALL current background runs. Returns ONLY each run's final status — one `id (role): finished/failed` line per run, never the results; fetch them afterwards with subagent_check. If timeout_ms elapses before every run finishes, returns an error listing per-run statuses. Cancelling the wait never cancels the runs — to stop a run, use subagent_cancel(id).",
+      "Block until one or more background subagents (started via subagent_delegate with background: true) finish. Omit ids to wait for ALL current background runs. Returns a per-run roll call — one `id (role): state (turns, elapsed, tokens, cost)` line per run, never the output; fetch it afterwards with subagent_check. If timeout_ms elapses before every run finishes, returns the same roll call (live runs carry usage so far) under a timeout header. Cancelling the wait never cancels the runs — to stop a run, use subagent_cancel(id).",
     promptSnippet: "Wait for background subagents to finish",
     parameters: Type.Object({
       ids: Type.Optional(
@@ -647,20 +649,12 @@ export default function subagentExtension(pi: ExtensionAPI) {
         for (const u of unsubscribers) u();
       }
 
-      // Status line per run — same `id (role): state` shape check uses, so
-      // the model can map ids to roles from wait output alone. Budget stops
-      // report "finished" but their output is partial; cancelled runs keep
-      // their partial output in the registry for check — flag both inline.
-      const perId = () =>
-        runs
-          .map((r) =>
-            r.result?.stopReason === "budget_exceeded"
-              ? `${r.id} (${r.role}): ${r.state} (budget exceeded — output is partial)`
-              : r.result?.stopReason === "cancelled"
-                ? `${r.id} (${r.role}): cancelled (partial output kept)`
-                : `${r.id} (${r.role}): ${r.state}`,
-          )
-          .join("\n");
+      // One roll-call line per run — the same `id (role): state (stats)`
+      // shape cancel uses, so the model can map ids to roles and gauge
+      // task scale from wait output alone; the output itself stays
+      // check's to deliver. Timeout reuses the same lines: live runs carry
+      // their so-far usage.
+      const perId = () => runs.map((r) => formatRunLine(r.id, r.role, r.snapshot)).join("\n");
       if (timedOut) {
         const unfinished = runs.filter((r) => r.state === "queued" || r.state === "running");
         const text =
@@ -685,7 +679,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
     name: "subagent_check",
     label: "Check a background subagent",
     description:
-      "Get an instant snapshot of ONE background subagent run: queued / running (with current activity) / finished (with the full output as the run result) / failed (with reason and partial output). Does not wait — use subagent_wait for that. Idempotent: checking a terminal run again re-delivers the same snapshot, so the result stays reachable even after branch navigation or compaction. One id per call because results can be large.",
+      "Get an instant snapshot of ONE background subagent run: queued / running (with current activity, elapsed/budget, and usage so far) / finished (with the full output and usage) / failed or cancelled (with reason, partial output, and usage). Does not wait — use subagent_wait for that. Idempotent: checking a terminal run again re-delivers the same snapshot, so the result stays reachable even after branch navigation or compaction. One id per call because results can be large.",
     promptSnippet: "Inspect a background subagent run",
     parameters: Type.Object({
       id: Type.String({ description: "Run id returned by a background delegate call" }),
@@ -1057,8 +1051,8 @@ export default function subagentExtension(pi: ExtensionAPI) {
         const result = await run.promise;
         lines.push(
           result.usage.turns > 0 || result.output
-            ? `\u2717 ${run.id} (${run.role}): cancelled after ${result.usage.turns} turn${result.usage.turns === 1 ? "" : "s"} — partial output kept (subagent_check / history)`
-            : `\u2717 ${run.id} (${run.role}): cancelled (nothing had run yet)`,
+            ? `✗ ${formatRunLine(run.id, run.role, result)} — partial output kept`
+            : `✗ ${formatRunLine(run.id, run.role, result)}`,
         );
       }
       ctx.ui.notify(lines.join("\n"), "info");

@@ -341,11 +341,11 @@ export const renderBackgroundDelegateResult: RenderResultFn = (result, { expande
 
 export const renderWaitCall: RenderCallFn = (args, theme) => {
   const ids = ((args as any).ids as string[] | undefined) ?? [];
-  const timeoutMs = ((args as any).timeout_ms as number | undefined) ?? 0;
+  const timeoutSec = ((args as any).timeout as number | undefined) ?? 0;
   const label = ids.length > 0 ? ids.join(", ") : "(all)";
   // Show the wait ceiling up front — the user should know how long this row
   // can block before it gives up. Omitted timeout = wait until runs finish.
-  const cap = timeoutMs > 0 ? ` \u2264${Math.max(1, Math.round(timeoutMs / 1000))}s` : "";
+  const cap = timeoutSec > 0 ? ` \u2264${Math.max(1, Math.round(timeoutSec))}s` : "";
   const text =
     theme.fg("toolTitle", theme.bold("subagent_wait ")) +
     theme.fg("accent", label) +

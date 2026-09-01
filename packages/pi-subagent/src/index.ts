@@ -184,7 +184,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
       "BACKGROUND DELEGATION:",
       "",
       "- Use it only when you have your own work this turn (including an ongoing discussion with the user) while the run executes; otherwise let the call block and return the result directly.",
-      "- Results are pull-only for the model — a completion notice is shown to the user, but nothing wakes you or delivers the result. Dispatching means owning the collection point: finish your own work, then subagent_check(id) for each result. Use subagent_wait(ids) to block until the run finish.",
+      "- Results are pull-only for the model — a completion notice is shown to the user, but nothing wakes you or delivers the result. Dispatching means owning the collection point: finish your own work, then subagent_check(id) for each result. Use subagent_wait(ids) to block until runs finish.",
       "- Cancel a run you no longer need with subagent_cancel(id) — the child stops and its partial output stays in the registry for subagent_check to collect.",
       "- Background delegation works only in the top-level session.",
     );
@@ -550,7 +550,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
     name: "subagent_wait",
     label: "Wait for background subagents",
     description:
-      "Block until one or more background subagents (started via subagent_delegate with background: true) finish. Omit ids to wait for ALL current background runs. Returns a per-run roll call — one `id (role): state (turns, elapsed, tokens, cost)` line per run, never the output; fetch it afterwards with subagent_check. If timeout_ms elapses before every run finishes, returns the same roll call (live runs carry usage so far) under a timeout header. Cancelling the wait never cancels the runs — to stop a run, use subagent_cancel(id).",
+      "Block until one or more background subagents (started via subagent_delegate with background: true) finish. Omit ids to wait for ALL current background runs. Returns a per-run roll call — one `id (role): state (turns, elapsed, tokens, cost)` line per run, never the output; fetch it afterwards with subagent_check. If timeout elapses before every run finishes, returns the same roll call (live runs carry usage so far) under a timeout header. Cancelling the wait never cancels the runs — to stop a run, use subagent_cancel(id).",
     promptSnippet: "Wait for background subagents to finish",
     parameters: Type.Object({
       ids: Type.Optional(
@@ -560,10 +560,10 @@ export default function subagentExtension(pi: ExtensionAPI) {
             "Run ids returned by background delegate calls. Omit to wait for all current background runs.",
         }),
       ),
-      timeout_ms: Type.Optional(
+      timeout: Type.Optional(
         Type.Number({
           description:
-            "Max time to wait in milliseconds. Omit to wait until all runs finish (each run still has its own role timeout).",
+            "Max time to wait in seconds. Subagent runs typically take minutes — omit this and let the wait block until they finish (each run's own role timeout is the ceiling); that is the normal usage. Set it only when you must resume soon, e.g. to report progress to the user.",
         }),
       ),
     }),
@@ -583,8 +583,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
         );
       }
       const runs = ids.map((id) => backgroundRuns.get(id)!);
-      const timeoutMs =
-        typeof params.timeout_ms === "number" && params.timeout_ms > 0 ? params.timeout_ms : 0;
+      const timeoutMs = typeof params.timeout === "number" && params.timeout > 0 ? params.timeout * 1000 : 0;
 
       // ── Live mirror: forward combined snapshots into this tool row ──
       const entries = () => runs.map((r) => ({ id: r.id, role: r.role, result: r.snapshot }));

@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-session-namer",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "type": "module",
   "description": "Session naming for pi — cheap side agent on first prompt, user-triggered regeneration, and a rename_session tool for agent-driven naming",
   "main": "src/index.ts",

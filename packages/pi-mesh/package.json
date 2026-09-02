@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-mesh",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "Agent mesh for pi — peer discovery + cross-instance transport. The neutral foundation that pi-peek-agent, chat-room, and other multi-instance workflows build on. Self-sufficient: install alone to discover peers and self-introduce a role.",
   "main": "src/index.ts",

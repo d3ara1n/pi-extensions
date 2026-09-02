@@ -52,7 +52,6 @@ import type { ActivityEntry } from "./types.ts";
 import {
   briefFilesUsed,
   formatFallback,
-  formatInheritedConversationInput,
   formatThinking,
   formatTimePart,
   formatToolCall,
@@ -130,6 +129,20 @@ export function filterDeliveredRuns(runs: RunHandle[], delivered: Set<string>): 
   return runs.filter(
     (r) => (r.state !== "finished" && r.state !== "failed") || !delivered.has(r.id),
   );
+}
+
+/**
+ * @internal — exported for testing; formats the metadata shown in the brief view.
+ */
+export function inheritedConversationFields(
+  chars: number,
+  truncated: boolean,
+): Array<[label: string, value: string]> {
+  return [
+    ["inherited", "yes"],
+    ["size", `${formatTokens(chars)} chars`],
+    ["truncated", truncated ? "yes" : "no"],
+  ];
 }
 
 export class SubagentViewPanel implements Component, Focusable {
@@ -383,12 +396,15 @@ export class SubagentViewPanel implements Component, Focusable {
     }
 
     if (run.inheritConversation) {
-      section(
-        formatInheritedConversationInput(
-          run.inheritedConversationChars ?? 0,
-          run.inheritedConversationTruncated === true,
-        ),
+      section("conversation");
+      const fields = inheritedConversationFields(
+        run.inheritedConversationChars ?? 0,
+        run.inheritedConversationTruncated === true,
       );
+      const labelWidth = Math.max(...fields.map(([label]) => label.length));
+      for (const [label, value] of fields) {
+        lines.push(`  ${fg("dim", label.padEnd(labelWidth))}  ${fg("accent", value)}`);
+      }
     }
 
     if (run.files && run.files.length > 0) {

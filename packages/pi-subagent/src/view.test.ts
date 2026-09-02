@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert";
-import { filterDeliveredRuns, sortViewRuns } from "./view.ts";
+import {
+  filterDeliveredRuns,
+  inheritedConversationFields,
+  sortViewRuns,
+} from "./view.ts";
 import type { RunHandle } from "./run.ts";
 
 // ── Fakes ──────────────────────────────────────────────────────────
@@ -27,6 +31,21 @@ test("filterDeliveredRuns drops delivered terminal runs, keeps live and undelive
     out.map((r) => r.id),
     ["sub-1", "sub-2", "sub-3"],
   );
+});
+
+// ── inheritedConversationFields ────────────────────────────────────
+
+test("inheritedConversationFields returns aligned-view metadata without body text", () => {
+  assert.deepEqual(inheritedConversationFields(50_000, true), [
+    ["inherited", "yes"],
+    ["size", "50k chars"],
+    ["truncated", "yes"],
+  ]);
+  assert.deepEqual(inheritedConversationFields(0, false), [
+    ["inherited", "yes"],
+    ["size", "0 chars"],
+    ["truncated", "no"],
+  ]);
 });
 
 // ── sortViewRuns ───────────────────────────────────────────────────

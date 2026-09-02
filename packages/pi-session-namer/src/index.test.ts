@@ -1,48 +1,70 @@
 /**
- * Tests for user-message collection from session branch entries.
+ * Tests for conversation-turn collection from session branch entries.
  * Run: node --test packages/pi-session-namer/src/index.test.ts
  */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { collectUserMessages } from "./index.ts";
+import { collectTurns } from "./index.ts";
 
-function msg(role: string, content: unknown, id = Math.random().toString(36).slice(2)) {
-  return { type: "message", id, message: { role, content } };
+let seq = 0;
+function msg(role: string, content: unknown) {
+  return { type: "message", id: `m${++seq}`, message: { role, content } };
 }
 
-test("collectUserMessages keeps only user text in chronological order", () => {
+test("collectTurns pairs each user prompt with its assistant reply", () => {
   const entries = [
-    msg("user", "read the TODO"),
-    msg("assistant", "here is the TODO content"),
-    msg("user", "fix the auth middleware"),
-    msg("assistant", [{ type: "text", text: "done" }]),
+    msg("user", "review the project"),
+    msg("assistant", [{ type: "text", text: "found two issues" }]),
+    msg("user", "fix them"),
+    msg("assistant", [{ type: "text", text: "fixed" }]),
   ];
-  assert.deepEqual(collectUserMessages(entries), ["read the TODO", "fix the auth middleware"]);
+  assert.deepEqual(collectTurns(entries), [
+    { user: "review the project", assistant: "found two issues" },
+    { user: "fix them", assistant: "fixed" },
+  ]);
 });
 
-test("collectUserMessages skips slash commands and empty texts", () => {
+test("collectTurns keeps only the last assistant message of a run", () => {
   const entries = [
-    msg("user", "/reload"),
-    msg("user", "   "),
+    msg("user", "look at this"),
+    msg("assistant", "first take"),
+    msg("assistant", [{ type: "toolCall", name: "read", arguments: { path: "a.ts" } }]),
+    msg("assistant", "final take"),
+  ];
+  assert.deepEqual(collectTurns(entries), [{ user: "look at this", assistant: "final take" }]);
+});
+
+test("collectTurns skips slash-command exchanges entirely", () => {
+  const entries = [
     msg("user", "/namer:rename"),
+    msg("assistant", "regenerated"),
     msg("user", "real request"),
+    msg("assistant", "real reply"),
   ];
-  assert.deepEqual(collectUserMessages(entries), ["real request"]);
+  assert.deepEqual(collectTurns(entries), [{ user: "real request", assistant: "real reply" }]);
 });
 
-test("collectUserMessages ignores tool-result blocks in user messages", () => {
+test("collectTurns keeps an open turn without a reply", () => {
+  const entries = [msg("user", "in-flight prompt")];
+  assert.deepEqual(collectTurns(entries), [{ user: "in-flight prompt" }]);
+});
+
+test("collectTurns tolerates an assistant reply before the first prompt", () => {
+  const entries = [msg("assistant", "orphan reply"), msg("user", "hello")];
+  assert.deepEqual(collectTurns(entries), [
+    { user: "", assistant: "orphan reply" },
+    { user: "hello" },
+  ]);
+});
+
+test("collectTurns ignores text-free and tool-result entries", () => {
   const entries = [
+    { type: "compaction", id: "c1", summary: "…" },
+    msg("toolResult", [{ type: "text", text: "command output" }]),
     msg("user", [{ type: "tool_result", toolCallId: "t1", content: "file contents" }]),
-    msg("user", [{ type: "text", text: "what does it say?" }]),
-  ];
-  assert.deepEqual(collectUserMessages(entries), ["what does it say?"]);
-});
-
-test("collectUserMessages skips non-message entries", () => {
-  const entries = [
-    { type: "compaction", id: "c1" },
+    msg("user", "   "),
     msg("user", "hello"),
   ];
-  assert.deepEqual(collectUserMessages(entries), ["hello"]);
+  assert.deepEqual(collectTurns(entries), [{ user: "hello" }]);
 });

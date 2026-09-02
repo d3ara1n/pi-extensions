@@ -3,8 +3,9 @@
  *
  * L1: on the first user prompt of a new session, a lightweight side agent
  *     generates a concise title so the session is never "Untitled".
- * L2: `/namer:rename` regenerates from the accumulated user-message window
- *     when the user finds the initial name stale.
+ * L2: `/namer:rename` regenerates from a conversation window (each turn
+ *     pairs a user prompt with the assistant's closing reply) when the user
+ *     finds the initial name stale.
  * L3: `rename_session` tool lets the main agent name the session on the
  *     user's request — the agent's context is the best naming source.
  */
@@ -17,6 +18,7 @@ import { DEFAULT_CONFIG } from "./types.ts";
 import type { SessionNamerConfig } from "./types.ts";
 import { loadNamerConfig } from "./config.ts";
 import { cleanSessionName, generateSessionName, NAMING_RULES } from "./namer.ts";
+import type { NamingTurn } from "./namer.ts";
 
 export default function sessionNamerExtension(pi: ExtensionAPI) {
   let config: SessionNamerConfig = DEFAULT_CONFIG;
@@ -66,7 +68,7 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
           rolesApi,
           config.sideAgentRole,
           config,
-          { userMessages: [event.prompt] },
+          { turns: [{ user: event.prompt }] },
         );
 
         pi.setSessionName(name);
@@ -126,9 +128,9 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
   pi.registerCommand("namer:rename", {
     description: "Regenerate session name from the user's messages",
     handler: async (_args, ctx) => {
-      const userMessages = collectUserMessages(ctx.sessionManager.getBranch());
-      if (userMessages.length === 0) {
-        ctx.ui.notify("No user prompt available to generate a name from.", "warning");
+      const turns = collectTurns(ctx.sessionManager.getBranch());
+      if (turns.length === 0) {
+        ctx.ui.notify("No conversation available to generate a name from.", "warning");
         return;
       }
 
@@ -153,7 +155,7 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
           rolesApi,
           config.sideAgentRole,
           config,
-          { userMessages },
+          { turns },
         );
 
         pi.setSessionName(name);
@@ -191,9 +193,14 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
 }
 
 /**
- * Collect user messages from the active branch (root → leaf,
- * chronological), excluding entries on abandoned branches. Slash-command
- * invocations are skipped: they are session tooling, not user intent.
+ * Collect naming turns from the active branch (root → leaf,
+ * chronological), excluding entries on abandoned branches. Each user prompt
+ * opens a turn, and the turn keeps only the LAST assistant text message of
+ * the consecutive run that follows — the closing reply carries what was
+ * actually found and done. Slash-command exchanges are skipped entirely
+ * (prompt and any reply to it): they are session tooling, not user intent.
+ * Tool-call blocks and tool-result entries carry no prose and never enter
+ * a turn.
  *
  * Uses getBranch() rather than getEntries(): the session file is append-only,
  * so after re-editing the first message (resetLeaf → new root) the old root
@@ -203,17 +210,35 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
  * @internal — exported for testing; command handlers consume it via the
  * session branch directly.
  */
-export function collectUserMessages(entries: unknown[]): string[] {
-  const messages: string[] = [];
+export function collectTurns(entries: unknown[]): NamingTurn[] {
+  const turns: NamingTurn[] = [];
+  // Inside a slash-command exchange: its skipped prompt and any assistant
+  // reply to it are dropped together.
+  let inSlashExchange = false;
   for (const entry of entries as any[]) {
     if (entry?.type !== "message") continue;
     const msg = entry.message;
-    if (msg?.role !== "user") continue;
-    const text = extractEntryText(msg?.content);
-    if (!text.trim() || text.startsWith("/")) continue;
-    messages.push(text);
+    if (msg?.role === "user") {
+      // Empty text means image-only prompts or tool-result carriers — they
+      // neither open a turn nor start a slash exchange.
+      const text = extractEntryText(msg?.content).trim();
+      if (!text) continue;
+      if (text.startsWith("/")) {
+        inSlashExchange = true;
+        continue;
+      }
+      inSlashExchange = false;
+      turns.push({ user: text });
+    } else if (msg?.role === "assistant") {
+      const text = extractEntryText(msg?.content).trim();
+      if (!text || inSlashExchange) continue;
+      // Reply before any prompt (rare) still carries substance — keep it as a
+      // userless turn rather than dropping it.
+      if (turns.length === 0) turns.push({ user: "" });
+      turns[turns.length - 1].assistant = text;
+    }
   }
-  return messages;
+  return turns;
 }
 
 /** Pull text out of a content field that may be a string or a ContentBlock[]. */

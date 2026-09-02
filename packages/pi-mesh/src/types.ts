@@ -79,6 +79,12 @@ export interface MeshListDetails {
   peers: PeerInfo[];
 }
 
+/** Tool result details for mesh_get_profile and mesh_set_profile — the peer
+ * (resp. self) with its profile, structured for the TUI name card. */
+export interface MeshGetProfileDetails {
+  peer: PeerInfo;
+}
+
 export interface ResolvePeerOptions {
   /** Target by name. Omit to auto-pick the other same-project peer. */
   at?: string;

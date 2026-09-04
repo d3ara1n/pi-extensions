@@ -25,6 +25,9 @@ export interface EditorShellIcons {
 /** How the model is shown in the top-left border slot. */
 export type ModelDisplay = "name" | "provider-id";
 
+/** Which response-throughput metric is shown in the shell border. */
+export type TpsDisplay = "end-to-end" | "generation" | "none";
+
 export interface EditorShellConfig {
   /**
    * Status keys to pin to the shell's top-right corner.
@@ -44,6 +47,11 @@ export interface EditorShellConfig {
    * - `"provider-id"` — `provider/id`.
    */
   modelDisplay: ModelDisplay;
+  /**
+   * Response-throughput metric shown in the bottom border.
+   * Detailed response timing remains available via /editor-shell:status.
+   */
+  tpsDisplay: TpsDisplay;
 }
 
 const ICON_KEYS: ReadonlyArray<keyof EditorShellIcons> = [
@@ -70,6 +78,7 @@ export const DEFAULT_CONFIG: EditorShellConfig = {
   pinnedStatus: [],
   icons: {},
   modelDisplay: "name",
+  tpsDisplay: "end-to-end",
 };
 
 /** Read the `editorShell` block from a settings file.
@@ -101,6 +110,13 @@ export function loadEditorShellConfig(cwd?: string): EditorShellConfig {
     modelDisplayRaw === "name" || modelDisplayRaw === "provider-id"
       ? modelDisplayRaw
       : DEFAULT_CONFIG.modelDisplay;
+  const tpsDisplayRaw = raw.tpsDisplay;
+  const tpsDisplay =
+    tpsDisplayRaw === "end-to-end" ||
+    tpsDisplayRaw === "generation" ||
+    tpsDisplayRaw === "none"
+      ? tpsDisplayRaw
+      : DEFAULT_CONFIG.tpsDisplay;
   return {
     pinnedStatus: Array.isArray(pinned)
       ? pinned.filter((k): k is string => typeof k === "string")
@@ -110,5 +126,6 @@ export function loadEditorShellConfig(cwd?: string): EditorShellConfig {
         ? filterIcons(iconsRaw as Record<string, unknown>)
         : {},
     modelDisplay,
+    tpsDisplay,
   };
 }

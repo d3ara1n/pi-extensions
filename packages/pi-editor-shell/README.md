@@ -7,7 +7,7 @@ Replaces pi's default editor and status bar with a unified rounded-corner shell 
 ## What shows up where
 
 - **Top border** — `  model ·  thinking-level ` (left) + pinned extension statuses (right, via `pinnedStatus` config)
-- **Bottom border** — `  ctx NN%/NNk|N.NM · ⚡ cacheRead (total)  hitRate% · NN.N t/s · $N.NNN ` (left) + `  ~/Projects (main +2 ~1 *4) ` (right, shows git branch plus staged, unstaged, and untracked file counts when in a repo). TPS is client-observed visible-text throughput for the latest reliable completed response: `(visible output tokens - 1) / (last text delta - first text delta)`, excluding time-to-first-token and provider-reported reasoning tokens. Responses containing tool calls, failed/aborted responses, samples below 10 visible tokens, and samples shorter than 250 ms do not replace the last valid TPS. Providers without a reasoning-token breakdown may still include hidden reasoning in the count. Session cost includes assistant, tool, compaction, and branch-summary usage; the dollar segment is hidden when the provider reports no priced usage. Session hit rate via `/editor-shell:status`.
+- **Bottom border** — `  ctx NN%/NNk|N.NM · ⚡ cacheRead (total)  hitRate% · NN.N e2e t/s · $N.NNN ` (left) + `  ~/Projects (main +2 ~1 *4) ` (right, shows git branch plus staged, unstaged, and untracked file counts when in a repo). Response throughput defaults to client-observed end-to-end visible-text throughput, including local request preparation, network and queue latency, hidden reasoning, and visible generation. It can instead show generation throughput or be hidden; see [Throughput display](#throughput-display). A new turn clears the previous measurement, so unavailable samples never leave stale data in the border. Session cost includes assistant, tool, compaction, and branch-summary usage; the dollar segment is hidden when the provider reports no priced usage. Session hit rate and detailed response timing are available via `/editor-shell:status`.
 - **Below shell** — Auto-wrapping extension status line (all `setStatus` entries not pinned to the top)
 - **Border color** follows pi's thinking-level / bash-mode indicator automatically.
 
@@ -21,6 +21,7 @@ In `~/.pi/agent/settings.json` under the `editorShell` key:
 {
   "editorShell": {
     "pinnedStatus": ["subagent", "access-denied"],
+    "tpsDisplay": "end-to-end",
     "icons": {
       "model": "robot",
       "cache": "\\uf0e7"
@@ -59,11 +60,31 @@ How the model is labeled in the top-left border (`"name"` by default):
 
 `"name"` uses `model.name`; a model with no name falls back to its id, so the slot never goes blank.
 
+### Throughput display
+
+Choose the response-throughput metric shown in the bottom border (`"end-to-end"` by default):
+
+```json
+{
+  "editorShell": {
+    "tpsDisplay": "end-to-end"
+  }
+}
+```
+
+| Value | Border label | Measurement |
+|-------|--------------|-------------|
+| `"end-to-end"` (default) | `e2e t/s` | Visible output tokens divided by total turn duration, including wait time and hidden reasoning |
+| `"generation"` | `gen t/s` | Visible tokens after the first divided by the time from first visible text to response completion |
+| `"none"` | — | Hides response throughput from the border |
+
+Both throughput values, time to first visible text, total response time, visible-token count, and token source remain available via `/editor-shell:status`. Generation samples below 10 visible tokens or 250 ms are reported as unavailable. Responses containing tool calls cannot provide a portable text-token split. If reasoning is active but the provider does not supply a usable positive reasoning-token count, both throughput values are reported as unavailable rather than treating hidden tokens as visible output.
+
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `/editor-shell:status` | Show debug info: pinned config, all extension statuses with their keys, cache totals, latest reliable visible-text TPS, and session cost |
+| `/editor-shell:status` | Show debug info: config, extension statuses, cache totals, response wait time, end-to-end and generation throughput, token source, and session cost |
 
 ## How it works
 

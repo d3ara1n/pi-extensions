@@ -137,6 +137,7 @@ export interface SubagentMessage {
     cost?: { total?: number };
     totalTokens?: number;
   };
+  provider?: string;
   model?: string;
   stopReason?: string;
   errorMessage?: string;

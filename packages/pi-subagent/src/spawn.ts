@@ -481,7 +481,12 @@ export async function spawnSubagent(
               usage.totalTokens || 0,
             );
           }
-          if (!result.model && msg.model) result.model = msg.model;
+          // The child's AssistantMessage carries the bare model id with the
+          // provider in a separate field — compose the full `provider/model-id`
+          // ref so usage displays match the delegate-facing modelRef format.
+          if (!result.model && msg.model) {
+            result.model = msg.provider ? `${msg.provider}/${msg.model}` : msg.model;
+          }
           // message_end is authoritative for the latest assistant attempt. A
           // successful native retry must clear the transient error left by the
           // failed attempt instead of triggering a redundant whole-run fallback.

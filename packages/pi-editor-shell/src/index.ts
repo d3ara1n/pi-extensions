@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { spawn } from "node:child_process";
+import { readFileSync, statSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { CardEditor, type FrameProvider, type SpinnerPhase } from "./card-editor.ts";
@@ -270,6 +271,60 @@ function refreshGitDirty(cwd: string, onDone?: () => void): void {
   child.on("close", (code) => settle(code === 0, stdout));
 }
 
+/** Filesystem boundary for {@link linkedWorktreeName}, injectable so tests
+ *  can exercise the walk-up and pointer parsing without touching the real
+ *  filesystem. `isFile` distinguishes "missing" (undefined) from "exists but
+ *  not a regular file" (false) — the walk-up continues past the former and
+ *  stops at the latter (a `.git` directory = main worktree). */
+export interface WorktreeIO {
+  isFile(p: string): boolean | undefined;
+  readText(p: string): string;
+}
+
+const NODE_IO: WorktreeIO = {
+  isFile(p) {
+    try {
+      return statSync(p).isFile();
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw e;
+    }
+  },
+  readText(p) {
+    return readFileSync(p, "utf8");
+  },
+};
+
+/** Name of the linked worktree containing `cwd`, or null when `cwd` sits in
+ *  the main worktree or outside any repo. A linked worktree marks itself with
+ *  a `.git` *file* pointing at `<main>/.git/worktrees/<name>`; the parent-dir
+ *  check keeps submodule pointers (`.git/modules/…`) from masquerading as
+ *  worktrees.
+ *  @internal — exported for testing; the session reads it once at start. */
+export function linkedWorktreeName(cwd: string, io: WorktreeIO = NODE_IO): string | null {
+  let dir = path.resolve(cwd);
+  for (;;) {
+    const dotGit = path.join(dir, ".git");
+    const kind = io.isFile(dotGit);
+    if (kind === undefined) {
+      const parent = path.dirname(dir);
+      if (parent === dir) return null;
+      dir = parent;
+      continue;
+    }
+    if (!kind) return null;
+    try {
+      const content = io.readText(dotGit).trim();
+      if (!content.startsWith("gitdir: ")) return null;
+      const gitdir = path.resolve(dir, content.slice("gitdir: ".length));
+      if (path.basename(path.dirname(gitdir)) !== "worktrees") return null;
+      return path.basename(gitdir) || null;
+    } catch {
+      return null;
+    }
+  }
+}
+
 /** Format dirty state as "+staged ~unstaged *untracked" (leading space), or ""
  *  if clean / unknown — ready to splice into a "(branch…)" segment. */
 function gitDirtyDisplay(): string {
@@ -301,6 +356,10 @@ export default function (pi: ExtensionAPI) {
   let footerSnap: FooterSnap | undefined;
   // CWD cached from session_start — used by turn_end to refresh git dirty.
   let _cwd = "";
+  // Linked-worktree name for the session cwd, resolved once at session_start
+  // (worktree names are stable for the lifetime of a session). Null = main
+  // worktree or outside any repo — no badge.
+  let _worktreeName: string | null = null;
   // cacheRead total + latest-turn usage, refreshed at session_start +
   // agent_end. The render provider reads these instead of re-scanning
   // entries every frame.
@@ -425,6 +484,7 @@ export default function (pi: ExtensionAPI) {
     if (!ctx.hasUI) return;
 
     _cwd = ctx.cwd;
+    _worktreeName = linkedWorktreeName(ctx.cwd);
     config = loadEditorShellConfig(ctx.cwd);
     icons = { ...DEFAULT_ICONS, ...config.icons };
     _cacheTotal = sumCacheRead(ctx);
@@ -497,13 +557,16 @@ export default function (pi: ExtensionAPI) {
           ? `${theme.fg("dim", " · ")}${theme.fg("warning", `$${_sessionCost.toFixed(3)}`)}`
           : "";
 
-      // Git branch + dirty state — pi's format: ~/Projects (main).
+      // Git branch + worktree badge + dirty state — pi's format:
+      // ~/Projects (main). Inside a linked worktree the branch carries an
+      // @<name> tag, so sibling worktrees of one repo are told apart at a glance.
       const cwdText = formatCwd(ctx.cwd);
       const branch = footerSnap?.getGitBranch() ?? null;
+      const worktreeTag = _worktreeName ? ` @${_worktreeName}` : "";
       const dirty = branch ? gitDirtyDisplay() : "";
       const cwdDisplay =
         branch && branch !== "detached"
-          ? `${icons.folder} ${cwdText} (${branch}${dirty})`
+          ? `${icons.folder} ${cwdText} (${branch}${worktreeTag}${dirty})`
           : `${icons.folder} ${cwdText}`;
 
       // Model in accent; thinking label in its level token — same hue the
@@ -645,6 +708,7 @@ export default function (pi: ExtensionAPI) {
       if (branch) {
         const dirty = gitDirtyDisplay().trim();
         lines.push(`  git dirty: ${dirty || "clean"}`);
+        lines.push(`  worktree: ${_worktreeName ?? "main"}`);
       }
       const m = ctx.model;
       lines.push(`  model: ${m ? `${m.provider}/${m.id}:${pi.getThinkingLevel()}` : "none"}`);

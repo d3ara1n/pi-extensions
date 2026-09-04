@@ -43,7 +43,7 @@ import { startSubagentRun, type RunHandle } from "./run.ts";
 import { buildInboxReminder, injectReminder } from "./reminder.ts";
 import { serializeInheritedConversation } from "./inheritance.ts";
 import { renderDelegateCall, renderDelegateResult } from "./render.ts";
-import { createViewPanel, filterDeliveredRuns } from "./view.ts";
+import { createViewPanel } from "./view.ts";
 import {
   createSteerCallRender,
   renderBackgroundDelegateCall,
@@ -59,11 +59,6 @@ import {
 } from "./render-async.ts";
 
 const BACKGROUND_COMPLETION_MESSAGE_TYPE = "subagent-completion";
-
-/** Refresh ceiling for the /subagent:view delivered-ids cache (ms). The panel
- * re-renders on every animation tick (~150ms); deriving delivery from the
- * session tree is throttled so the overlay stays cheap. */
-const VIEW_DELIVERED_CACHE_MS = 1000;
 
 // ── Extension entry ────────────────────────────────────────────────
 
@@ -812,28 +807,13 @@ export default function subagentExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("subagent:view", {
-    description: "Open the live subagent activity view (watch progress, steer runs)",
+    description: "Open the subagent activity view (watch runs, steer, browse the session's archive)",
     handler: async (_args, ctx) => {
-      // Union of every known run: the background registry plus live
-      // in-flight runs (foreground delegate calls included). Dedupe by id —
-      // background runs appear in both. Terminal runs stay listed until
-      // their result is delivered (subagent_check on the active branch,
-      // derived from the session tree — same source of truth as the inbox
-      // reminder), then leave the view: it is for live watching and pending
-      // collection, not an archive. Delivery re-derivation is throttled
-      // because the panel re-renders on every animation tick.
-      const deliveredCache = { ids: new Set<string>(), at: 0 };
-      const deliveredIds = (): Set<string> => {
-        if (Date.now() - deliveredCache.at > VIEW_DELIVERED_CACHE_MS) {
-          try {
-            deliveredCache.ids = collectDeliveredIds(ctx.sessionManager.buildContextEntries());
-          } catch {
-            /* keep the previous set */
-          }
-          deliveredCache.at = Date.now();
-        }
-        return deliveredCache.ids;
-      };
+      // Union of every known run: the background registry — append-only for
+      // the whole session, the view doubles as the run archive and derives
+      // nothing from delivery state — plus live in-flight runs (foreground
+      // delegate calls included, visible only while in flight). Dedupe by
+      // id — background runs appear in both.
       const runsProvider = () => {
         const seen = new Set<string>();
         const out: RunHandle[] = [];
@@ -843,7 +823,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
             out.push(r);
           }
         }
-        return filterDeliveredRuns(out, deliveredIds());
+        return out;
       };
       if (runsProvider().length === 0) {
         ctx.ui.notify("No subagent runs yet.", "info");

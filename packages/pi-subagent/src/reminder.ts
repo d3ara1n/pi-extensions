@@ -3,11 +3,12 @@
  *
  * Injected into the LLM context before every provider call via the `context`
  * event. The reminder lists every delegated run not yet delivered by a
- * subagent_check on the active branch — queued, running, and
- * finished/failed alike — so the model cannot forget about them. Delivery
- * state is derived from the session tree (see collectDeliveredIds), not
- * tracked in the registry: branching past a check re-arms the inbox,
- * branching back silences it, and compaction un-delivers naturally.
+ * subagent_check of a terminal snapshot on the active branch — queued,
+ * running, and finished/failed alike — so the model cannot forget about
+ * them. Delivery state is derived from the session tree (see
+ * collectDeliveredIds), not tracked in the registry: branching past a check
+ * re-arms the inbox, branching back silences it, and compaction un-delivers
+ * naturally.
  *
  * Cache discipline: the reminder is prepended to the FIRST user message, so
  * it sits at a stable position in the message prefix. Its content must stay
@@ -65,9 +66,9 @@ function inboxStatus(entry: InboxEntry): string {
  * Build the inbox reminder text, or undefined when every delegated run has
  * already been checked on the active branch (nothing to remind about —
  * inject nothing, keep the context untouched and the provider cache fully
- * stable). Queued/running runs are always listed regardless of delivery
- * state — their result is not final yet, so a past check (of a live frame)
- * never counts as delivered.
+ * stable). The state guard pins the inbox's own invariant locally — only
+ * terminal runs can ever count as delivered (collectDeliveredIds ignores
+ * live-frame checks), so a past peek at a running run never silences it.
  */
 export function buildInboxReminder(entries: Iterable<InboxEntry>, delivered: Set<string>): string | undefined {
   const rows: string[] = [];

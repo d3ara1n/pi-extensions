@@ -23,8 +23,13 @@
  * Steer input is modal so keys never conflict with the editor: browse mode
  * owns navigation; `s` opens the editor (Enter sends and returns to browse,
  *    Esc cancels and clears). Esc in browse closes the overlay; Tab cycles
- *    the focused run and resets its view — page back to activity, scrolls
- *    re-pinned.
+ *    the focused run forward, Shift+Tab backward, and cycling resets its
+ *    view — page back to activity, scrolls re-pinned.
+ *
+ * The run list is the session's archive: every background run stays listed
+ * (newest first) after it settles — results remain browsable even after the
+ * model collects them, so nothing is ever derived from delivery state here.
+ * Foreground runs appear only while their delegate call is in flight.
  *
  * Layout: a centered screen overlay (overlay:true) occupying most of the
  * terminal, framed with a thin border. An embedded Editor accepts steering
@@ -110,25 +115,54 @@ function capBriefText(text: string): string {
 }
 
 /**
- * Build the display list of runs for the panel: running/queued first, then
- * finished, each group ordered by registry id.
+ * Build the display list of runs for the panel: newest first, by numeric
+ * id (creation order). Creation order never reshuffles — the archive is
+ * append-only, so rows stay put when runs settle and focus remains
+ * predictable.
  */
 export function sortViewRuns(runs: RunHandle[]): RunHandle[] {
-  const rank = (r: RunHandle) => (r.state === "running" || r.state === "queued" ? 0 : 1);
-  return [...runs].sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id));
+  const num = (r: RunHandle) => Number.parseInt(r.id.replace(/^sub-/, ""), 10) || 0;
+  return [...runs].sort((a, b) => num(b) - num(a));
 }
 
 /**
- * Drop terminal runs whose result is already in the conversation — delivered
- * by subagent_check on the active branch (the same session-tree source of
- * truth as the inbox reminder). Live runs and undelivered terminal runs
- * stay: the view is for live watching and pending collection, not an
- * archive.
+ * @internal — exported for testing; fits a window of tab cells around the
+ * focused one into `budget` visible columns. The archive can outgrow the
+ * row, but the focused cell never scrolls off-screen: neighbors expand
+ * outward (cheaper side first) while they fit, and clipped sides collapse
+ * to `…` markers.
  */
-export function filterDeliveredRuns(runs: RunHandle[], delivered: Set<string>): RunHandle[] {
-  return runs.filter(
-    (r) => (r.state !== "finished" && r.state !== "failed") || !delivered.has(r.id),
-  );
+export function windowTabCells(
+  cells: string[],
+  focusIdx: number,
+  budget: number,
+): { items: string[]; leftClipped: boolean; rightClipped: boolean } {
+  if (cells.length === 0) return { items: [], leftClipped: false, rightClipped: false };
+  const focus = Math.max(0, Math.min(focusIdx, cells.length - 1));
+  const widths = cells.map((c) => visibleWidth(c) + 1); // +1 separator space
+  let lo = focus;
+  let hi = focus;
+  let used = widths[focus];
+  const tryAdd = (i: number): boolean => {
+    if (i < 0 || i >= cells.length || used + widths[i] > budget) return false;
+    used += widths[i];
+    return true;
+  };
+  for (;;) {
+    const canLeft = lo > 0;
+    const canRight = hi < cells.length - 1;
+    if (!canLeft && !canRight) break;
+    const preferLeft = canLeft && (!canRight || widths[lo - 1] <= widths[hi + 1]);
+    if (preferLeft) {
+      if (tryAdd(lo - 1)) { lo--; continue; }
+      if (canRight && tryAdd(hi + 1)) { hi++; continue; }
+      break;
+    }
+    if (tryAdd(hi + 1)) { hi++; continue; }
+    if (canLeft && tryAdd(lo - 1)) { lo--; continue; }
+    break;
+  }
+  return { items: cells.slice(lo, hi + 1), leftClipped: lo > 0, rightClipped: hi < cells.length - 1 };
 }
 
 /**
@@ -205,9 +239,10 @@ export class SubagentViewPanel implements Component, Focusable {
     }, ANIMATION_INTERVAL_MS);
   }
 
-  /** Resolve the focused run by id; stable across sort-order reshuffles
-   *  (e.g. a run finishing re-ranks the list). The focused run's view state
-   *  (page + scrolls) resets only when the focused run actually changes. */
+  /** Resolve the focused run by id; stable across list changes (a
+   *  foreground run settling drops out of the registry). The focused run's
+   *  view state (page + scrolls) resets only when the focused run actually
+   *  changes. */
   private focusedRun(): RunHandle | undefined {
     const runs = sortViewRuns(this.runsProvider());
     if (runs.length === 0) {
@@ -231,15 +266,21 @@ export class SubagentViewPanel implements Component, Focusable {
     this.briefTop = 0;
   }
 
-  private cycleRun(): void {
+  private cycleRun(direction: 1 | -1): void {
     const runs = sortViewRuns(this.runsProvider());
     if (runs.length < 2) return;
     const idx = runs.findIndex((r) => r.id === this.focusId);
-    // Focus id gone from the list: fall back to the first run, same as
-    // focusedRun() — not to the second.
-    const next = idx < 0 ? runs[0] : runs[(idx + 1) % runs.length];
-    if (next.id === this.focusId) return;
-    this.focusId = next.id;
+    if (idx < 0) {
+      // Focus id gone from the list (a foreground run settled): fall back
+      // to the newest run, same as focusedRun().
+      const run = runs[0];
+      if (run.id === this.focusId) return;
+      this.focusId = run.id;
+    } else {
+      const next = runs[(idx + direction + runs.length) % runs.length];
+      if (next.id === this.focusId) return;
+      this.focusId = next.id;
+    }
     this.resetRunView();
     this.tui.requestRender();
   }
@@ -282,7 +323,11 @@ export class SubagentViewPanel implements Component, Focusable {
       return;
     }
     if (matchesKey(data, Key.tab)) {
-      this.cycleRun();
+      this.cycleRun(1);
+      return;
+    }
+    if (matchesKey(data, "shift+tab")) {
+      this.cycleRun(-1);
       return;
     }
     const ch = printableChar(data);
@@ -482,25 +527,30 @@ export class SubagentViewPanel implements Component, Focusable {
     const runningCount = runs.filter((r) => r.state === "running").length;
     const focused = this.focusedRun();
 
-    // ── Tab row: one cell per run; the focused one is highlighted. ──
+    // ── Tab row: one cell per run; the focused one is highlighted. The
+    // archive can outgrow the row — window the cells around the focused one
+    // so focus never scrolls off-screen; Tab/⇧Tab walk the full list.
     if (runs.length > 0) {
       // Brackets stay on every cell, focused included — the selectedBg +
       // accent highlight is the indicator, so Tab doesn't shift text.
       const cells = runs.map((r) => {
-        const isFocused = r === focused;
-        const label = `${runIcon(r.snapshot, fg)} ${r.id} ${r.role}`;
-        const styled = isFocused ? th.bg("selectedBg", fg("accent", label)) : fg("dim", label);
-        return `[${styled}]`;
+        const label = `[${runIcon(r.snapshot, fg)} ${r.id} ${r.role}]`;
+        return r === focused ? th.bg("selectedBg", fg("accent", label)) : fg("dim", label);
       });
-      lines.push(
-        row(
-          `${fg("accent", th.bold("subagents"))} ${th.fg("dim", `${runningCount} running · ${runs.length} total · Tab switch`)}  ` +
-            cells.join(th.fg("dim", " ")),
-        ),
-      );
+      const header =
+        `${fg("accent", th.bold("subagents"))} ` +
+        th.fg("dim", `${runningCount} running · ${runs.length} total · Tab/⇧Tab switch`) +
+        "  ";
+      const focusIdx = Math.max(0, runs.findIndex((r) => r === focused));
+      const win = windowTabCells(cells, focusIdx, innerW - visibleWidth(header));
+      const parts: string[] = [];
+      if (win.leftClipped) parts.push(fg("dim", "…"));
+      parts.push(...win.items);
+      if (win.rightClipped) parts.push(fg("dim", "…"));
+      lines.push(row(header + parts.join(th.fg("dim", " "))));
     } else {
-      // Empty registry — every run left the view (a run disappears once its
-      // result is in the conversation). Give the state real presence — a
+      // Empty registry — nothing was delegated this session and no
+      // foreground run is in flight. Give the state real presence — a
       // full-size panel with a centered message and the close hint — and
       // fold steer mode back to browse so Esc closes immediately.
       if (this.mode === "steer") {
@@ -510,12 +560,7 @@ export class SubagentViewPanel implements Component, Focusable {
       lines.push(row(""));
       lines.push(row(fg("muted", centerText("no subagent runs", innerW))));
       lines.push(
-        row(
-          fg(
-            "dim",
-            centerText("a run leaves the view once its result is in the conversation", innerW),
-          ),
-        ),
+        row(fg("dim", centerText("start one with subagent_delegate to see it here", innerW))),
       );
       lines.push(row(""));
       lines.push(row(""));
@@ -565,7 +610,7 @@ export class SubagentViewPanel implements Component, Focusable {
           lines.push(row(fg("dim", `steer → ${label} · press s`)));
         }
         const pageKey = this.page === "activity" ? "d brief" : "d activity";
-        lines.push(row(fg("dim", `↑↓ scroll · ${pageKey} · Tab run · s steer · Esc close`)));
+        lines.push(row(fg("dim", `↑↓ scroll · ${pageKey} · Tab/⇧Tab run · s steer · Esc close`)));
       }
     }
 

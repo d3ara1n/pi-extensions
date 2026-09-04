@@ -903,6 +903,11 @@ interface SessionEntryLike {
  * truth for delivery state: it is append-only and branch navigation rebuilds
  * the active path, so branching past a check entry un-delivers (the inbox
  * re-arms) while branching back re-delivers — no mirrored state to sync.
+ *
+ * Only checks that returned a TERMINAL snapshot count: a peek at a live
+ * frame (running/queued, exitCode -1) delivers nothing — the steer flow
+ * re-checks later — so an early check can never silence the inbox before
+ * the outcome exists.
  */
 export function collectDeliveredIds(entries: Iterable<SessionEntryLike>): Set<string> {
   const ids = new Set<string>();
@@ -910,8 +915,12 @@ export function collectDeliveredIds(entries: Iterable<SessionEntryLike>): Set<st
     if (entry.type !== "message") continue;
     const message = entry.message;
     if (!message || message.role !== "toolResult" || message.toolName !== "subagent_check") continue;
-    const id = (message.details as { id?: unknown } | undefined)?.id;
-    if (typeof id === "string" && id) ids.add(id);
+    const details = message.details as { id?: unknown; result?: { exitCode?: unknown } } | undefined;
+    if (typeof details?.id !== "string" || !details.id) continue;
+    // A malformed or live frame (exitCode -1) is not a delivery — leave the
+    // inbox armed.
+    if (typeof details.result?.exitCode !== "number" || details.result.exitCode === -1) continue;
+    ids.add(details.id);
   }
   return ids;
 }

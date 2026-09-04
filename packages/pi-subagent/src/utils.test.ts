@@ -910,9 +910,15 @@ describe("briefFilesUsed", () => {
 });
 
 describe("collectDeliveredIds", () => {
-  const checkEntry = (id: string) => ({
+  // A check tool result carrying a terminal snapshot (exitCode >= 0) —
+  // the shape the check tool persists into the session tree.
+  const checkEntry = (id: string, exitCode = 0) => ({
     type: "message",
-    message: { role: "toolResult", toolName: "subagent_check", details: { id, role: "worker" } },
+    message: {
+      role: "toolResult",
+      toolName: "subagent_check",
+      details: { id, role: "worker", result: { exitCode } },
+    },
   });
 
   test("collects ids from subagent_check tool results only", () => {
@@ -932,6 +938,11 @@ describe("collectDeliveredIds", () => {
     assert.deepEqual(collectDeliveredIds([checkEntry("sub-1"), checkEntry("sub-1")]), new Set(["sub-1"]));
   });
 
+  test("a check of a live frame never delivers (stale peek must not silence the inbox)", () => {
+    const entries = [checkEntry("sub-1", -1), checkEntry("sub-2")];
+    assert.deepEqual(collectDeliveredIds(entries), new Set(["sub-2"]));
+  });
+
   test("empty path means nothing delivered (branch rewound past the check)", () => {
     assert.equal(collectDeliveredIds([]).size, 0);
   });
@@ -941,6 +952,10 @@ describe("collectDeliveredIds", () => {
       { type: "message", message: { role: "toolResult", toolName: "subagent_check" } },
       { type: "message", message: { role: "toolResult", toolName: "subagent_check", details: {} } },
       { type: "message", message: { role: "toolResult", toolName: "subagent_check", details: { id: 42 } } },
+      {
+        type: "message",
+        message: { role: "toolResult", toolName: "subagent_check", details: { id: "sub-1", result: {} } },
+      },
     ];
     assert.equal(collectDeliveredIds(entries).size, 0);
   });

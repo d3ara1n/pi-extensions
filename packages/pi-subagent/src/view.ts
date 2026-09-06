@@ -539,7 +539,7 @@ export class SubagentViewPanel implements Component, Focusable {
       });
       const header =
         `${fg("accent", th.bold("subagents"))} ` +
-        th.fg("dim", `${runningCount} running · ${runs.length} total · Tab/⇧Tab switch`) +
+        th.fg("dim", `${runningCount} running · ${runs.length} total`) +
         "  ";
       const focusIdx = Math.max(0, runs.findIndex((r) => r === focused));
       const win = windowTabCells(cells, focusIdx, innerW - visibleWidth(header));

@@ -87,7 +87,7 @@ export interface SubagentRole {
 }
 
 /** Status of an individual tool call within a subagent run. */
-export type ToolStatus = "running" | "done" | "failed";
+export type ToolStatus = "queued" | "running" | "done" | "failed";
 
 /** A single entry in the real-time activity log (thinking block, tool call, streamed assistant text, or a user steer). */
 export interface ActivityEntry {

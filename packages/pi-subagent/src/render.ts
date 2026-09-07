@@ -16,13 +16,11 @@ import {
   ensureElapsedTimer,
   formatFallback,
   formatInheritedConversationInput,
-  formatThinking,
+  formatDisplayItem,
   formatTimePart,
-  formatToolCall,
   formatUsageStats,
   renderDisplayItems,
   runIcon,
-  statusStyle,
   taskPreview,
   terminalResultLine,
 } from "./utils.ts";
@@ -150,14 +148,8 @@ export const renderDelegateResult: RenderResultFn = (result, { expanded }, theme
       container.addChild(new Text(theme.fg("muted", runningLabel), 0, 0));
     } else {
       for (const item of displayItems) {
-        if (item.type === "thinking") {
-          container.addChild(new Text(formatThinking(item.status, fg), 0, 0));
-        } else {
-          const { prefix, color } = statusStyle(item.status, fg);
-          container.addChild(
-            new Text(prefix + formatToolCall(item.name, item.args, color), 0, 0),
-          );
-        }
+        const row = formatDisplayItem(item, fg);
+        container.addChild(item.type === "steer" ? collapsedText(row) : new Text(row, 0, 0));
       }
     }
 

@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { appendActivity, consumeSteer } from "./activity.ts";
 import type { SubagentControl, SubagentMessage, SubagentResult } from "./types.ts";
 
 const PI_CODING_AGENT_PACKAGE = "@earendil-works/pi-coding-agent";
@@ -463,6 +464,10 @@ export async function spawnSubagent(
         }
       }
 
+      if (event.type === "message_start" && event.message && consumeSteer(result.activityLog, event.message)) {
+        emitProgress();
+      }
+
       if (event.type === "message_end" && event.message) {
         const msg = event.message as SubagentMessage;
 
@@ -510,14 +515,14 @@ export async function spawnSubagent(
       // Activity log: track thinking blocks and tool calls in arrival order.
       // Both update in place so the TUI reflects real-time state.
       if (event.type === "tool_execution_start" && event.toolCallId) {
-        toolCallIndex.set(event.toolCallId, result.activityLog.length);
-        result.activityLog.push({
+        const index = appendActivity(result.activityLog, {
           kind: "toolCall",
           id: event.toolCallId,
           status: "running",
           toolName: event.toolName,
           args: event.args ?? {},
         });
+        toolCallIndex.set(event.toolCallId, index);
         // Pause the parent timeout clock while the child delegates — nested
         // subagents get their own full budget instead of racing this clock.
         // Ref-counted: concurrent subagent_delegate calls pause once and resume
@@ -545,7 +550,7 @@ export async function spawnSubagent(
       const aev = event.assistantMessageEvent;
       if (event.type === "message_update" && aev) {
         if (aev.type === "thinking_start") {
-          result.activityLog.push({
+          appendActivity(result.activityLog, {
             kind: "thinking",
             id: `thinking-${thinkingCounter++}`,
             status: "running",
@@ -564,7 +569,7 @@ export async function spawnSubagent(
           }
           emitProgress();
         } else if (aev.type === "text_start") {
-          result.activityLog.push({
+          appendActivity(result.activityLog, {
             kind: "text",
             id: `text-${textCounter++}`,
             status: "running",
@@ -719,12 +724,11 @@ export async function spawnSubagent(
         steer(message: string) {
           if (processExited || terminationRequested) return;
           sendCommand({ type: "steer", message });
-          // Mirror the steer into the activity feed so the :view overlay shows
-          // what was injected and when.
-          result.activityLog.push({
+          // Keep pending input visible until the child emits its user message.
+          appendActivity(result.activityLog, {
             kind: "steer",
             id: `steer-${steerCounter++}`,
-            status: "done",
+            status: "queued",
             text: message,
           });
           emitProgress();

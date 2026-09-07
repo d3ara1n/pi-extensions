@@ -58,6 +58,7 @@ import {
   briefFilesUsed,
   formatFallback,
   formatThinking,
+  formatDisplayItem,
   formatTimePart,
   formatToolCall,
   formatTokens,
@@ -396,8 +397,7 @@ export class SubagentViewPanel implements Component, Focusable {
       return truncateToWidth(indent + formatThinking(e.status, fg), width);
     }
     if (e.kind === "steer") {
-      const firstLine = (e.text ?? "").trimEnd().split("\n")[0] || "";
-      return truncateToWidth(indent + fg("accent", `↩ steer: ${firstLine}`), width);
+      return truncateToWidth(indent + formatDisplayItem({ type: "steer", text: e.text ?? "", status: e.status }, fg), width);
     }
     if (e.kind === "text") {
       const buffer = e.text ?? "";

@@ -142,7 +142,8 @@ export function formatTimePart(r: {
 
 export type DisplayItem =
   | { type: "toolCall"; name: string; args: Record<string, any>; status?: ToolStatus }
-  | { type: "thinking"; status?: ToolStatus };
+  | { type: "thinking"; status?: ToolStatus }
+  | { type: "steer"; text: string; status?: ToolStatus };
 
 /**
  * Map the real-time activity log into renderable display items (in order).
@@ -151,12 +152,12 @@ export type DisplayItem =
  */
 export function buildDisplayItems(activityLog: ActivityEntry[]): DisplayItem[] {
   return activityLog
-    .filter((a) => a.kind === "thinking" || a.kind === "toolCall")
-    .map((a) =>
-      a.kind === "thinking"
-        ? { type: "thinking", status: a.status }
-        : { type: "toolCall", name: a.toolName ?? "?", args: a.args ?? {}, status: a.status },
-    );
+    .filter((a) => a.kind !== "text")
+    .map((a): DisplayItem => {
+      if (a.kind === "thinking") return { type: "thinking", status: a.status };
+      if (a.kind === "steer") return { type: "steer", text: a.text ?? "", status: a.status };
+      return { type: "toolCall", name: a.toolName ?? "?", args: a.args ?? {}, status: a.status };
+    });
 }
 
 export function shortenPath(p: string): string {
@@ -280,6 +281,24 @@ export function formatThinking(
   return fg("dim", "\u25C6 thought");
 }
 
+export function formatDisplayItem(
+  item: DisplayItem,
+  fg: (color: string, text: string) => string,
+): string {
+  const queued = item.status === "queued";
+  const marker = queued ? " (queued)" : "";
+  if (item.type === "steer") {
+    return fg("accent", `\u21a9 steer${marker}: ${oneLine(item.text)}`);
+  }
+  if (queued) {
+    const body = item.type === "thinking" ? "thinking" : formatToolCall(item.name, item.args, (_c, text) => text);
+    return fg("accent", `\u23f8 ${body}${marker}`);
+  }
+  if (item.type === "thinking") return formatThinking(item.status, fg);
+  const { prefix, color } = statusStyle(item.status, fg);
+  return prefix + formatToolCall(item.name, item.args, color);
+}
+
 export function renderDisplayItems(
   items: DisplayItem[],
   limit: number | undefined,
@@ -290,12 +309,7 @@ export function renderDisplayItems(
   let text = "";
   if (skipped > 0) text += fg("muted", `... ${skipped} earlier items\n`);
   for (const item of toShow) {
-    if (item.type === "thinking") {
-      text += `${formatThinking(item.status, fg)}\n`;
-    } else {
-      const { prefix, color } = statusStyle(item.status, fg);
-      text += `${prefix}${formatToolCall(item.name, item.args, color)}\n`;
-    }
+    text += `${formatDisplayItem(item, fg)}\n`;
   }
   return text.trimEnd();
 }
@@ -622,7 +636,7 @@ export function describeCurrentActivity(r: { activityLog: ActivityEntry[] }): st
   if (!last) return "waiting for first event";
   if (last.kind === "thinking") return last.status === "running" ? "thinking" : "thought";
   if (last.kind === "text") return last.status === "running" ? "responding" : "responded";
-  if (last.kind === "steer") return "steered — awaiting next turn";
+  if (last.kind === "steer") return last.status === "queued" ? "steer queued — awaiting delivery" : "steer received";
   return formatToolCall(last.toolName ?? "?", last.args ?? {}, (_color, text) => text);
 }
 

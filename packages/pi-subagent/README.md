@@ -55,7 +55,7 @@ Observations on how main models behave with this plugin, one family per subsecti
 
 ## TUI Display
 
-- **During execution**: the task's first line with a ⏳ (or ⏸ queued) indicator, a live stream of thinking blocks and tool calls (latest 5 collapsed, everything expanded), and a usage line (elapsed/budget time, turns, tokens, peak context, cost, model). Delegates using inherited conversation are marked in the tool-call title.
+- **During execution**: the task's first line with a ⏳ (or ⏸ queued) indicator, a live stream of thinking blocks, tool calls, and steering messages (latest 5 collapsed, everything expanded), and a usage line (elapsed/budget time, turns, tokens, peak context, cost, model). Delegates using inherited conversation are marked in the tool-call title.
 - **Collapsed result**: the task's first line, then `✓` + the AI-generated summary (or the first line of the output), then the usage line — no activity replay
 - **Expanded result** (Ctrl+O): reference files, context size, the full task, the complete activity stream, the final output as rendered Markdown, and usage details
 - **Fallback trace**: when a provider error (429, quota, timeout, ...) kills a run and it is retried on the role's `fallbackRole`, a `⚠ fallback: first attempt <model> failed (<reason>)` line appears in both views — also while the retry is running (see [Fallback observability](#fallback-observability))
@@ -73,11 +73,11 @@ Observations on how main models behave with this plugin, one family per subsecti
 
 A centered overlay covering most of the screen. A tab row across the top lists every run (icon · id · role); `Tab` cycles the focused run forward and `Shift+Tab` backward, and the rest of the viewport belongs to it alone — showing one of two pages, toggled with `d`. Runs are ordered newest-first, and the row is windowed around the focused cell — the archive can outgrow the terminal width, but focus never scrolls off-screen.
 
-The **activity page** (default) is the run's live feed: a continuous, append-only list where each entry is static text with a state icon, and the only animated thing is the ellipsis on a running entry (`.` → `..` → `...`). Finishing freezes an entry in place — its position never changes, only the icon flips. Streamed assistant text grows in place as the run's last line and settles into plain terminal-colored text at the turn boundary. The feed is scrollable (`↑↓`, `PgUp/PgDn`, `Home`/`End`): the view pins to the end and auto-follows new entries; scrolling up unpins (a `⋮ N earlier` marker appears), and reaching the bottom again re-pins. Both foreground and background runs appear here; a foreground run stays listed while its delegate call blocks the main agent. Background runs stay listed for the whole session — the view doubles as the session's run archive, so a run's activity and brief remain browsable even after the model has collected the result. The centered empty notice (with `Esc close` hinted) appears only when nothing has been delegated yet.
+The **activity page** (default) is the run's live feed: a continuous list with pending input pinned below current activity, where each entry is static text with a state icon, and the only animated thing is the ellipsis on a running entry (`.` → `..` → `...`). Finishing freezes an entry in place — its position never changes, only the icon flips. Streamed assistant text grows in place as the run's last line and settles into plain terminal-colored text at the turn boundary. The feed is scrollable (`↑↓`, `PgUp/PgDn`, `Home`/`End`): the view pins to the end and auto-follows new entries; scrolling up unpins (a `⋮ N earlier` marker appears), and reaching the bottom again re-pins. Both foreground and background runs appear here; a foreground run stays listed while its delegate call blocks the main agent. Background runs stay listed for the whole session — the view doubles as the session's run archive, so a run's activity and brief remain browsable even after the model has collected the result. The centered empty notice (with `Esc close` hinted) appears only when nothing has been delegated yet.
 
 The **brief page** shows the run's inputs and vitals at full width: the task and context verbatim (wrapped; head+tail elided beyond 20k chars), inherited-conversation size and truncation status when enabled (never its text), the reference file list annotated with `✓`/`·` for whether the child's tool calls actually touched each file, usage and time stats, the fallback trace, and a stderr tail on failures.
 
-Steer input is modal so keys never conflict with typing: in browse mode `s` opens the editor, `Enter` queues the message into the focused run (only while it is running) and returns to browse, `Esc` cancels and clears. The message appears immediately in the feed as an `↩ steer:` entry and is delivered to the child after its current tool batch, before its next LLM call — the run keeps its progress. `Esc` in browse mode closes the overlay.
+Steer input is modal so keys never conflict with typing: in browse mode `s` opens the editor, `Enter` queues the message into the focused run (only while it is running) and returns to browse, `Esc` cancels and clears. The message appears immediately at the bottom of the feed as an `↩ steer (queued):` entry. When the child consumes the user message, the queued marker disappears in place; the entry remains accent-colored in the history. Delivery happens after the current tool batch, before the next LLM call, without resetting the run's progress. `Esc` in browse mode closes the overlay.
 
 ## Dependencies
 
@@ -281,9 +281,9 @@ Steering queues a correction into a running subagent without killing it — the 
 There are two channels into the same mechanism:
 
 - **The model** calls `subagent_steer(id, message)` — typically right after a `subagent_check` snapshot revealed the run heading down a wrong path (check → steer → check again later).
-- **The user** types into the input box of `/subagent:view`, targeting the focused run. Every accepted steer also appears in the run's activity feed as an `↩ steer:` entry, so whoever watches the view sees what was injected and when.
+- **The user** types into the input box of `/subagent:view`, targeting the focused run. Every accepted steer also appears in the run's activity feed, so whoever watches the view sees what was injected and when.
 
-Queued steers are visible in neither wait nor check results — they shape the run's subsequent behavior, not its transcript.
+Steering messages appear in the delegate, wait, check, and live-view activity streams. Pending entries use `↩ steer (queued):`, stay below current activity, and count toward the same five-item collapsed limit. Consumption removes the queued marker without moving the row; `↩ steer:` remains accent-colored in history. Expanded views retain the full activity history. This is TUI presentation only: wait's model-facing response remains a status roll call.
 
 ### Background TUI display
 

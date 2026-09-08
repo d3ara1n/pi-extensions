@@ -245,7 +245,7 @@ Three execution properties, kept separate:
 | `subagent_steer(id, message)` | Queue a mid-run correction into one running run (typically right after a check revealed it heading down a wrong path) | Confirmation that the steer is queued — delivered after the child's current tool batch, before its next LLM call; the run keeps its progress |
 | `subagent_cancel(id, reason?)` | Kill one live (queued/running) run | Confirmation — the same roll-call line wait uses, plus a pointer to check for the partial output; the run settles as `cancelled` (warning styling, same family as timeout/budget) with the reason in its error message |
 
-Typical flow:
+Example tool calls made by the main model:
 
 ```json
 [
@@ -254,23 +254,23 @@ Typical flow:
 ]
 ```
 
-…continue other work. When you need a result, call `subagent_check`:
+The main model continues its own work while these runs execute. Before each model request, the extension refreshes an inbox reminder with the status of runs whose results have not been collected. When the model needs a result from a run that has ended, it retrieves it through `subagent_check`:
 
 ```json
 { "id": "sub-1" }
 ```
 
-If the run is queued or running, call `subagent_wait` to await its end:
+If the needed run is still queued or running, the model can wait for it through `subagent_wait`:
 
 ```json
 { "ids": ["sub-1"] }
 ```
 
-Then call `subagent_check` again to collect its result. Already-ended runs return their results on the first check. `subagent_check` accepts one id per call because results can be large; `subagent_wait` can await multiple unfinished runs together.
+Once the wait returns, the model retrieves the result through `subagent_check`. The reminder supplies status information, while check provides execution details and results; a separate check is not required before waiting. `subagent_check` accepts one id per call because results can be large; `subagent_wait` can await multiple unfinished runs together.
 
 Semantics worth knowing:
 
-- **Results are pull-only for the model.** A purple completion notice is shown to the user, but nothing delivers the result to the model or wakes it up. The notice is a pure notification in the same visual family as pi's `[compaction]` card — a `[subagent] id (role) outcome` header with the bare task preview beneath, each line truncated to the terminal width — and deliberately unlike the tool rows, so it never reads as model behavior; the result itself never appears in the notice, only in `subagent_check` (model) or `/subagent:status` (user). The model collects results with `subagent_check`, using `subagent_wait` when a checked run has not ended yet. The inbox reminder (below) lists runs not yet collected by a terminal check on the active branch on every request, but it never pushes results.
+- **Results are pull-only for the model.** A purple completion notice is shown to the user, but nothing delivers the result to the model or wakes it up. The notice is a pure notification in the same visual family as pi's `[compaction]` card — a `[subagent] id (role) outcome` header with the bare task preview beneath, each line truncated to the terminal width — and deliberately unlike the tool rows, so it never reads as model behavior; the result itself never appears in the notice, only in `subagent_check` (model) or `/subagent:status` (user). The model collects results with `subagent_check`, using `subagent_wait` when a run has not ended yet. The inbox reminder (below) lists runs not yet collected by a terminal check on the active branch on every request, but it never pushes results.
 - **Background runs survive turn cancellation** and are unaffected by a cancelled `subagent_wait` — cancelling the wait never cancels the runs; call `subagent_wait` or `subagent_check` again later.
 - **Idempotent check, session-tree delivery state:** `subagent_check` re-delivers the same terminal snapshot on every call — runs stay in the registry for the whole session, so no result can ever be stranded by branch navigation or compaction. Whether a run still needs collecting is not tracked in the registry: it derives from the session tree itself. The session is append-only, so branching back past a check entry drops it from the active path — the inbox reminder re-arms and the model simply checks again (the id still resolves; the run is still there). Branching forward to the original branch restores the check entry and silences the reminder again.
 - **Cancellation keeps the partial output.** `subagent_cancel(id, reason?)` kills the child (SIGTERM, escalating to SIGKILL) and settles the run as `cancelled` — its own stop reason in the same family as `timeout`/`budget_exceeded` (TUI warning styling ⏹, not the error-red ✗ of real failures) — with whatever it had produced. The `reason` becomes the error message verbatim, so whoever reads the partial output later via `subagent_check` — or the audit history — sees `cancelled — <reason>`; the source is distinguishable too (`user: ...` for `/subagent:cancel`, the model's own words for the tool, `session shutdown` for reaping). Cancelling does not remove the run: `subagent_check` still returns the partial output, and `subagent_wait` reports the run as `cancelled` with its usage stats.

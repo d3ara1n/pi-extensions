@@ -179,7 +179,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
       "BACKGROUND DELEGATION:",
       "",
       "- Use it only when you have your own work this turn (including an ongoing discussion with the user) while the run executes; otherwise let the call block and return the result directly.",
-      "- When you need a background run's result, use subagent_check. If it is queued or running, use subagent_wait to await its end, then check again to collect the result.",
+      "- When you need a background run's result, collect it with subagent_check if the run has ended; otherwise use subagent_wait, then check to collect it.",
       "- Cancel a run you no longer need with subagent_cancel(id) — the child stops and its partial output stays in the registry for subagent_check to collect.",
       "- Background delegation works only in the top-level session.",
     );

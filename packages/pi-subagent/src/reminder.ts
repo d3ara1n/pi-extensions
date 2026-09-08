@@ -2,10 +2,10 @@
  * The model's inbox of background subagent runs.
  *
  * Injected into the LLM context before every provider call via the `context`
- * event. The reminder lists every delegated run not yet delivered by a
- * subagent_check of a terminal snapshot on the active branch — queued,
- * running, and finished/failed alike — so the model cannot forget about
- * them. Delivery state is derived from the session tree (see
+ * event. The reminder separates queued/running work from terminal results
+ * awaiting collection by subagent_check on the active branch. Live runs
+ * stay visible as status information without implying a result is ready.
+ * Delivery state is derived from the session tree (see
  * collectDeliveredIds), not tracked in the registry: branching past a check
  * re-arms the inbox, branching back silences it, and compaction un-delivers
  * naturally.
@@ -30,8 +30,9 @@ export interface InboxEntry {
   snapshot: SubagentResult;
 }
 
-const INBOX_HEADER =
-  "[background subagent runs — results not yet collected with subagent_check; a terminal check removes a run from this list; runs missing here were already checked on this branch]";
+const INBOX_HEADER = "[background subagent runs]";
+const LIVE_HEADER = "In progress — no final results available yet:";
+const TERMINAL_HEADER = "Ended — results awaiting collection with subagent_check; a terminal check removes a run from this section:";
 
 /** `42s`, `3m12s`, `4m` — whole seconds, no live clocks. */
 function formatDuration(totalSec: number): string {
@@ -71,13 +72,19 @@ function inboxStatus(entry: InboxEntry): string {
  * live-frame checks), so a past peek at a running run never silences it.
  */
 export function buildInboxReminder(entries: Iterable<InboxEntry>, delivered: Set<string>): string | undefined {
-  const rows: string[] = [];
+  const liveRows: string[] = [];
+  const terminalRows: string[] = [];
   for (const entry of entries) {
-    if (entry.state !== "queued" && entry.state !== "running" && delivered.has(entry.id)) continue;
+    const live = entry.state === "queued" || entry.state === "running";
+    if (!live && delivered.has(entry.id)) continue;
+    const rows = live ? liveRows : terminalRows;
     rows.push(`- ${entry.id} (${entry.role}) — ${inboxStatus(entry)} — "${taskPreview(entry.task)}"`);
   }
-  if (rows.length === 0) return undefined;
-  return `${INBOX_HEADER}\n${rows.join("\n")}`;
+  if (liveRows.length === 0 && terminalRows.length === 0) return undefined;
+  const sections = [INBOX_HEADER];
+  if (liveRows.length > 0) sections.push(`${LIVE_HEADER}\n${liveRows.join("\n")}`);
+  if (terminalRows.length > 0) sections.push(`${TERMINAL_HEADER}\n${terminalRows.join("\n")}`);
+  return sections.join("\n\n");
 }
 
 /** Message array type of the `context` event (AgentMessage[]). */

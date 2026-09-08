@@ -242,7 +242,7 @@ Three execution properties, kept separate:
 | `subagent_delegate(background: true)` | Start an async run | Just the id (`sub-N`) |
 | `subagent_wait(ids?)` | Block until **all** listed runs end (omit `ids` for all current background runs) | A per-run roll call — one `id (role): state (turns, elapsed, tokens, cost)` line per run; retrieve results with `subagent_check` |
 | `subagent_check(id)` | One-shot snapshot of a single run | `queued` / `running` + current activity, elapsed/budget, and usage so far / the **full output** with a usage footer once finished / failure reason + partial output + usage on failed or cancelled. Idempotent: re-delivers the same terminal snapshot — the run stays in the registry for the whole session |
-| `subagent_steer(id, message)` | Queue a mid-run correction into one running run (typically right after a check revealed it heading down a wrong path) | Confirmation that the steer is queued — delivered after the child's current tool batch, before its next LLM call; the run keeps its progress |
+| `subagent_steer(id, message)` | Queue a correction or updated requirement into one running run | Confirmation that the steer is queued — delivered after the child's current tool batch, before its next LLM call; the run keeps its progress |
 | `subagent_cancel(id, reason?)` | Kill one live (queued/running) run | Confirmation — the same roll-call line wait uses, plus a pointer to check for the partial output; the run settles as `cancelled` (warning styling, same family as timeout/budget) with the reason in its error message |
 
 Example tool calls made by the main model:
@@ -260,7 +260,7 @@ The main model continues its own work while these runs execute. Before each mode
 { "id": "sub-1" }
 ```
 
-If the needed run is still queued or running, the model can wait for it through `subagent_wait`:
+If the needed run is still queued or running and no independent work remains, the model waits for it through `subagent_wait` rather than repeatedly polling `subagent_check`:
 
 ```json
 { "ids": ["sub-1"] }
@@ -274,7 +274,7 @@ Semantics worth knowing:
 - **Background runs survive turn cancellation** and are unaffected by a cancelled `subagent_wait` — cancelling the wait never cancels the runs; call `subagent_wait` or `subagent_check` again later.
 - **Idempotent check, session-tree delivery state:** `subagent_check` re-delivers the same terminal snapshot on every call — runs stay in the registry for the whole session, so no result can ever be stranded by branch navigation or compaction. Whether a run still needs collecting is not tracked in the registry: it derives from the session tree itself. The session is append-only, so branching back past a check entry drops it from the active path — the inbox reminder re-arms and the model simply checks again (the id still resolves; the run is still there). Branching forward to the original branch restores the check entry and silences the reminder again.
 - **Cancellation keeps the partial output.** `subagent_cancel(id, reason?)` kills the child (SIGTERM, escalating to SIGKILL) and settles the run as `cancelled` — its own stop reason in the same family as `timeout`/`budget_exceeded` (TUI warning styling ⏹, not the error-red ✗ of real failures) — with whatever it had produced. The `reason` becomes the error message verbatim, so whoever reads the partial output later via `subagent_check` — or the audit history — sees `cancelled — <reason>`; the source is distinguishable too (`user: ...` for `/subagent:cancel`, the model's own words for the tool, `session shutdown` for reaping). Cancelling does not remove the run: `subagent_check` still returns the partial output, and `subagent_wait` reports the run as `cancelled` with its usage stats.
-- **Inbox reminder:** every LLM call carries a `[background subagent runs]` system reminder listing the runs not yet collected by a terminal check on the active branch (queued, running, and finished/failed-but-unchecked alike, including cancelled ones — shown as `cancelled — <reason>`), injected at a cache-stable head position. Only checks that returned a terminal snapshot count — a peek at a live frame never silences the inbox, so the steer flow's check → steer → check-later cycle cannot strand an outcome. Runs missing from the list were already checked on this branch — so a finished run the model forgot to check keeps surfacing until it does. Branch navigation keeps this honest: the list derives from the session tree, not registry bookkeeping.
+- **Inbox reminder:** each LLM request with outstanding background runs carries a `[background subagent runs]` reminder at a cache-stable head position. It separates **In progress — no final results available yet** (queued/running) from **Ended — results awaiting collection with subagent_check** (finished/failed, including cancelled ones shown as `cancelled — <reason>`). Empty sections are omitted. Live runs provide status information; only terminal runs are presented as awaiting collection. A check of a live snapshot leaves the run visible, while a terminal check removes it from the reminder on the active branch. Once every result is collected, no reminder is injected. Branch navigation derives delivery from the session tree, not registry bookkeeping.
 - **Wait has no timeout parameter.** `subagent_wait` blocks until all specified runs end. Each run's own role timeout and budgets still apply; cancelling the wait leaves the runs running.
 - Background runs share the global `maxConcurrency` gate — extra runs show up as `queued` in wait/check views.
 - **Top-level only:** nested subagents cannot delegate in the background (a subagent process exits when its task finishes, which would orphan the run).
@@ -282,11 +282,11 @@ Semantics worth knowing:
 
 ### Steering a running subagent
 
-Steering queues a correction into a running subagent without killing it — the middle ground between waiting it out and cancelling. The message is delivered after the child finishes its current tool batch, before its next LLM call, so the run keeps its progress and can change course. It is a suggestion injected between turns, not an interrupt: the child may comply immediately, finish what it was doing first, or ignore poor instructions entirely — to actually stop a run, cancel it.
+Steering queues a correction or updated requirement into a running subagent without killing it. The message is delivered after the child finishes its current tool batch, before its next LLM call, so the run keeps its progress and can change course. It is a suggestion injected between turns, not an interrupt: the child may comply immediately, finish what it was doing first, or ignore poor instructions entirely — to actually stop a run, cancel it.
 
 There are two channels into the same mechanism:
 
-- **The model** calls `subagent_steer(id, message)` — typically right after a `subagent_check` snapshot revealed the run heading down a wrong path (check → steer → check again later).
+- **The model** calls `subagent_steer(id, message)` when there is a concrete deviation from the delegated task or new information changes its requirements. A running status or repeated checks without a result does not establish a wrong direction or a stall; steering must not ask the child to wrap up or return early merely to avoid waiting.
 - **The user** types into the input box of `/subagent:view`, targeting the focused run. Every accepted steer also appears in the run's activity feed, so whoever watches the view sees what was injected and when.
 
 Steering messages appear in the delegate, wait, check, and live-view activity streams. Pending entries use `↩ steer (queued):`, stay below current activity, and count toward the same five-item collapsed limit. Consumption removes the queued marker without moving the row; `↩ steer:` remains accent-colored in history. Expanded views retain the full activity history. This is TUI presentation only: wait's model-facing response remains a status roll call.

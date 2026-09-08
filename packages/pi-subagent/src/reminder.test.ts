@@ -143,10 +143,53 @@ describe("buildInboxReminder", () => {
     assert.ok(text.includes(`"${"x".repeat(70)}..."`));
   });
 
-  test("header identifies results awaiting collection with check", () => {
-    const text = buildInboxReminder([entry({ id: "sub-1", state: "running" })], new Set())!;
-    assert.match(text, /^\[background subagent runs — results not yet collected with subagent_check/);
-    assert.match(text, /already checked on this branch\]/);
+  test("live-only reminders report progress without requesting collection", () => {
+    const text = buildInboxReminder([
+      entry({ id: "sub-1", state: "running" }),
+      entry({ id: "sub-2", state: "queued" }),
+    ], new Set())!;
+    assert.match(text, /^\[background subagent runs\]/);
+    assert.match(text, /In progress — no final results available yet:/);
+    assert.doesNotMatch(text, /awaiting collection|subagent_check|Ended/);
+  });
+
+  test("mixed reminders separate live runs from every terminal outcome", () => {
+    const text = buildInboxReminder([
+      entry({ id: "sub-1", state: "finished" }),
+      entry({ id: "sub-2", state: "running" }),
+      entry({ id: "sub-3", state: "failed", snapshot: frame({ exitCode: 1 }) }),
+      entry({ id: "sub-4", state: "queued" }),
+      entry({ id: "sub-5", state: "failed", snapshot: frame({ exitCode: 1, stopReason: "cancelled" }) }),
+    ], new Set())!;
+    const sections = text.split("\n\n");
+    assert.equal(sections.length, 3);
+    assert.match(sections[1], /^In progress/);
+    assert.deepEqual([...sections[1].matchAll(/- (sub-\d+)/g)].map((match) => match[1]), ["sub-2", "sub-4"]);
+    assert.match(sections[2], /^Ended — results awaiting collection with subagent_check/);
+    assert.deepEqual([...sections[2].matchAll(/- (sub-\d+)/g)].map((match) => match[1]), ["sub-1", "sub-3", "sub-5"]);
+  });
+
+  test("completion makes a live run collectible until its terminal result is delivered", () => {
+    const run = entry({ id: "sub-1", state: "running" });
+    const running = buildInboxReminder([run], new Set())!;
+    assert.doesNotMatch(running, /awaiting collection/);
+
+    run.state = "finished";
+    run.snapshot = frame({ elapsedMs: 42_000 });
+    const finished = buildInboxReminder([run], new Set())!;
+    assert.match(finished, /Ended — results awaiting collection with subagent_check/);
+    assert.match(finished, /sub-1 \(worker\) — finished \(ran 42s\)/);
+    assert.doesNotMatch(finished, /In progress/);
+    assert.equal(buildInboxReminder([run], new Set([run.id])), undefined);
+  });
+
+  test("collecting terminal results leaves live runs without a collection section", () => {
+    const text = buildInboxReminder([
+      entry({ id: "sub-1", state: "finished" }),
+      entry({ id: "sub-2", state: "running" }),
+    ], new Set(["sub-1"]))!;
+    assert.match(text, /sub-2 \(worker\) — running/);
+    assert.doesNotMatch(text, /sub-1|awaiting collection|subagent_check|Ended/);
   });
 
   test("terminal rows in the delivered set drop out of the inbox", () => {
@@ -163,7 +206,7 @@ describe("buildInboxReminder", () => {
 
   test("live rows stay listed even when their id is in the delivered set", () => {
     // A live frame checked mid-run does not count as delivery — the result
-    // was not final yet, so the run keeps nagging until a terminal check.
+    // was not final yet, so the run remains visible as progress information.
     const text = buildInboxReminder(
       [
         entry({ id: "sub-1", state: "queued", snapshot: frame({ exitCode: -1, queued: true }) }),

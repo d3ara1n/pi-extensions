@@ -179,7 +179,8 @@ export default function subagentExtension(pi: ExtensionAPI) {
       "BACKGROUND DELEGATION:",
       "",
       "- Use it only when you have your own work this turn (including an ongoing discussion with the user) while the run executes; otherwise let the call block and return the result directly.",
-      "- When you need a background run's result, collect it with subagent_check if the run has ended; otherwise use subagent_wait, then check to collect it.",
+      "- While a background run is queued or running, continue independent work. When its result is needed and no independent work remains, use subagent_wait, then subagent_check to collect it; if it has already ended, collect it directly. Do not use repeated subagent_check calls as a substitute for waiting.",
+      "- Use subagent_steer for a concrete deviation from the delegated task or new information that changes its requirements. A running status or several checks without a result is not evidence of a wrong direction or a stall. Do not ask the child to wrap up or return early merely to avoid waiting.",
       "- Cancel a run you no longer need with subagent_cancel(id) — the child stops and its partial output stays in the registry for subagent_check to collect.",
       "- Background delegation works only in the top-level session.",
     );
@@ -707,13 +708,13 @@ export default function subagentExtension(pi: ExtensionAPI) {
     name: "subagent_steer",
     label: "Steer a running background subagent",
     description:
-      "Queue a mid-run correction into ONE running background subagent — typically right after subagent_check showed it heading down a wrong path. The message is delivered after the child finishes its current tool batch, before its next LLM call; the run keeps its progress (unlike cancel). Only running runs accept steering; queued runs reject it, and check is the tool for terminal runs. Typical flow: check → steer → check again later.",
+      "Queue a correction or updated requirement into ONE running background subagent. The message is delivered after the child finishes its current tool batch, before its next LLM call; the run keeps its progress. Only running runs accept steering; queued and terminal runs reject it.",
     promptSnippet: "Send a mid-run correction to a background subagent",
     parameters: Type.Object({
       id: Type.String({ description: "Run id returned by a background delegate call" }),
       message: Type.String({
         description:
-          "The correction. Concise and imperative — it lands mid-run, between the child's turns.",
+          "The concrete correction or updated requirement for the child to follow.",
       }),
     }),
 
@@ -740,7 +741,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
         content: [
           {
             type: "text",
-            text: `Steer queued for ${params.id} (${run.role}) — delivered after its current tool batch. Verify the effect with subagent_check later.`,
+            text: `Steer queued for ${params.id} (${run.role}) — delivered after its current tool batch.`,
           },
         ],
         details: { id: params.id, role: run.role, message: params.message },

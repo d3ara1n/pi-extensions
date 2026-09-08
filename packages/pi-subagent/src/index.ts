@@ -179,7 +179,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
       "BACKGROUND DELEGATION:",
       "",
       "- Use it only when you have your own work this turn (including an ongoing discussion with the user) while the run executes; otherwise let the call block and return the result directly.",
-      "- Results are pull-only for the model — a completion notice is shown to the user, but nothing wakes you or delivers the result. Dispatching means owning the collection point: finish your own work, then subagent_check(id) for each result. Use subagent_wait(ids) to block until runs finish.",
+      "- When you need a background run's result, use subagent_check. If it is queued or running, use subagent_wait to await its end, then check again to collect the result.",
       "- Cancel a run you no longer need with subagent_cancel(id) — the child stops and its partial output stays in the registry for subagent_check to collect.",
       "- Background delegation works only in the top-level session.",
     );
@@ -304,7 +304,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
     name: "subagent_delegate",
     label: "Delegate to subagent",
     description:
-      "Delegate a task to a specialized subagent. By default the call blocks until the run finishes and returns the final output — intermediate tool output stays out of your context. With background: true it returns an id immediately and you collect the result later with subagent_wait/subagent_check. Subagents are isolated by default; inheritConversation optionally injects a filtered snapshot of the active parent branch.",
+      "Delegate a task to a specialized subagent. By default the call blocks until the run finishes and returns the final output — intermediate tool output stays out of your context. With background: true it returns an id immediately and you collect the result later with subagent_check. Subagents are isolated by default; inheritConversation optionally injects a filtered snapshot of the active parent branch.",
     promptSnippet: "Delegate tasks to specialized subagents",
     promptGuidelines: guidelines,
 
@@ -335,7 +335,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
       background: Type.Optional(
         Type.Boolean({
           description:
-            "Non-blocking: returns an id immediately so you can do your own work (or keep discussing with the user) while the run executes — not for parallelism (several foreground calls in one turn already run concurrently). Results are pull-only for the model: a completion notice is shown to the user, but nothing delivers the result or wakes you; fetch with subagent_wait/subagent_check when your own work is done. If the next thing you'd do is wait for the result, omit this and let the call block.",
+            "Return immediately with a run id instead of waiting for the final output. Results are pull-only: a completion notice is shown to the user, but does not deliver the result to the model or wake it.",
         }),
       ),
       cwd: Type.Optional(Type.String({ description: "Working directory (defaults to current)" })),
@@ -545,7 +545,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
     name: "subagent_wait",
     label: "Wait for background subagents",
     description:
-      "Block until one or more background subagents (started via subagent_delegate with background: true) finish. Omit ids to wait for ALL current background runs. Returns a per-run roll call — one `id (role): state (turns, elapsed, tokens, cost)` line per run, never the output; fetch it afterwards with subagent_check. If timeout elapses before every run finishes, returns the same roll call (live runs carry usage so far) under a timeout header. Cancelling the wait never cancels the runs — to stop a run, use subagent_cancel(id).",
+      "Wait until all specified background subagent runs end. Omit ids to wait for all current background runs. Returns status and usage for each run; use subagent_check to retrieve results. Cancelling the wait leaves the runs running.",
     promptSnippet: "Wait for background subagents to finish",
     parameters: Type.Object({
       ids: Type.Optional(
@@ -555,12 +555,12 @@ export default function subagentExtension(pi: ExtensionAPI) {
             "Run ids returned by background delegate calls. Omit to wait for all current background runs.",
         }),
       ),
-      timeout: Type.Optional(
-        Type.Number({
-          description:
-            "Max time to wait in seconds. Subagent runs typically take minutes — omit this and let the wait block until they finish (each run's own role timeout is the ceiling); that is the normal usage. Set it only when you must resume soon, e.g. to report progress to the user.",
-        }),
-      ),
+      // Timeout is hidden from the tool schema; restore with the timeoutMs expression below.
+      // timeout: Type.Optional(
+      //   Type.Number({
+      //     description: "Max time to wait in seconds. Omit to wait until all specified runs end.",
+      //   }),
+      // ),
     }),
 
     async execute(_toolCallId, params, signal, onUpdate, _ctx) {
@@ -578,7 +578,9 @@ export default function subagentExtension(pi: ExtensionAPI) {
         );
       }
       const runs = ids.map((id) => backgroundRuns.get(id)!);
-      const timeoutMs = typeof params.timeout === "number" && params.timeout > 0 ? params.timeout * 1000 : 0;
+      // Keep the timeout machinery available while the tool exposes completion-only waiting.
+      // const timeoutMs = typeof params.timeout === "number" && params.timeout > 0 ? params.timeout * 1000 : 0;
+      const timeoutMs = 0;
 
       // ── Live mirror: forward combined snapshots into this tool row ──
       const entries = () => runs.map((r) => ({ id: r.id, role: r.role, result: r.snapshot }));

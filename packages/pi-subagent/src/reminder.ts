@@ -31,7 +31,7 @@ export interface InboxEntry {
 }
 
 const INBOX_HEADER =
-  "[background subagent runs — results are pull-only for the model: no completion notice wakes you. subagent_wait, then subagent_check to collect each run; a terminal check removes it from this list; runs missing here were already checked on this branch]";
+  "[background subagent runs — results not yet collected with subagent_check; a terminal check removes a run from this list; runs missing here were already checked on this branch]";
 
 /** `42s`, `3m12s`, `4m` — whole seconds, no live clocks. */
 function formatDuration(totalSec: number): string {

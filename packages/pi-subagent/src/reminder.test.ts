@@ -143,9 +143,9 @@ describe("buildInboxReminder", () => {
     assert.ok(text.includes(`"${"x".repeat(70)}..."`));
   });
 
-  test("header explains pull-only collection semantics", () => {
+  test("header identifies results awaiting collection with check", () => {
     const text = buildInboxReminder([entry({ id: "sub-1", state: "running" })], new Set())!;
-    assert.match(text, /^\[background subagent runs — results are pull-only for the model/);
+    assert.match(text, /^\[background subagent runs — results not yet collected with subagent_check/);
     assert.match(text, /already checked on this branch\]/);
   });
 

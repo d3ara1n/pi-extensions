@@ -44,6 +44,17 @@ publish.{js,sh}  发布脚本
 
 - **未经用户明确同意，禁止自行提交。** 改动完成后展示 diff 或摘要，等用户确认"提交"后再执行 `git commit`。即使改动很小（README 修正等），也先展示再等确认
 
+### Agent 署名
+
+AI 辅助的提交必须在 message 尾部附 `Co-Authored-By` trailer，记录操作 agent：
+
+```
+Co-Authored-By: <PI_MODEL 环境变量的值> <noreply@pi.dev>
+```
+
+- 模型名以 `PI_MODEL` 环境变量为准，提交前读取，不凭记忆手写
+- 邮箱统一 `noreply@pi.dev`，不使用各 provider 域名
+
 ### 示例
 
 ```
@@ -51,6 +62,14 @@ feat(pi-context-include): 支持嵌套 @ 引用
 fix(pi-context-include): 修复 ~ 路径展开在 Windows 上的问题
 chore: 更新依赖
 docs(pi-context-include): 补充 README
+```
+
+完整 message 示例（AI 辅助提交）：
+
+```
+fix(pi-subagent): 区分后台任务状态并明确等待与纠偏规则
+
+Co-Authored-By: glm-5.3 <noreply@pi.dev>
 ```
 
 ### 版本发布

@@ -830,10 +830,6 @@ export default function subagentExtension(pi: ExtensionAPI) {
       }
       return out;
     };
-    if (runsProvider().length === 0) {
-      ctx.ui.notify("No subagent runs yet.", "info");
-      return;
-    }
     await ctx.ui.custom(
       (tui, theme, _keybindings, done) =>
         createViewPanel(runsProvider, tui, theme, () => done(undefined)),

@@ -42,11 +42,10 @@ test("queued items share the visible limit and consumption changes only the mark
   assert.equal(buildDisplayItems(log).length, 7);
 });
 
-test("queued rendering uses status for every display type and steers retain accent", () => {
+test("queued rendering uses status for every display type and steer color follows delivery status", () => {
   const color = (name: string, text: string) => `<${name}>${text}</${name}>`;
-  for (const status of ["queued", "done"] as const) {
-    assert.match(formatDisplayItem({ type: "steer", status, text: "input" }, color), /^<accent>/);
-  }
+  assert.match(formatDisplayItem({ type: "steer", status: "queued", text: "input" }, color), /^<accent>/);
+  assert.match(formatDisplayItem({ type: "steer", status: "done", text: "input" }, color), /^<dim>/);
   assert.equal(formatDisplayItem({ type: "steer", status: "done", text: "queued" }, plain), "\u21a9 steer: queued");
   assert.match(formatDisplayItem({ type: "thinking", status: "queued" }, plain), /\(queued\)/);
   assert.match(formatDisplayItem({ type: "toolCall", name: "read", args: {}, status: "queued" }, plain), /\(queued\)/);

@@ -288,7 +288,10 @@ export function formatDisplayItem(
   const queued = item.status === "queued";
   const marker = queued ? " (queued)" : "";
   if (item.type === "steer") {
-    return fg("accent", `\u21a9 steer${marker}: ${oneLine(item.text)}`);
+    // Color follows delivery status like every other entry (queued = accent,
+    // consumed = dim); the ↩ glyph alone carries the external-origin marker.
+    const steerColor = queued ? "accent" : "dim";
+    return fg(steerColor, `\u21a9 steer${marker}: ${oneLine(item.text)}`);
   }
   if (queued) {
     const body = item.type === "thinking" ? "thinking" : formatToolCall(item.name, item.args, (_c, text) => text);

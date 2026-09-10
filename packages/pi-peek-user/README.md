@@ -32,6 +32,7 @@ Opens a centered overlay that serializes the current conversation and streams an
 - **Multi-turn** — follow-up questions reuse the serialized context (cheaper, no re-serialization)
 - **Live status** — header shows what the main agent is doing right now; status line shows the utility model + cumulative tokens
 - **Read-after-burn** — closing the overlay discards everything; the main session is never touched
+- **Command palette entry** — "Peek: Ask This Session" runs directly from the palette, mid-draft
 
 ## Installation
 
@@ -56,12 +57,15 @@ Or add to `~/.pi/agent/settings.json`:
 ## Dependencies
 
 - [`@d3ara1n/pi-peek`](../pi-peek) — consult core (tracker hooks + investigate backend)
+- [`@d3ara1n/pi-command-palette-core`](../pi-command-palette-core) — native command-palette registry (pure npm library, installed automatically; entries appear when [`pi-command-palette`](../pi-command-palette) is installed)
 
 ## Usage
 
 ```
 /peek
 ```
+
+Or pick **Peek: Ask This Session** in the command palette (Ctrl+Shift+P, via [`pi-command-palette`](../pi-command-palette)) — it opens the same overlay directly, without needing an empty editor.
 
 Type a question, press Enter. The answer streams in. Ask follow-ups, use PageUp/PageDown to jump between your questions (Fn+↑/Fn+↓ on MacBook), or press Esc to close.
 

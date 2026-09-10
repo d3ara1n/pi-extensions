@@ -26,6 +26,7 @@
     }
   },
   "dependencies": {
+    "@d3ara1n/pi-command-palette-core": "*",
     "@d3ara1n/pi-peek": "*"
   },
   "pi": {

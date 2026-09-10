@@ -4,6 +4,9 @@
   "type": "module",
   "description": "Global command palette for pi — press Ctrl+Shift+P to search and run commands from anywhere",
   "main": "src/index.ts",
+  "dependencies": {
+    "@d3ara1n/pi-command-palette-core": "*"
+  },
   "keywords": [
     "pi-package",
     "pi",

@@ -14,10 +14,8 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import {
-  copyToClipboard,
-  DynamicBorder,
-} from "@earendil-works/pi-coding-agent";
+import { copyToClipboard, DynamicBorder } from "@earendil-works/pi-coding-agent";
+import { paletteCommandRegistry } from "@d3ara1n/pi-command-palette-core";
 import {
   Container,
   type SelectItem,
@@ -33,6 +31,7 @@ import { resolveShortcutKey } from "./config.ts";
 
 type CommandAction =
   | { type: "editor"; text: string }
+  | { type: "native"; id: string }
   | { type: "model-select" }
   | { type: "compact" }
   | { type: "reload" }
@@ -67,7 +66,22 @@ const BUILTIN_ORDER: Record<string, number> = {
 
 // ── Helpers ────────────────────────────────────────────────────────
 
-function buildPaletteItems(pi: ExtensionAPI, ctx: ExtensionContext): PaletteItem[] {
+/**
+ * Sort ranks: built-in actions first, then native commands registered by other
+ * extensions (direct callbacks), then everything that fills the editor with a
+ * `/command`. Lower rank = higher up in the palette.
+ */
+function paletteSortRank(item: PaletteItem): number {
+  if (item.category === "Built-in") return 0;
+  if (item.action.type === "native") return 1;
+  return 2;
+}
+
+/**
+ * @internal — exported for testing; builds the palette item list from
+ * built-ins, the native-command registry, and pi's command registry.
+ */
+export function buildPaletteItems(pi: ExtensionAPI): PaletteItem[] {
   const items: PaletteItem[] = [];
 
   // ── Restore option (if previous editor text was saved) ────────
@@ -156,6 +170,20 @@ function buildPaletteItems(pi: ExtensionAPI, ctx: ExtensionContext): PaletteItem
     action: { type: "clear-editor" },
   });
 
+  // ── Native commands from other extensions ────────────────────
+  // Direct callbacks registered via @d3ara1n/pi-command-palette-core —
+  // executed in place, never touching the editor. Read at palette-open time,
+  // so late registrations are visible the next time the palette opens.
+  for (const cmd of paletteCommandRegistry.getAll()) {
+    items.push({
+      value: `native:${cmd.id}`,
+      label: cmd.label,
+      description: cmd.description ?? "",
+      category: "Native",
+      action: { type: "native", id: cmd.id },
+    });
+  }
+
   // ── Extension commands, skills, templates ────────────────────
   const commands = pi.getCommands();
   for (const cmd of commands) {
@@ -172,13 +200,13 @@ function buildPaletteItems(pi: ExtensionAPI, ctx: ExtensionContext): PaletteItem
     });
   }
 
-  // Sort: built-in actions first, ordered by BUILTIN_ORDER (then alphabetical
-  // for unlisted built-ins); extension commands follow alphabetically.
+  // Sort: built-in actions first (ordered by BUILTIN_ORDER, then alphabetical),
+  // then native commands, then editor-fill entries — each group alphabetical.
   items.sort((a, b) => {
-    const aBuilt = a.category === "Built-in";
-    const bBuilt = b.category === "Built-in";
-    if (aBuilt !== bBuilt) return aBuilt ? -1 : 1;
-    if (aBuilt) {
+    const ar = paletteSortRank(a);
+    const br = paletteSortRank(b);
+    if (ar !== br) return ar - br;
+    if (ar === 0) {
       const ai = BUILTIN_ORDER[a.value] ?? Number.MAX_SAFE_INTEGER;
       const bi = BUILTIN_ORDER[b.value] ?? Number.MAX_SAFE_INTEGER;
       if (ai !== bi) return ai - bi;
@@ -226,10 +254,7 @@ export function partitionedFuzzyFilter<T>(
   getText: (item: T) => string,
 ): T[] {
   if (!query.trim()) return [...primary, ...secondary];
-  return [
-    ...fuzzyFilter(primary, query, getText),
-    ...fuzzyFilter(secondary, query, getText),
-  ];
+  return [...fuzzyFilter(primary, query, getText), ...fuzzyFilter(secondary, query, getText)];
 }
 
 async function showModelSelector(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
@@ -374,7 +399,7 @@ async function showModelSelector(pi: ExtensionAPI, ctx: ExtensionContext): Promi
 async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
   if (!ctx.hasUI) return;
 
-  const paletteItems = buildPaletteItems(pi, ctx);
+  const paletteItems = buildPaletteItems(pi);
   const selectItems: SelectItem[] = paletteItems.map((item) => ({
     value: item.value,
     label: item.label,
@@ -464,6 +489,20 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionContext): Prom
   // Execute the selected action
   const action = result.action;
   switch (action.type) {
+    case "native": {
+      const cmd = paletteCommandRegistry.get(action.id);
+      if (!cmd) {
+        ctx.ui.notify(`Palette command not found: ${action.id}`, "warning");
+        break;
+      }
+      try {
+        await cmd.run(pi, ctx);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        ctx.ui.notify(`Palette command "${cmd.label}" failed: ${message}`, "error");
+      }
+      break;
+    }
     case "restore": {
       if (savedEditorText !== null) {
         ctx.ui.setEditorText(savedEditorText);

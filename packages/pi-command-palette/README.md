@@ -10,7 +10,7 @@ Pi's slash commands (`/model`, `/compact`, extension commands, etc.) only work w
 
 ## Dependencies
 
-None.
+- [`@d3ara1n/pi-command-palette-core`](../pi-command-palette-core) — shared registry for native palette commands (pure npm library, installed automatically)
 
 ## Installation
 
@@ -37,6 +37,7 @@ Or add to `~/.pi/agent/settings.json`:
 The palette lists:
 
 - **Built-in actions** — curated shortcuts for common operations (detailed below)
+- **Native commands** — entries registered by other extensions that run a callback directly (see below)
 - **Extension commands** — All registered `/command` entries
 - **Skills & Templates** — Skill commands and prompt templates
 
@@ -65,6 +66,23 @@ Built-in actions are grouped by how they run:
 | Session: Resume | `/resume` |
 
 > Pi ships with more built-in slash commands (e.g. `/export`, `/share`, `/name`, `/settings`). This palette only surfaces a curated subset above — for the rest, type them directly into the editor.
+
+### Native commands from other extensions
+
+Extensions built on [`@d3ara1n/pi-command-palette-core`](../pi-command-palette-core) can register palette entries backed by a **direct callback** instead of a `/command` editor fill. They appear above the extension-command entries, and selecting one runs the callback in place — your editor text is never touched, saved, or restored:
+
+```ts
+import { paletteCommandRegistry } from "@d3ara1n/pi-command-palette-core";
+
+paletteCommandRegistry.register({
+  id: "my-plugin:do-thing",
+  label: "My Plugin: Do the Thing",
+  description: "Runs immediately, without touching the editor",
+  run: (pi, ctx) => { /* ... */ },
+});
+```
+
+The registry is read every time the palette opens, so commands can be registered and unregistered at any time. Failures inside `run` are caught and surfaced as an error notification. See the [core package](../pi-command-palette-core) for the full API.
 
 ### Editor text preservation
 

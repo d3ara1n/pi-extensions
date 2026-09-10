@@ -1,11 +1,19 @@
 /**
- * Regression tests for model reference parsing and the partitioned fuzzy
- * filter that keeps scoped models on top while searching.
+ * Regression tests for model reference parsing, the partitioned fuzzy
+ * filter that keeps scoped models on top while searching, and the palette
+ * item ordering that keeps built-ins → native commands → editor-fill entries.
  */
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { parseModelRef, partitionedFuzzyFilter } from "./index.ts";
+import { after, test } from "node:test";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { paletteCommandRegistry } from "@d3ara1n/pi-command-palette-core";
+import { buildPaletteItems, parseModelRef, partitionedFuzzyFilter } from "./index.ts";
+
+/** Minimal fake of the pi API surface buildPaletteItems uses. */
+function fakePi(commands: { name: string; description?: string }[]): ExtensionAPI {
+  return { getCommands: () => commands } as unknown as ExtensionAPI;
+}
 
 test("parseModelRef splits provider and model at the first slash", () => {
   assert.deepEqual(parseModelRef("anthropic/claude-sonnet"), {
@@ -64,7 +72,10 @@ test("partitionedFuzzyFilter drops non-matches independently per partition", () 
 
   const result = partitionedFuzzyFilter(primary, secondary, "keep", getText);
 
-  assert.deepEqual(result.map((m) => m.label), ["keep-scoped", "keep-other"]);
+  assert.deepEqual(
+    result.map((m) => m.label),
+    ["keep-scoped", "keep-other"],
+  );
 });
 
 test("partitionedFuzzyFilter returns only primary matches when secondary has none", () => {
@@ -74,5 +85,50 @@ test("partitionedFuzzyFilter returns only primary matches when secondary has non
 
   const result = partitionedFuzzyFilter(primary, secondary, "son", getText);
 
-  assert.deepEqual(result.map((m) => m.label), ["sonnet"]);
+  assert.deepEqual(
+    result.map((m) => m.label),
+    ["sonnet"],
+  );
+});
+
+// ── buildPaletteItems ordering ─────────────────────────────────────
+
+const idsBefore = new Set(paletteCommandRegistry.getAll().map((c) => c.id));
+after(() => {
+  for (const c of paletteCommandRegistry.getAll()) {
+    if (!idsBefore.has(c.id)) paletteCommandRegistry.unregister(c.id);
+  }
+});
+
+test("buildPaletteItems orders built-ins above native commands above editor fills", () => {
+  paletteCommandRegistry.register({
+    id: "test:peek",
+    label: "Peek: Ask This Session",
+    run: () => {},
+  });
+
+  const items = buildPaletteItems(
+    fakePi([{ name: "some-command", description: "extension command" }]),
+  );
+
+  const ranks = items.map((item) =>
+    item.category === "Built-in" ? 0 : item.action.type === "native" ? 1 : 2,
+  );
+  // Monotonically non-decreasing → no editor-fill entry sits above a native
+  // entry, and no native entry sits above a built-in.
+  assert.ok(ranks.every((r, i) => i === 0 || ranks[i - 1] <= r));
+
+  const native = items.find((item) => item.value === "native:test:peek");
+  assert.ok(native);
+  assert.equal(native.label, "Peek: Ask This Session");
+  assert.equal(native.action.type, "native");
+});
+
+test("buildPaletteItems picks up native commands registered after load", () => {
+  // The registry is read at palette-open time, so a late registration must
+  // show up on the next build without any re-init.
+  paletteCommandRegistry.register({ id: "test:late", label: "Registered Late", run: () => {} });
+
+  const items = buildPaletteItems(fakePi([]));
+  assert.ok(items.some((item) => item.value === "native:test:late"));
 });

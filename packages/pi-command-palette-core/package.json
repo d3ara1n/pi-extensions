@@ -1,0 +1,22 @@
+{
+  "name": "@d3ara1n/pi-command-palette-core",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Shared types and singleton registry for pi-command-palette — let any extension register native palette entries with direct callbacks",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/d3ara1n/pi-extensions",
+    "directory": "packages/pi-command-palette-core"
+  }
+}

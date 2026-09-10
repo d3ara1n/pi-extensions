@@ -17,7 +17,7 @@ A collection of small extensions for [Pi Coding Agent](https://pi.dev).
 | [`@d3ara1n/pi-scout`](./packages/pi-scout) <sup>†</sup> | [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-scout)](https://www.npmjs.com/package/@d3ara1n/pi-scout) | Per-turn side agent — lazy skill injection, automatic model routing, and trivial-ack short-circuit (skips the side model on `好的`/`ok`/`はい`) |
 | [`@d3ara1n/pi-subagent`](./packages/pi-subagent) <sup>†</sup> | [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-subagent)](https://www.npmjs.com/package/@d3ara1n/pi-subagent) | Role-based subagent orchestration — foreground and background (async `subagent_wait`/`subagent_check`, cancellable via `subagent_cancel`) delegation to specialized pi child processes with real-time TUI progress |
 | [`@d3ara1n/pi-model-roles`](./packages/pi-model-roles) | [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-model-roles)](https://www.npmjs.com/package/@d3ara1n/pi-model-roles) | Named model role definitions with resolution to Model instances |
-| [`@d3ara1n/pi-command-palette`](./packages/pi-command-palette) | [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-command-palette)](https://www.npmjs.com/package/@d3ara1n/pi-command-palette) | Global command palette — Ctrl+Shift+P to search and run commands from anywhere |
+| [`@d3ara1n/pi-command-palette`](./packages/pi-command-palette) | [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-command-palette)](https://www.npmjs.com/package/@d3ara1n/pi-command-palette) | Global command palette — Ctrl+Shift+P to search and run commands from anywhere; other extensions can register native entries via [`pi-command-palette-core`](./packages/pi-command-palette-core) |
 | [`@d3ara1n/pi-session-namer`](./packages/pi-session-namer) <sup>†</sup> | [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-session-namer)](https://www.npmjs.com/package/@d3ara1n/pi-session-namer) | Auto-name sessions using a cheap side agent |
 | [`@d3ara1n/pi-access-denied`](./packages/pi-access-denied) | [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-access-denied)](https://www.npmjs.com/package/@d3ara1n/pi-access-denied) | Sandbox `write`/`edit`/`bash` to the project dir — prompt / deny / allow modes with per-session allow-deny memory |
 | [`@d3ara1n/pi-mesh`](./packages/pi-mesh) | [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-mesh)](https://www.npmjs.com/package/@d3ara1n/pi-mesh) | Agent mesh — peer discovery + cross-instance transport; the neutral foundation `pi-peek-agent` and `pi-chat-room` build on |
@@ -35,6 +35,7 @@ Pure npm packages — no `pi.extensions` entry point, no hooks/tools/commands. I
 | Package | Version | Description |
 |---------|---------|-------------|
 | [`@d3ara1n/pi-usage-block-core`](./packages/pi-usage-block-core) | [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-usage-block-core)](https://www.npmjs.com/package/@d3ara1n/pi-usage-block-core) | Shared types and singleton registry for usage quota reporting |
+| [`@d3ara1n/pi-command-palette-core`](./packages/pi-command-palette-core) | [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-command-palette-core)](https://www.npmjs.com/package/@d3ara1n/pi-command-palette-core) | Shared types and singleton registry for native command-palette entries |
 
 ## ACP / headless support
 

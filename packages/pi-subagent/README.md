@@ -64,7 +64,7 @@ Observations on how main models behave with this plugin, one family per subsecti
 
 | Command | Description |
 |---------|-------------|
-| `/subagent:view` | Open the live view: a tabbed overlay with a per-run activity feed and a brief detail page (inputs, files, stats), plus modal steer input for the focused run — doubles as the session's run archive |
+| `/subagent:view` | Open the live view: a tabbed overlay with a per-run activity feed and a brief detail page (inputs, files, stats), plus modal steer input for the focused run — doubles as the session's run archive. Also available as the native palette entry **Subagent: Activity View** (Ctrl+Shift+P via [`pi-command-palette`](../pi-command-palette)), which opens the view directly without needing an empty editor |
 | `/subagent:doctor` | Diagnose pi invocation, model-role resolution, configuration, and role references |
 | `/subagent:status` | List background runs and their current state |
 | `/subagent:cancel <id\|all> [reason]` | Cancel a live background run (or every live run); the optional reason is recorded with the run |
@@ -82,6 +82,7 @@ Steer input is modal so keys never conflict with typing: in browse mode `s` open
 ## Dependencies
 
 - [`@d3ara1n/pi-model-roles`](../pi-model-roles) — model role resolution
+- [`@d3ara1n/pi-command-palette-core`](../pi-command-palette-core) — native command-palette registry (pure npm library, installed automatically; the palette entry appears when [`pi-command-palette`](../pi-command-palette) is installed)
 
 ## Installation
 

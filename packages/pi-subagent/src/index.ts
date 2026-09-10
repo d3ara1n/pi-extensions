@@ -13,9 +13,10 @@
  * - Accurate, concise output for the main model
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { getModelRolesAPI } from "@d3ara1n/pi-model-roles";
+import { paletteCommandRegistry } from "@d3ara1n/pi-command-palette-core";
 import type { SubagentConfig, SubagentResult, SubagentRole } from "./types.ts";
 import { DEFAULT_CONFIG } from "./types.ts";
 import { loadSubagentConfig } from "./config.ts";
@@ -713,8 +714,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
     parameters: Type.Object({
       id: Type.String({ description: "Run id returned by a background delegate call" }),
       message: Type.String({
-        description:
-          "The concrete correction or updated requirement for the child to follow.",
+        description: "The concrete correction or updated requirement for the child to follow.",
       }),
     }),
 
@@ -809,38 +809,54 @@ export default function subagentExtension(pi: ExtensionAPI) {
     renderResult: renderCancelResult,
   });
 
-  pi.registerCommand("subagent:view", {
-    description: "Open the subagent activity view (watch runs, steer, browse the session's archive)",
-    handler: async (_args, ctx) => {
-      // Union of every known run: the background registry — append-only for
-      // the whole session, the view doubles as the run archive and derives
-      // nothing from delivery state — plus live in-flight runs (foreground
-      // delegate calls included, visible only while in flight). Dedupe by
-      // id — background runs appear in both.
-      const runsProvider = () => {
-        const seen = new Set<string>();
-        const out: RunHandle[] = [];
-        for (const r of [...backgroundRuns.values(), ...liveRuns]) {
-          if (!seen.has(r.id)) {
-            seen.add(r.id);
-            out.push(r);
-          }
+  // ── Subagent activity view ─────────────────────────────────────────
+  // Shared by the /subagent:view command and the native command-palette
+  // entry — both open the same overlay.
+  //
+  // Union of every known run: the background registry — append-only for
+  // the whole session, the view doubles as the run archive and derives
+  // nothing from delivery state — plus live in-flight runs (foreground
+  // delegate calls included, visible only while in flight). Dedupe by
+  // id — background runs appear in both.
+  async function openSubagentView(ctx: ExtensionContext): Promise<void> {
+    const runsProvider = () => {
+      const seen = new Set<string>();
+      const out: RunHandle[] = [];
+      for (const r of [...backgroundRuns.values(), ...liveRuns]) {
+        if (!seen.has(r.id)) {
+          seen.add(r.id);
+          out.push(r);
         }
-        return out;
-      };
-      if (runsProvider().length === 0) {
-        ctx.ui.notify("No subagent runs yet.", "info");
-        return;
       }
-      await ctx.ui.custom(
-        (tui, theme, _keybindings, done) =>
-          createViewPanel(runsProvider, tui, theme, () => done(undefined)),
-        {
-          overlay: true,
-          overlayOptions: { anchor: "center", width: "90%", maxHeight: "85%" },
-        },
-      );
-    },
+      return out;
+    };
+    if (runsProvider().length === 0) {
+      ctx.ui.notify("No subagent runs yet.", "info");
+      return;
+    }
+    await ctx.ui.custom(
+      (tui, theme, _keybindings, done) =>
+        createViewPanel(runsProvider, tui, theme, () => done(undefined)),
+      {
+        overlay: true,
+        overlayOptions: { anchor: "center", width: "90%", maxHeight: "85%" },
+      },
+    );
+  }
+
+  pi.registerCommand("subagent:view", {
+    description:
+      "Open the subagent activity view (watch runs, steer, browse the session's archive)",
+    handler: (_args, ctx) => openSubagentView(ctx),
+  });
+
+  // Native command-palette entry — opens the view directly, no editor
+  // round-trip, so it works mid-draft.
+  paletteCommandRegistry.register({
+    id: "subagent:view",
+    label: "Subagent: Activity View",
+    description: "Watch subagent runs, steer, browse the session's archive",
+    run: (_pi, ctx) => openSubagentView(ctx),
   });
 
   pi.registerCommand("subagent:doctor", {

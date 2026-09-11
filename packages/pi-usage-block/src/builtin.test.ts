@@ -172,6 +172,31 @@ test("Kimi For Coding drops malformed rows and unknown windows", async () => {
   ]);
 });
 
+test("Kimi For Coding derives used from remaining and tolerates alternate field spellings", async () => {
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    // `remaining` instead of `used`, plus the `resetAt` spelling.
+    usage: { limit: "100", remaining: "74", resetAt: "2030-01-07T00:00:00.000Z" },
+    limits: [
+      // Bare timeUnit (as the official CLI's fixtures spell it) + snake_case reset.
+      { window: { duration: 300, timeUnit: "minute" }, detail: { limit: "100", remaining: "85", reset_time: "2030-01-01T05:00:00.000Z" } },
+      // `used` wins when both counts are present; an unparsable resetTime falls through to resetAt.
+      { window: { duration: 1, timeUnit: "TIME_UNIT_DAY" }, detail: { used: "5", remaining: "99", limit: "100", resetTime: "not-a-date", resetAt: "2030-01-02T00:00:00.000Z" } },
+    ],
+  }), { status: 200 })) as typeof fetch;
+
+  const definition = BUILTIN_PROVIDERS.find((provider) => provider.id === "kimi-coding");
+  assert.ok(definition);
+  const provider = definition.build({ apiKey: "kimi-key", resolveApiKey: async () => "kimi-key" });
+  assert.equal(provider.kind, "quota");
+  assert.ok(provider.fetchUsage);
+
+  assert.deepEqual(await provider.fetchUsage(), [
+    { period: "5h", used: 15, limit: 100, unit: "requests", resetAt: new Date("2030-01-01T05:00:00.000Z") },
+    { period: "daily", used: 5, limit: 100, unit: "requests", resetAt: new Date("2030-01-02T00:00:00.000Z") },
+    { period: "weekly", used: 26, limit: 100, unit: "requests", resetAt: new Date("2030-01-07T00:00:00.000Z") },
+  ]);
+});
+
 test("Kimi For Coding returns empty for an empty payload", async () => {
   globalThis.fetch = (async () => new Response(JSON.stringify({}), { status: 200 })) as typeof fetch;
 

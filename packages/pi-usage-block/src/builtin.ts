@@ -332,12 +332,19 @@ async function zhipuCodingQuota(host: string, apiKey: string): Promise<QuotaWind
 
 // ── Kimi For Coding ───────────────────────────────────────────────────────
 
-/** Proto-style timeUnit enum → minutes multiplier. */
+/**
+ * timeUnit → minutes multiplier, keyed by the bare unit. The endpoint sends
+ * the proto-style `TIME_UNIT_MINUTE`; the official CLI's own fixtures use the
+ * bare `MINUTE`, so both spellings (any case) are accepted.
+ *
+ * Units outside this table (e.g. `TIME_UNIT_MONTH`) yield no window at all —
+ * the display model covers 5h / daily / weekly windows only.
+ */
 const KIMI_TIME_UNIT_MINUTES: Record<string, number> = {
-  TIME_UNIT_MINUTE: 1,
-  TIME_UNIT_HOUR: 60,
-  TIME_UNIT_DAY: 1440,
-  TIME_UNIT_WEEK: 10080,
+  MINUTE: 1,
+  HOUR: 60,
+  DAY: 1440,
+  WEEK: 10080,
 };
 
 /** Non-negative integer, arriving as a decimal string or a number. */
@@ -352,10 +359,16 @@ function kimiInt(value: unknown): number | undefined {
   return undefined;
 }
 
+/** Minutes multiplier for a limits[] item's `window.timeUnit`. */
+function kimiTimeUnitMultiplier(raw: unknown): number | undefined {
+  if (typeof raw !== "string") return undefined;
+  return KIMI_TIME_UNIT_MINUTES[raw.trim().toUpperCase().replace(/^TIME_UNIT_/, "")];
+}
+
 /** Rolling-window minutes from a limits[] item's proto-style `window`. */
 function kimiWindowMinutes(item: any): number | undefined {
   const duration = kimiInt(item?.window?.duration);
-  const multiplier = KIMI_TIME_UNIT_MINUTES[item?.window?.timeUnit];
+  const multiplier = kimiTimeUnitMultiplier(item?.window?.timeUnit);
   if (duration === undefined || duration === 0 || multiplier === undefined) return undefined;
   return duration * multiplier;
 }
@@ -370,18 +383,33 @@ function kimiPeriodLabel(minutes: number): string {
   return `${minutes}m`;
 }
 
-/** One usage row (`detail`) → QuotaWindow. Skips non-integer/zero-limit rows. */
+/** The row's reset timestamp, under any of the spellings the endpoint uses. */
+function kimiResetAt(detail: any): Date | undefined {
+  for (const key of ["resetTime", "resetAt", "reset_time", "reset_at"]) {
+    const value = detail?.[key];
+    if (typeof value !== "string") continue;
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+  return undefined;
+}
+
+/** One usage row (`detail`) → QuotaWindow. Skips rows without usable counts. */
 function kimiRow(detail: any, period: string): QuotaWindow | undefined {
-  const used = kimiInt(detail?.used);
   const limit = kimiInt(detail?.limit);
+  // Some payloads report only `remaining`; QuotaWindow.used is consumed.
+  let used = kimiInt(detail?.used);
+  if (used === undefined && limit !== undefined) {
+    const remaining = kimiInt(detail?.remaining);
+    if (remaining !== undefined) used = limit - remaining;
+  }
   if (used === undefined || limit === undefined || limit === 0) return undefined;
-  const reset = typeof detail?.resetTime === "string" ? new Date(detail.resetTime) : undefined;
   return {
     period,
     used,
     limit,
     unit: "requests", // plan usage counts — the endpoint exposes no finer unit
-    resetAt: reset !== undefined && !Number.isNaN(reset.getTime()) ? reset : undefined,
+    resetAt: kimiResetAt(detail),
   };
 }
 
@@ -390,9 +418,13 @@ function kimiRow(detail: any, period: string): QuotaWindow | undefined {
  *
  * `usage` is the plan's weekly summary (the backend omits its window);
  * `limits[]` carries per-window rows (the 5-hour limit arrives as duration
- * 300 TIME_UNIT_MINUTE). Numbers arrive as decimal strings or numbers.
- * Duplicate windows collapse to one (summary wins), rows sort shortest
- * window first. The optional `boosterWallet` (prepaid balance) is not
+ * 300 TIME_UNIT_MINUTE). Counts arrive as decimal strings or numbers, and
+ * some payloads report `remaining` instead of `used`. Duplicate windows
+ * collapse to one (summary wins), rows sort shortest window first.
+ *
+ * Only the units in {@link KIMI_TIME_UNIT_MINUTES} are mapped: a
+ * `TIME_UNIT_MONTH` row is dropped until the display handles monthly
+ * windows. The optional `boosterWallet` (prepaid balance) is likewise not
  * mapped — a balance does not fit the quota-window display.
  */
 function parseKimiUsage(data: any): QuotaWindow[] {

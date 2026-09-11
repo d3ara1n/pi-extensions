@@ -153,7 +153,7 @@ test("Kimi For Coding drops malformed rows and unknown windows", async () => {
     limits: [
       { name: "dup-a", window: { duration: 300, timeUnit: "TIME_UNIT_MINUTE" }, detail: { used: "1", limit: "100" } },
       { name: "dup-b", window: { duration: 5, timeUnit: "TIME_UNIT_HOUR" }, detail: { used: "2", limit: "100" } }, // 5h == 300min → duplicate
-      { name: "unknown", window: { duration: 1, timeUnit: "TIME_UNIT_MONTH" }, detail: { used: "3", limit: "100" } },
+      { name: "unknown", window: { duration: 1, timeUnit: "TIME_UNIT_FORTNIGHT" }, detail: { used: "3", limit: "100" } },
       { name: "bad-reset", window: { duration: 24, timeUnit: "TIME_UNIT_HOUR" }, detail: { used: "5", limit: "100", resetTime: "invalid" } },
       { name: "missing-used", window: { duration: 7, timeUnit: "TIME_UNIT_DAY" }, detail: { limit: "100" } },
     ],
@@ -194,6 +194,25 @@ test("Kimi For Coding derives used from remaining and tolerates alternate field 
     { period: "5h", used: 15, limit: 100, unit: "requests", resetAt: new Date("2030-01-01T05:00:00.000Z") },
     { period: "daily", used: 5, limit: 100, unit: "requests", resetAt: new Date("2030-01-02T00:00:00.000Z") },
     { period: "weekly", used: 26, limit: 100, unit: "requests", resetAt: new Date("2030-01-07T00:00:00.000Z") },
+  ]);
+});
+
+test("Kimi For Coding maps a monthly window", async () => {
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    limits: [{
+      window: { duration: 1, timeUnit: "TIME_UNIT_MONTH" },
+      detail: { used: "26", limit: "100", resetTime: "2030-02-01T00:00:00.000Z" },
+    }],
+  }), { status: 200 })) as typeof fetch;
+
+  const definition = BUILTIN_PROVIDERS.find((provider) => provider.id === "kimi-coding");
+  assert.ok(definition);
+  const provider = definition.build({ apiKey: "kimi-key", resolveApiKey: async () => "kimi-key" });
+  assert.equal(provider.kind, "quota");
+  assert.ok(provider.fetchUsage);
+
+  assert.deepEqual(await provider.fetchUsage(), [
+    { period: "monthly", used: 26, limit: 100, unit: "requests", resetAt: new Date("2030-02-01T00:00:00.000Z") },
   ]);
 });
 

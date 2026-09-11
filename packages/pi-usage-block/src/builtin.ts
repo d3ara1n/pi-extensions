@@ -336,15 +336,17 @@ async function zhipuCodingQuota(host: string, apiKey: string): Promise<QuotaWind
  * timeUnit → minutes multiplier, keyed by the bare unit. The endpoint sends
  * the proto-style `TIME_UNIT_MINUTE`; the official CLI's own fixtures use the
  * bare `MINUTE`, so both spellings (any case) are accepted.
+ * Units outside this table yield no window at all.
  *
- * Units outside this table (e.g. `TIME_UNIT_MONTH`) yield no window at all —
- * the display model covers 5h / daily / weekly windows only.
+ * `MONTH` counts as 30 days: the duration is only a sort/dedupe key and the
+ * basis for the period label, so the calendar-month imprecision is harmless.
  */
 const KIMI_TIME_UNIT_MINUTES: Record<string, number> = {
   MINUTE: 1,
   HOUR: 60,
   DAY: 1440,
   WEEK: 10080,
+  MONTH: 43200,
 };
 
 /** Non-negative integer, arriving as a decimal string or a number. */
@@ -373,11 +375,12 @@ function kimiWindowMinutes(item: any): number | undefined {
   return duration * multiplier;
 }
 
-/** Short period label: "5h", "daily", "weekly", … */
+/** Short period label: "5h", "daily", "weekly", "monthly", … */
 function kimiPeriodLabel(minutes: number): string {
   if (minutes === 300) return "5h";
   if (minutes === 1440) return "daily";
   if (minutes === 10080) return "weekly";
+  if (minutes === 43200) return "monthly";
   if (minutes % 1440 === 0) return `${minutes / 1440}d`;
   if (minutes % 60 === 0) return `${minutes / 60}h`;
   return `${minutes}m`;
@@ -422,10 +425,10 @@ function kimiRow(detail: any, period: string): QuotaWindow | undefined {
  * some payloads report `remaining` instead of `used`. Duplicate windows
  * collapse to one (summary wins), rows sort shortest window first.
  *
- * Only the units in {@link KIMI_TIME_UNIT_MINUTES} are mapped: a
- * `TIME_UNIT_MONTH` row is dropped until the display handles monthly
- * windows. The optional `boosterWallet` (prepaid balance) is likewise not
- * mapped — a balance does not fit the quota-window display.
+ * Window types map to the 5h / daily / weekly / monthly rows; a unit outside
+ * {@link KIMI_TIME_UNIT_MINUTES} yields no row. The optional `boosterWallet`
+ * (prepaid balance) is likewise not mapped — a balance does not fit the
+ * quota-window display.
  */
 function parseKimiUsage(data: any): QuotaWindow[] {
   const byWindow = new Map<number, QuotaWindow>();

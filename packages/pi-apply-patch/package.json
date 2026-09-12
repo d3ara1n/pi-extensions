@@ -3,9 +3,18 @@
   "version": "0.0.0",
   "type": "module",
   "description": "Codex-compatible freeform apply_patch editing within the current pi workspace",
-  "keywords": ["pi-package", "pi"],
+  "keywords": [
+    "pi-package",
+    "pi"
+  ],
   "main": "src/index.ts",
-  "files": ["src", "!src/**/*.test.ts", "README.md", "LICENSE", "NOTICE"],
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
   "scripts": {
     "test": "node --test src/core/*.test.ts test/*.test.ts",
     "test:integration": "node --test test/integration/*.test.ts"
@@ -15,7 +24,11 @@
     "@earendil-works/pi-tui": ">=0.84.3",
     "typebox": "^1.1.38"
   },
-  "pi": { "extensions": ["./src/index.ts"] },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/d3ara1n/pi-extensions",

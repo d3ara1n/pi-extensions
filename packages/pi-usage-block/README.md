@@ -51,8 +51,9 @@ The following pi providers are supported out of the box — no extra plugin need
 | OpenCode Go | quota % | `GET opencode.ai/zen/go/v1/usage` |
 | Z.AI | quota % | `GET api.z.ai/api/monitor/usage/quota/limit` |
 | Z.AI Coding CN | quota % | `GET open.bigmodel.cn/api/monitor/usage/quota/limit` |
+| Kimi For Coding | quota % | `GET api.kimi.com/coding/v1/usages` |
 
-> **Notes:** OpenAI Codex uses the ChatGPT OAuth credential and an undocumented ChatGPT backend usage endpoint; it is separate from the public OpenAI API-key provider. Google Gemini and Mistral don't surface response headers in pi's call path. Groq's rate-limit headers are undocumented/unstable, and Fireworks only exposes limit (no remaining/reset).
+> **Notes:** OpenAI Codex uses the ChatGPT OAuth credential and an undocumented ChatGPT backend usage endpoint; it is separate from the public OpenAI API-key provider. Kimi For Coding reads the managed usage endpoint the official kimi-code CLI uses (weekly summary + 5h rolling window; the optional prepaid booster wallet is not shown). Google Gemini and Mistral don't surface response headers in pi's call path. Groq's rate-limit headers are undocumented/unstable, and Fireworks only exposes limit (no remaining/reset).
 
 ## Configuration
 

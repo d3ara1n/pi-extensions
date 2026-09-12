@@ -15,6 +15,7 @@
  *   - quota (OpenAI Codex): ChatGPT Codex subscription usage endpoint
  *   - balance (OpenRouter / DeepSeek): prepaid account balance endpoint
  *   - quota (OpenCode Go, Z.AI / Z.AI Coding CN): coding-plan quota endpoint
+ *   - quota (Kimi For Coding): coding-plan usage endpoint
  */
 import type {
   UsageProvider,
@@ -329,6 +330,133 @@ async function zhipuCodingQuota(host: string, apiKey: string): Promise<QuotaWind
     }));
 }
 
+// ── Kimi For Coding ───────────────────────────────────────────────────────
+
+/**
+ * timeUnit → minutes multiplier, keyed by the bare unit. The endpoint sends
+ * the proto-style `TIME_UNIT_MINUTE`; the official CLI's own fixtures use the
+ * bare `MINUTE`, so both spellings (any case) are accepted.
+ * Units outside this table yield no window at all.
+ *
+ * `MONTH` counts as 30 days: the duration is only a sort/dedupe key and the
+ * basis for the period label, so the calendar-month imprecision is harmless.
+ */
+const KIMI_TIME_UNIT_MINUTES: Record<string, number> = {
+  MINUTE: 1,
+  HOUR: 60,
+  DAY: 1440,
+  WEEK: 10080,
+  MONTH: 43200,
+};
+
+/** Non-negative integer, arriving as a decimal string or a number. */
+function kimiInt(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+  }
+  if (typeof value === "string" && /^\d+$/.test(value)) {
+    const n = Number(value);
+    return Number.isSafeInteger(n) ? n : undefined;
+  }
+  return undefined;
+}
+
+/** Minutes multiplier for a limits[] item's `window.timeUnit`. */
+function kimiTimeUnitMultiplier(raw: unknown): number | undefined {
+  if (typeof raw !== "string") return undefined;
+  return KIMI_TIME_UNIT_MINUTES[raw.trim().toUpperCase().replace(/^TIME_UNIT_/, "")];
+}
+
+/** Rolling-window minutes from a limits[] item's proto-style `window`. */
+function kimiWindowMinutes(item: any): number | undefined {
+  const duration = kimiInt(item?.window?.duration);
+  const multiplier = kimiTimeUnitMultiplier(item?.window?.timeUnit);
+  if (duration === undefined || duration === 0 || multiplier === undefined) return undefined;
+  return duration * multiplier;
+}
+
+/** Short period label: "5h", "daily", "weekly", "monthly", … */
+function kimiPeriodLabel(minutes: number): string {
+  if (minutes === 300) return "5h";
+  if (minutes === 1440) return "daily";
+  if (minutes === 10080) return "weekly";
+  if (minutes === 43200) return "monthly";
+  if (minutes % 1440 === 0) return `${minutes / 1440}d`;
+  if (minutes % 60 === 0) return `${minutes / 60}h`;
+  return `${minutes}m`;
+}
+
+/** The row's reset timestamp, under any of the spellings the endpoint uses. */
+function kimiResetAt(detail: any): Date | undefined {
+  for (const key of ["resetTime", "resetAt", "reset_time", "reset_at"]) {
+    const value = detail?.[key];
+    if (typeof value !== "string") continue;
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+  return undefined;
+}
+
+/** One usage row (`detail`) → QuotaWindow. Skips rows without usable counts. */
+function kimiRow(detail: any, period: string): QuotaWindow | undefined {
+  const limit = kimiInt(detail?.limit);
+  // Some payloads report only `remaining`; QuotaWindow.used is consumed.
+  let used = kimiInt(detail?.used);
+  if (used === undefined && limit !== undefined) {
+    const remaining = kimiInt(detail?.remaining);
+    if (remaining !== undefined) used = limit - remaining;
+  }
+  if (used === undefined || limit === undefined || limit === 0) return undefined;
+  return {
+    period,
+    used,
+    limit,
+    unit: "requests", // plan usage counts — the endpoint exposes no finer unit
+    resetAt: kimiResetAt(detail),
+  };
+}
+
+/**
+ * Parse the Kimi usage payload into windows keyed by rolling duration.
+ *
+ * `usage` is the plan's weekly summary (the backend omits its window);
+ * `limits[]` carries per-window rows (the 5-hour limit arrives as duration
+ * 300 TIME_UNIT_MINUTE). Counts arrive as decimal strings or numbers, and
+ * some payloads report `remaining` instead of `used`. Duplicate windows
+ * collapse to one (summary wins), rows sort shortest window first.
+ *
+ * Window types map to the 5h / daily / weekly / monthly rows; a unit outside
+ * {@link KIMI_TIME_UNIT_MINUTES} yields no row. The optional `boosterWallet`
+ * (prepaid balance) is likewise not mapped — a balance does not fit the
+ * quota-window display.
+ */
+function parseKimiUsage(data: any): QuotaWindow[] {
+  const byWindow = new Map<number, QuotaWindow>();
+  const summary = kimiRow(data?.usage, "weekly");
+  if (summary) byWindow.set(10080, summary);
+  for (const item of Array.isArray(data?.limits) ? data.limits : []) {
+    const minutes = kimiWindowMinutes(item);
+    if (minutes === undefined || byWindow.has(minutes)) continue;
+    const row = kimiRow(item?.detail, kimiPeriodLabel(minutes));
+    if (row) byWindow.set(minutes, row);
+  }
+  return [...byWindow.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, w]) => w);
+}
+
+/**
+ * Kimi For Coding: GET https://api.kimi.com/coding/v1/usages.
+ *
+ * The managed usage endpoint the official kimi-code CLI reads. The OAuth
+ * token (when pi resolves one instead of an API key) is re-resolved on every
+ * poll so short-lived tokens refresh after expiry.
+ */
+async function kimiCodingUsage(apiKey: string): Promise<QuotaWindow[]> {
+  const data = await fetchJson("https://api.kimi.com/coding/v1/usages", apiKey);
+  return parseKimiUsage(data);
+}
+
 // ── Registry of built-in definitions ──────────────────────────────────────
 
 export interface BuiltinContext {
@@ -418,6 +546,17 @@ export const BUILTIN_PROVIDERS: BuiltinDef[] = [
     build: ({ apiKey }) => ({
       kind: "quota", id: "zai-coding-cn", name: "Z.AI Coding CN", source: "api",
       fetchUsage: () => zhipuCodingQuota("https://open.bigmodel.cn", apiKey),
+    }),
+  },
+  {
+    id: "kimi-coding",
+    build: ({ resolveApiKey }) => ({
+      kind: "quota", id: "kimi-coding", name: "Kimi For Coding", source: "api",
+      fetchUsage: async () => {
+        const key = await resolveApiKey();
+        if (!key) throw new Error("Kimi Coding credential unavailable");
+        return kimiCodingUsage(key);
+      },
     }),
   },
 ];

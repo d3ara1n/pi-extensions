@@ -1,0 +1,17 @@
+pi-apply-patch
+
+Includes grammar, test fixtures, and TypeScript adaptations of the parser,
+sequence matcher, and file update algorithm from OpenAI Codex.
+Copyright 2025 OpenAI
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Upstream: https://github.com/openai/codex
+Revision: b04a2c264516ec2e6b3c91dd73ad18a21fd5a88f
+Sources: codex-rs/apply-patch/ and
+         codex-rs/core/assets/tools/apply_patch.lark
+
+Modifications: the parser and update algorithm are expressed as synchronous
+TypeScript functions using the upstream default NormalizeToLf behavior.
+Execution is adapted to pi, with workspace boundary checks, filesystem
+injection, mutation queues, and plain tool results. Multi-environment routing
+and the experimental PreserveLineEndings mode are not included.

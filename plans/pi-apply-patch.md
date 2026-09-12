@@ -1,99 +1,59 @@
-# pi-apply-patch — 接住 code-mode 模型的 apply_patch 调用（设计计划）
+# pi-apply-patch — Codex 兼容的工作区补丁工具
 
-> **状态：计划中，待实施**（2026-09 讨论定稿）
+> 状态：已实现，待加载后进行真实模型验收。实现与测试见 `packages/pi-apply-patch/`。
 
-## 背景与动机
+## 目标与范围
 
-经 sub2api 等网关接入的 code-mode 模型（gpt-5.6-sol / terra / luna 一组，sub2api 元数据 `tool_mode: "code_mode_only"`、`apply_patch_tool_type: "freeform"`）以 Codex 环境为训练基座，**编辑文件的先验动作就是 apply_patch**，与客户端实际声明了什么工具基本无关。在 pi 里表现为两条失败路径：
+为习惯 Codex `apply_patch` 的模型提供同名 freeform 工具。模型侧格式及编辑行为以固定版本的官方源码与测试为基准；内部使用 TypeScript 纯函数与 pi 扩展 API。
 
-1. **freeform 路径**：模型发出 `custom_tool_call`（name=`apply_patch`，input=patch 原文）。pi 的 Responses 协议层已能把它包装成普通 toolCall（`arguments: { input: patch }`，见 pi-ai `openai-responses-shared.js` 的 custom_tool_call 分支），但因上下文里没有注册过名为 `apply_patch` 的工具而失败。
-2. **bash 路径**：模型往 bash 命令里写 `apply_patch <<'EOF' ...` heredoc，shell 里没有这个命令，直接报错。
+- 包：`@d3ara1n/pi-apply-patch`
+- 工具名固定为 `apply_patch`，内部参数为 `input: string`
+- 无配置、无额外运行库依赖
+- 插件自身限制访问当前 `ctx.cwd` 工作区；不接入 pi-access-denied
+- 不覆盖其他编辑工具，不安装 shell shim，不提供多环境路由
 
-路径 1 已在协议层解决了一半——**只差一个同名的 pi 工具本体把它接住**。路径 2 属 shell 层，见「范围外」。
+## 兼容基线
 
-**目标**：注册 `apply_patch` 工具，解析并应用 Codex `*** Begin Patch` 格式，让模型两条调用形态（function JSON / freeform custom_tool_call）都落到同一 handler，编辑体验闭环。
+OpenAI Codex 提交：`b04a2c264516ec2e6b3c91dd73ad18a21fd5a88f`。
 
-## 范围
+采用该版本默认的 `NormalizeToLf` 行处理语义，未启用实验性的 `PreserveLineEndings`。
 
-- 新包 `packages/pi-apply-patch`（`@d3ara1n/pi-apply-patch`），无 extension 依赖、无 npm 库依赖
-- 一个工具 `apply_patch`，单参数 `input: string`（patch 原文）
-- 支持格式：`*** Begin Patch` / `*** End Patch` 包裹；`*** Update File`（@@ 上下文锚定 hunk）、`*** Add File`、`*** Delete File`、`*** Move to:`（重命名）；多文件、单文件多 hunk
-- 路径安全：默认只允许 cwd 内的相对路径，越界直接报错回传
+- 使用官方 Lark grammar，通过 `constrainedSampling` 注册。
+- 模型的 `compat.supportsOpenAIGrammarTools` 决定是否声明为 custom grammar 工具；不支持时由 pi 回退为 function 工具。
+- pi 负责 freeform 原文包装、工具结果配对与历史回放转换。
+- 更新按游标顺序搜索；精确匹配、忽略行尾空白、忽略首尾空白、有限 Unicode 归一化依次尝试。
+- `@@ text` 表示找到该上下文行后继续搜索；纯新增 chunk 追加到文件末尾。
+- Add 可以覆盖，Move 先写目标再删源；允许工作区内绝对路径。
+- 完整解析与整体预校验在写入前完成；落盘阶段失败可能部分生效，不提供事务回滚。
 
-**范围外（明确不做）**：
+官方 grammar 与 fixtures 原样保留，算法移植注明出处，包使用 Apache-2.0 许可证。
 
-- 不覆盖 pi 内置 `edit` / `write` 工具——两者并存，模型自选（顺应先验而非对抗）
-- 不做 bash heredoc 的 shell shim——README 提一句可选方案（往 PATH 装独立 apply_patch CLI）
-- 不管 `collaboration.spawn_agent` 等命名空间调用——那是子代理派发，编辑工具管不了
+## 实现结构
 
-## 架构
-
-沿用 `pi-hashline-edit` 的两层结构：
-
-```
-src/core/          纯逻辑，无 pi 依赖，node --test 独立测试
-  parse.ts         patch 文本 → ParsedPatch { files: FileOp[] }
-                  FileOp = add { path, content }
-                         | update { path, moveTo?, hunks: Hunk[] }
-                         | delete { path }
-                  Hunk = { anchor?: string（@@ 后的提示文本）,
-                           lines: (context|delete|add)[] }
-  apply.ts         ParsedPatch × 文件系统 → ApplyResult
-                  update: 上下文锚定（见 D3）；逐 op 应用，失败即停
-src/pi/
-  apply-patch-tool.ts   makeApplyPatchTool(cwd)：registerTool 定义与 execute
-  render.ts             TUI renderer：每文件一行 +dir/file、±N 摘要
-src/index.ts       注册工具
+```text
+src/core/       纯解析、匹配、更新函数与测试
+src/grammar.ts  官方 Lark grammar
+src/workspace.ts 工作区路径解析与文件系统接口
+src/apply.ts    文件准备、队列、重校验和落盘
+src/tool.ts     工具定义与 execute
+src/render.ts   JSON details、TUI 摘要和 diff
+src/index.ts    注册入口
+test/          内存文件系统、上游 fixtures、工具协议测试
+test/integration/  真实临时目录文件操作测试
 ```
 
-## 关键决策与理由
+解析结果采用 discriminated union；源内容与 chunk 的更新逻辑不依赖文件系统或 pi。
 
-### D1. 参数名必须是 `input`
+执行层注入文件系统和文件修改队列，使用排序、去重后的 canonical 路径获取队列。路径检查覆盖源、移动目标和新文件已有祖先；在等待队列及执行文件操作时重新检查。内部符号链接保留原有文件操作语义，路径检查不是操作系统沙箱。
 
-pi 的 custom_tool_call 包装逻辑：`arguments: { [grammarToolInputProperties?.get(name) ?? "input"]: input }`。未按 grammar 声明的工具，freeform 调用会被包装成 `{ input: patch }`；而 function 路径模型按 schema 也发 `{"input": ...}`。两条形态零适配落进同一 handler，这是本包成立的前提。
+预校验保存旧内容与计算结果。落盘前重读源内容，内容未变则复用计算结果；如果前面的 Move 改变了后续源内容，则按当前内容重新匹配。
 
-### D2. 锚定算法 V1 从严：精确匹配 + 唯一性
+错误通过 throw 交给 pi 标记失败；成功返回 Codex 风格的 A/M/D 摘要。渲染数据为可序列化 details，执行不依赖 TUI。
 
-对每个 hunk，取「上下文行 + 删除行」序列在文件全文中查找：
+## 验证
 
-- 恰好 1 处命中 → 应用
-- 0 处或 >1 处 → 该文件报错回传（含 hunk 首行内容、命中数），不做模糊匹配、不猜位置，让模型下一轮自纠
-- `@@` anchor 文本仅用作消歧提示：多处命中时优先选 anchor 附近（同 codex 语义）
-
-理由：apply_patch 的 hunk 无行号，宽松匹配（缩进归一、fuzz）是 codex-rs 的成熟行为但移植成本和误改风险都高；V1 宁可报错让模型重试。语义基准参照 openai/codex（Apache-2.0）的 `apply_patch` 模块测试用例，实现自写，不搬代码。
-
-### D3. 错误走工具结果回传，不抛异常
-
-execute 返回结构化错误文本（哪一步、哪个 hunk、什么原因），模型读后自纠。与内置 edit 工具的失败模式一致，对 code-mode 模型是最熟悉的反馈形态。
-
-### D4. 文案分层遵守仓库约定
-
-- tool description 写契约：接受 `*** Begin Patch` 格式、只允许 cwd 内路径、失败原因会回传
-- **不写**「优先用本工具」「不要用 edit」之类引导——先验在模型侧，不需要教；也不对内置工具做对比声明
-- 不注册 promptSnippet / promptGuidelines（工具名本身自带召回）
-
-### D5. 工具名硬编码 `apply_patch`
-
-不提供配置改名——模型先验里这个名字是固定的，改名即失效。
-
-## 测试
-
-- `src/core/*.test.ts`（node --test，同 hashline 布局）：
-  - 格式：多文件混合、Move to、嵌套引号路径、CRLF、文件末尾无换行、空 patch、`*** End Patch` 缺失、未知段落头报错
-  - 锚定：唯一命中、多处命中（anchor 消歧成功/失败）、上下文找不到、连续 hunk 位置顺延、文件首/尾追加
-  - 应用：Add 覆盖已存在文件报错、Delete 不存在报错、路径越界（`../`、绝对路径）报错、原子性——同一 patch 内前一个文件成功后一个失败时整体不落盘
-- typecheck：`npm run typecheck`
-- 在线验收（需用户 `/reload` 后）：sub2api + gpt-5.6-sol 跑一轮真实多文件编辑任务，确认 freeform 与 function 两种调用形态都被接住且正确落盘
-
-## 登记与发布
-
-- 主 README Extensions 表加一行（无角标，无依赖）
-- 包 README：`## Installation`（`pi install npm:@d3ara1n/pi-apply-patch` + settings.json 本地路径两式）、`## Dependencies`（None）、`## Model Compatibility` 一节写实测的 code-mode 模型行为（有真实观察，符合仓库「没有观察不写」的反向要求）
-- `package.json`：keywords `pi-package` / `pi`；`pi.extensions: ["./src/index.ts"]`；peerDependencies `@earendil-works/pi-coding-agent`
-- commit scope：`pi-apply-patch`
-
-## 风险
-
-- patch 格式边角（fuzz、缩进归一）与真实 codex 行为有差异 → V1 以报错代替猜测，实测后再决定是否放宽
-- 模型偶尔会把 patch 写进 bash heredoc → 工具管不到，README 提供独立 CLI 方案兜底
-- pi-ai 若调整 custom_tool_call 包装的属性名（当前 `"input"`）→ 该属性名是协议层的稳定默认值，真变了也是一行适配，风险低
+- 默认测试：核心语义、内存文件系统、全部上游场景 fixture、freeform/function 协议转换和历史配对、错误与渲染。
+- fixture 015 按 Codex 工具整体预校验的语义断言无落盘；023/024 明确按默认行处理模式断言，与上游实验性模式的期望区分。
+- 显式 integration：临时目录中的真实文件操作、符号链接越界、UTF-8 与 BOM、并发文件队列；测试负责清理。
+- 全仓库 `npx tsc --noEmit`。
+- 在线验收：用户加载插件并 `/reload` 或重启后，用支持 grammar 的 GPT 模型验证真实 freeform 多文件编辑。

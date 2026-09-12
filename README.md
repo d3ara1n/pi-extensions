@@ -6,6 +6,7 @@ A collection of small extensions for [Pi Coding Agent](https://pi.dev).
 
 | Package | Version | Description |
 |---------|---------|-------------|
+| [`@d3ara1n/pi-apply-patch`](./packages/pi-apply-patch) | [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-apply-patch)](https://www.npmjs.com/package/@d3ara1n/pi-apply-patch) | Codex-compatible freeform apply_patch editing with context matching, multi-file operations, and workspace boundaries |
 | [`@d3ara1n/pi-ask-user`](./packages/pi-ask-user) | [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-ask-user)](https://www.npmjs.com/package/@d3ara1n/pi-ask-user) | Collapsible ask-user tool — panel renders in the bottom editor slot (not a screen overlay), so the transcript stays visible and scrollable above it |
 | [`@d3ara1n/pi-context-include`](./packages/pi-context-include) | [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-context-include)](https://www.npmjs.com/package/@d3ara1n/pi-context-include) | `@path` syntax for AGENTS.md — include files by reference, with a path safety fence (allow/deny roots, safe by default) |
 | [`@d3ara1n/pi-hashline-edit`](./packages/pi-hashline-edit) | [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-hashline-edit)](https://www.npmjs.com/package/@d3ara1n/pi-hashline-edit) | Hashline-style file editing — line-anchored edits verified by content hash, replacing oldText/newText matching |

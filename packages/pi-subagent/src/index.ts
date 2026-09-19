@@ -13,6 +13,7 @@
  * - Accurate, concise output for the main model
  */
 
+import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { getModelRolesAPI } from "@d3ara1n/pi-model-roles";
@@ -260,6 +261,16 @@ export default function subagentExtension(pi: ExtensionAPI) {
     }
 
     rebuildGuidelines(availableRoles);
+
+    // pi-coding-agent caches `promptGuidelines` at registerTool time
+    // (`_refreshToolRegistry` → `_normalizePromptGuidelines`), so the rebuilt
+    // content — which now reflects agentOverrides added in this session — is
+    // invisible to the system prompt until we re-register the tool. Without
+    // this, custom roles defined via `agentOverrides` never appear in the
+    // AVAILABLE ROLES / DECISION FLOW / CONCRETE EXAMPLES sections, even
+    // though they're callable at runtime. See the README's "Agent Overrides"
+    // section for the promised behavior.
+    pi.registerTool(subagentDelegateTool);
   });
 
   pi.on("context", async (event, ctx) => {
@@ -309,7 +320,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
   // family, so it never reads as model behavior.
   pi.registerMessageRenderer(BACKGROUND_COMPLETION_MESSAGE_TYPE, renderCompletionNotice);
 
-  pi.registerTool({
+  const subagentDelegateTool = defineTool({
     name: "subagent_delegate",
     label: "Delegate to subagent",
     description:
@@ -552,6 +563,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
         : renderDelegateResult(result, options, theme, context);
     },
   });
+  pi.registerTool(subagentDelegateTool);
 
   pi.registerTool({
     name: "subagent_wait",

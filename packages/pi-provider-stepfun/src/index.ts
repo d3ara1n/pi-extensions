@@ -9,12 +9,14 @@
  *
  * Both channels accept the same API key; the model sets differ:
  *  - stepfun      has step-1o-turbo-vision (32K, vision, non-reasoning)
- *  - stepfun-plan has step-router-v1 (1M, auto-routes deepseek-v4-pro ↔ step-3.5-flash)
- *  - the three Step 3.x Flash models are shared
+ *  - stepfun-plan has step-router-v1 (deepseek-v4-pro or step-3.7-flash)
+ *  - step-5-preview and the three Step 3.x Flash models are shared
  *
- * Compat verified against the live API (see ../../PROVIDER.md):
+ * Compat for the original models was verified against the live API
+ * (see ../../../PROVIDER.md):
  *  - `system` and `developer` roles both accepted
  *  - reasoning via standard `reasoning_effort` (low/medium/high)
+ *  - Chat Completions documents `max_tokens` for output limits
  *  - thinking echoed in both `reasoning` and `reasoning_content` (transport
  *    auto-dedupes via its reasoningFields list)
  *  - streaming carries usage on every chunk
@@ -22,9 +24,12 @@
  *  - context overflow returns OpenAI-style `context_length_exceeded` (HTTP 400)
  *  - step-router-v1 emits an `[Advisor consultation]` planning block in `content`;
  *    its tool_calls are otherwise standard OpenAI shape
+ *
+ * Step 5 Preview follows the published Chat Completions contract but still
+ * needs a live wire-contract check.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { OpenAICompletionsCompat } from "@earendil-works/pi-ai";
+import type { OpenAICompletionsCompat, ThinkingLevelMap } from "@earendil-works/pi-ai";
 
 const STANDARD_BASE = "https://api.stepfun.com/v1";
 const PLAN_BASE = "https://api.stepfun.com/step_plan/v1";
@@ -40,13 +45,15 @@ interface ModelMeta {
   reasoning: boolean;
   input: ("text" | "image")[];
   compat?: Partial<OpenAICompletionsCompat>;
+  thinkingLevelMap?: ThinkingLevelMap;
 }
 
 /**
  * Default compat. StepFun follows the OpenAI Chat Completions contract closely,
- * so only two flags are needed — verified identical on both channels:
+ * with explicit output-limit field selection:
  *  - supportsDeveloperRole: both `system` and `developer` are accepted
  *  - supportsReasoningEffort: emit standard `reasoning_effort`
+ *  - maxTokensField: StepFun documents `max_tokens`, not `max_completion_tokens`
  * No thinkingFormat is set — the default branch sends OpenAI-style
  * reasoning_effort, and the transport reads `reasoning`/`reasoning_content`
  * generically regardless of format.
@@ -54,10 +61,31 @@ interface ModelMeta {
 const DEFAULT_COMPAT: OpenAICompletionsCompat = {
   supportsDeveloperRole: true,
   supportsReasoningEffort: true,
+  maxTokensField: "max_tokens",
+};
+
+// Keep pi's extra thinking levels within StepFun's documented low/medium/high set.
+const THINKING_LEVELS: ThinkingLevelMap = {
+  minimal: "low",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "high",
+  max: "high",
 };
 
 // Shared across both channels
-const FLASH_MODELS: Record<string, ModelMeta> = {
+const SHARED_MODELS: Record<string, ModelMeta> = {
+  "step-5-preview": {
+    name: "Step 5 Preview",
+    contextWindow: 1_000_000,
+    // pi reserves maxTokens inside the context window; the API advertises
+    // up to 1M output, but using that value here would leave no input room.
+    maxTokens: 65_536,
+    reasoning: true,
+    input: ["text", "image"],
+    compat: { supportsDeveloperRole: false },
+  },
   "step-3.7-flash": {
     name: "Step 3.7 Flash",
     contextWindow: 262_144,
@@ -79,6 +107,7 @@ const FLASH_MODELS: Record<string, ModelMeta> = {
     maxTokens: 16_384,
     reasoning: true,
     input: ["text"],
+    thinkingLevelMap: { ...THINKING_LEVELS, medium: "low" },
   },
 };
 
@@ -93,7 +122,7 @@ const STANDARD_ONLY: Record<string, ModelMeta> = {
   },
 };
 
-// Step Plan channel only — routing model, 1M context, 384K max output per docs
+// Step Plan channel only; the routed engines have different context limits.
 const PLAN_ONLY: Record<string, ModelMeta> = {
   "step-router-v1": {
     name: "Step Router V1",
@@ -122,11 +151,12 @@ function buildModels(...maps: Record<string, ModelMeta>[]) {
     contextWindow: m.contextWindow,
     maxTokens: m.maxTokens,
     compat: { ...DEFAULT_COMPAT, ...(m.compat ?? {}) },
+    ...(m.reasoning ? { thinkingLevelMap: m.thinkingLevelMap ?? THINKING_LEVELS } : {}),
   }));
 }
 
-const STANDARD_MODELS = buildModels(FLASH_MODELS, STANDARD_ONLY);
-const PLAN_MODELS = buildModels(FLASH_MODELS, PLAN_ONLY);
+const STANDARD_MODELS = buildModels(SHARED_MODELS, STANDARD_ONLY);
+const PLAN_MODELS = buildModels(SHARED_MODELS, PLAN_ONLY);
 
 // ── Entry point ───────────────────────────────────────────────────────────
 

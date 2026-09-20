@@ -2,7 +2,7 @@
   "name": "@d3ara1n/pi-provider-stepfun",
   "version": "0.1.1",
   "type": "module",
-  "description": "StepFun (阶跃星辰) provider for pi — Step 3.x Flash models via OpenAI-compatible API",
+  "description": "StepFun provider for pi — Step 5 Preview and Flash via pay-as-you-go or Step Plan",
   "homepage": "https://github.com/d3ara1n/pi-extensions/tree/main/packages/pi-provider-stepfun#readme",
   "bugs": {
     "url": "https://github.com/d3ara1n/pi-extensions/issues"

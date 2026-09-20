@@ -986,6 +986,10 @@ export default function subagentExtension(pi: ExtensionAPI) {
     });
   }
 
+  // The TUI restores old tool rows before session_start on reload. Register
+  // static definitions now; session_start replaces them with configured roles.
+  registerTools();
+
   // ── Subagent activity view ─────────────────────────────────────────
   // Shared by the /subagent:view command and the native command-palette
   // entry — both open the same overlay.

@@ -1,5 +1,5 @@
 /**
- * Session initialization must register tools only after loading project roles.
+ * Static tool renderers must exist before session startup; role guidelines refresh afterward.
  *
  *   node --test packages/pi-subagent/src/index.test.ts
  */
@@ -93,24 +93,28 @@ afterEach(() => {
 });
 
 describe("subagent tool registration", () => {
-  test("registers all tools once after loading session configuration", async () => {
+  test("registers static tools before loading session configuration and refreshes role guidelines", async () => {
     const harness = setup();
-    assert.equal(harness.tools.length, 0);
+    assert.deepEqual(harness.tools.map((tool) => tool.name), TOOL_NAMES);
+    const initialGuidelines = harness.tools[0].promptGuidelines?.join("\n") ?? "";
+    assert.ok(initialGuidelines.includes("WHEN TO DELEGATE"));
+    assert.ok(!initialGuidelines.includes("  - researcher:"));
+    assert.ok(!initialGuidelines.includes(customRole.description));
 
     await harness.start({
       researcher: { disabled: true },
       cv_tailor: customRole,
     });
 
-    assert.deepEqual(harness.tools.map((tool) => tool.name), TOOL_NAMES);
-    const guidelines = harness.tools[0].promptGuidelines?.join("\n") ?? "";
+    assert.deepEqual(harness.tools.slice(TOOL_NAMES.length).map((tool) => tool.name), TOOL_NAMES);
+    const guidelines = harness.tools[TOOL_NAMES.length].promptGuidelines?.join("\n") ?? "";
     assert.match(guidelines, /  - cv_tailor: Drafts a tailored CV/);
     assert.ok(guidelines.includes(customRole.decisionTrigger));
     assert.ok(guidelines.includes(customRole.examples[0]));
     assert.ok(!guidelines.includes(`  - researcher: ${BUILTIN_ROLES.researcher.description}`));
     assert.ok(!guidelines.includes(`subagent_delegate(researcher):`));
     for (const tool of harness.tools.slice(1)) {
-      assert.equal(tool.promptGuidelines, undefined);
+      if (tool.name !== "subagent_delegate") assert.equal(tool.promptGuidelines, undefined);
     }
   });
 
@@ -118,7 +122,7 @@ describe("subagent tool registration", () => {
     const harness = setup();
     await harness.start();
 
-    const guidelines = harness.tools[0].promptGuidelines?.join("\n") ?? "";
+    const guidelines = harness.tools[TOOL_NAMES.length].promptGuidelines?.join("\n") ?? "";
     for (const [name, role] of Object.entries(BUILTIN_ROLES)) {
       assert.ok(guidelines.includes(`  - ${name}: ${role.description}`));
     }
@@ -127,11 +131,11 @@ describe("subagent tool registration", () => {
   test("repeated session starts replace roles instead of retaining stale guidelines", async () => {
     const harness = setup();
     await harness.start({ researcher: { disabled: true }, cv_tailor: customRole });
-    const first = harness.tools[0].promptGuidelines?.join("\n") ?? "";
+    const first = harness.tools[TOOL_NAMES.length].promptGuidelines?.join("\n") ?? "";
 
     await harness.start({ worker: { description: "Customized worker" } });
-    assert.deepEqual(harness.tools.slice(5).map((tool) => tool.name), TOOL_NAMES);
-    const second = harness.tools[5].promptGuidelines?.join("\n") ?? "";
+    assert.deepEqual(harness.tools.slice(TOOL_NAMES.length * 2).map((tool) => tool.name), TOOL_NAMES);
+    const second = harness.tools[TOOL_NAMES.length * 2].promptGuidelines?.join("\n") ?? "";
     assert.ok(first.includes(customRole.description));
     assert.ok(!second.includes(customRole.description));
     assert.ok(second.includes("  - worker: Customized worker"));
@@ -164,7 +168,8 @@ describe("subagent tool registration", () => {
     });
     try {
       assert.deepEqual(extensionsResult.errors, []);
-      assert.equal(session.getActiveToolNames().includes("subagent_delegate"), false);
+      assert.equal(session.getActiveToolNames().includes("subagent_delegate"), true);
+      assert.ok(!session.systemPrompt.includes(customRole.description));
       await session.bindExtensions({ mode: "print" });
 
       assert.deepEqual(
@@ -175,6 +180,71 @@ describe("subagent tool registration", () => {
       assert.ok(session.systemPrompt.includes(customRole.decisionTrigger));
       assert.ok(session.systemPrompt.includes(customRole.examples[0]));
       assert.ok(!session.systemPrompt.includes(`- researcher: ${BUILTIN_ROLES.researcher.description}`));
+    } finally {
+      session.dispose();
+    }
+  });
+
+  test("reload restores renderers before refreshing configured role guidelines", async () => {
+    const { projectDir, agentDir } = setup();
+    const settingsPath = path.join(projectDir, ".pi", "settings.json");
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify({ subagent: { agentOverrides: { cv_tailor: customRole } } }),
+    );
+    const loader = new DefaultResourceLoader({
+      cwd: projectDir,
+      agentDir,
+      extensionFactories: [subagentExtension],
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      noContextFiles: true,
+    });
+    await loader.reload();
+    const { session } = await createAgentSession({
+      cwd: projectDir,
+      agentDir,
+      resourceLoader: loader,
+      sessionManager: SessionManager.inMemory(projectDir),
+    });
+    try {
+      // A host binding makes reload invoke the pre-session chat restoration hook.
+      await session.bindExtensions({ mode: "print", shutdownHandler() {} });
+      assert.ok(session.systemPrompt.includes(customRole.description));
+      fs.writeFileSync(
+        settingsPath,
+        JSON.stringify({
+          subagent: {
+            agentOverrides: {
+              cv_tailor: { disabled: true },
+              researcher: { disabled: true },
+              worker: { description: "Customized worker" },
+            },
+          },
+        }),
+      );
+
+      let restored = false;
+      await session.reload({
+        beforeSessionStart() {
+          restored = true;
+          for (const name of TOOL_NAMES) {
+            const tool = session.getToolDefinition(name);
+            assert.equal(typeof tool?.renderCall, "function", name);
+            assert.equal(typeof tool?.renderResult, "function", name);
+          }
+          assert.ok(!session.systemPrompt.includes(customRole.description));
+        },
+      });
+      assert.ok(restored);
+      assert.ok(session.systemPrompt.includes("worker: Customized worker"));
+      assert.ok(!session.systemPrompt.includes(customRole.description));
+      assert.ok(!session.systemPrompt.includes(`researcher: ${BUILTIN_ROLES.researcher.description}`));
+      assert.deepEqual(
+        session.getActiveToolNames().filter((name) => name.startsWith("subagent_")),
+        TOOL_NAMES,
+      );
     } finally {
       session.dispose();
     }

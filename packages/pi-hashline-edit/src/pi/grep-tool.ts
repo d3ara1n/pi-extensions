@@ -42,7 +42,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { access, constants, readFile, stat } from "node:fs/promises";
-import { delimiter, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { hashFileLines } from "../core/hash.ts";
 import { splitLines } from "../core/lines.ts";
 import { getState } from "./state.ts";
@@ -141,7 +141,7 @@ const grepOverrideSchema = Type.Object({
   })),
   glob: Type.Optional(
     Type.Union([Type.String(), Type.Array(Type.String())], {
-      description: "Filter files by glob pattern; pass an array for multiple filters and prefix exclusions with `!`, e.g. ['*.ts', '!**/*.test.ts']",
+      description: "Filter files (including explicit file paths) by glob; pass an ordered array for multiple filters and prefix exclusions with `!`, e.g. ['*.ts', '!**/*.test.ts']",
     }),
   ),
   ignoreCase: Type.Optional(
@@ -178,6 +178,12 @@ interface RgRunResult {
 /** @internal — injectable process and fallback boundary for deterministic tests. */
 export interface GrepBackend {
   findRg(): Promise<string | null>;
+  listFiles(
+    rgPath: string,
+    directories: string[],
+    globs: string[],
+    signal: AbortSignal | undefined,
+  ): Promise<Set<string>>;
   runRg(
     rgPath: string,
     args: string[],
@@ -190,6 +196,43 @@ export interface GrepBackend {
     signal: AbortSignal | undefined,
     onUpdate: any,
   ): Promise<any>;
+}
+
+/** List direct children using rg's own ordered glob rules (including ignored files). */
+function listRgFiles(
+  rgPath: string,
+  directories: string[],
+  globs: string[],
+  signal: AbortSignal | undefined,
+): Promise<Set<string>> {
+  return new Promise((resolveFiles, reject) => {
+    if (signal?.aborted) return reject(new Error("Operation aborted"));
+    const args = ["--files", "--null", "--hidden", "--no-ignore", "--follow", "--max-depth=1"];
+    for (const glob of globs) args.push("--glob", glob);
+    args.push("--", ...directories);
+    const child = spawn(rgPath, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const chunks: Buffer[] = [];
+    let stderr = "";
+    const onAbort = () => child.kill();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      signal?.removeEventListener("abort", onAbort);
+      reject(new Error(`Failed to run ripgrep: ${error.message}`));
+    });
+    child.on("close", (code) => {
+      signal?.removeEventListener("abort", onAbort);
+      if (signal?.aborted) return reject(new Error("Operation aborted"));
+      if (code !== 0 && code !== 1) {
+        return reject(new Error(stderr.trim() || `ripgrep exited with code ${code}`));
+      }
+      const paths = Buffer.concat(chunks).toString("utf-8").split("\0").filter(Boolean);
+      resolveFiles(new Set(paths));
+    });
+  });
 }
 
 /** Run ripgrep and stream its JSON lines to the caller until it asks to stop. */
@@ -258,6 +301,10 @@ function countLeading(s: string): number {
 function toDisplayLines(raw: string, theme: any): string[] {
   const out: string[] = [];
   const lines = raw.split("\n");
+  const lineNoWidth = lines.reduce(
+    (width, line) => Math.max(width, parseHashline(line)?.lineNo.length ?? 0),
+    0,
+  );
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
@@ -278,7 +325,7 @@ function toDisplayLines(raw: string, theme: any): string[] {
       const marker = base > 0 ? theme.fg("dim", "›") + " " : "";
       for (const g of group) {
         const body = g.content.slice(base);
-        out.push(theme.fg("dim", `   ${g.lineNo}: `) + marker + theme.fg("toolOutput", body));
+        out.push(theme.fg("dim", `   ${g.lineNo.padStart(lineNoWidth)}: `) + marker + theme.fg("toolOutput", body));
       }
       i = j;
       continue;
@@ -300,6 +347,7 @@ export function makeGrepOverrideWithBackend(cwd: string, overrides: Partial<Grep
   let builtin: ReturnType<typeof createGrepTool> | undefined;
   const backend: GrepBackend = {
     findRg,
+    listFiles: listRgFiles,
     runRg,
     delegate(toolCallId, params, signal, onUpdate) {
       builtin ??= createGrepTool(cwd);
@@ -393,10 +441,19 @@ export function makeGrepOverrideWithBackend(cwd: string, overrides: Partial<Grep
         !Array.isArray(params.glob) &&
         !Array.isArray(params.path);
 
+      const globs = toArray(params.glob);
       const rgPath = await backend.findRg();
-      // ripgrep unavailable → built-in (it can auto-download rg), but only for plain params
+      // The built-in grep also lets explicit files bypass globs.
       if (!rgPath) {
-        if (legacyShaped) return backend.delegate(toolCallId, delegatedParams, signal, onUpdate);
+        if (legacyShaped) {
+          if (params.glob !== undefined && params.path !== undefined) {
+            const path = canonicalPath(cwd, params.path);
+            let explicitFile = false;
+            try { explicitFile = (await stat(path)).isFile(); } catch {}
+            if (explicitFile) throw new Error("ripgrep (rg) not found; cannot apply glob to an explicit file");
+          }
+          return backend.delegate(toolCallId, delegatedParams, signal, onUpdate);
+        }
         throw new Error(
           "ripgrep (rg) not found; extended grep params cannot fall back to the built-in grep. Retry with a simple pattern first, or use bash",
         );
@@ -405,7 +462,6 @@ export function makeGrepOverrideWithBackend(cwd: string, overrides: Partial<Grep
       const excludes = toArray(params.excludePattern);
       const matchMode: "any" | "all" = params.matchMode ?? "any";
       const outputMode: "content" | "files" | "count" = params.outputMode ?? "content";
-      const globs = toArray(params.glob);
       const { ignoreCase, literal, wordMatch, limit } = params;
       const searchPaths = (() => {
         const raw = toArray(params.path);
@@ -413,15 +469,36 @@ export function makeGrepOverrideWithBackend(cwd: string, overrides: Partial<Grep
       })();
       const hashLen = state.config.hashLen;
 
-      // Verify search paths upfront so a typo fails fast with a clear error
-      // (rg's own diagnostics are less actionable).
+      // rg ignores globs for explicit files, so select those with its file walker first.
+      const pathInfo: { path: string; isFile: boolean }[] = [];
+      const parents = new Set<string>();
       for (const sp of searchPaths) {
+        let info;
         try {
-          await stat(sp);
+          info = await stat(sp);
         } catch {
           throw new Error(`Path not found: ${sp}`);
         }
+        const isFile = info.isFile();
+        pathInfo.push({ path: sp, isFile });
+        if (globs.length && isFile) parents.add(dirname(sp));
       }
+      const fileKey = (path: string) => {
+        const absolute = resolve(cwd, path);
+        return process.platform === "win32" ? absolute.toLowerCase() : absolute;
+      };
+      const listed = parents.size
+        ? await backend.listFiles(rgPath, [...parents], globs, signal)
+        : new Set<string>();
+      const allowed = new Set([...listed].map(fileKey));
+      const selectedPaths = pathInfo
+        .filter(({ path, isFile }) => !globs.length || !isFile || allowed.has(fileKey(path)))
+        .map(({ path }) => path);
+      if (signal?.aborted) throw new Error("Operation aborted");
+      if (selectedPaths.length === 0) return {
+        content: [{ type: "text", text: "No matches found" }],
+        details: undefined,
+      };
 
       // Client-side line filters — only AND / exclude need them; "any" is native rg (-e OR).
       const excludeMatchers = excludes.map((p) =>
@@ -452,7 +529,7 @@ export function makeGrepOverrideWithBackend(cwd: string, overrides: Partial<Grep
         if (wordMatch) args.push("--word-regexp");
         for (const glob of globs) args.push("--glob", glob);
         for (const p of patterns) args.push("-e", p);
-        args.push("--", ...searchPaths);
+        args.push("--", ...selectedPaths);
 
         const effectiveLimit = Math.max(1, limit ?? DEFAULT_LIMIT);
         let matchCount = 0;

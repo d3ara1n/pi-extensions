@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { access, constants, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, constants, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { makeGrepOverrideWithBackend } from "../pi/grep-tool.ts";
@@ -66,6 +66,48 @@ test("real rg combines include and exclude globs in order", {
       outputMode: "files",
     }, undefined, undefined);
     assert.deepEqual(result.content[0].text.split("\n").sort(), ["first.ts", "notes.md", "second.ts"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("real rg applies globs to explicit files and mixed search paths", {
+  skip: rgPath === null,
+}, async () => {
+  const directory = await mkdtemp(join(tmpdir(), "hl-grep-explicit-globs-"));
+  try {
+    await mkdir(join(directory, "sub"));
+    await writeFile(join(directory, ".gitignore"), "ignored.ts\n");
+    for (const name of ["keep.ts", "drop.test.ts", "ignored.ts", "sub/child.ts"]) {
+      await writeFile(join(directory, name), "needle\n");
+    }
+    const tool = makeGrepOverrideWithBackend(directory, {
+      findRg: async () => rgPath,
+      delegate: async () => {
+        throw new Error("integration test must not invoke the built-in grep delegate");
+      },
+    });
+    const search = async (path: string | string[], glob: string | string[]) => {
+      const result: any = await tool.execute("0", { pattern: "needle", path, glob, outputMode: "files" }, undefined, undefined);
+      return result.content[0].text;
+    };
+    const globs = ["*.ts", "!**/*.test.ts"];
+    assert.deepEqual(
+      (await search(["drop.test.ts", "keep.ts", "ignored.ts"], globs)).split("\n").sort(),
+      ["ignored.ts", "keep.ts"],
+    );
+    assert.equal(await search("drop.test.ts", "*.ts"), "drop.test.ts");
+    assert.equal(await search("drop.test.ts", globs), "No matches found");
+    assert.equal(await search(["drop.test.ts", "keep.ts"], "!**/*.test.ts"), "keep.ts");
+    assert.equal(await search("sub/child.ts", "**/sub/*.ts"), "sub/child.ts");
+    assert.deepEqual(
+      (await search(["keep.ts", "sub/child.ts"], globs)).split("\n").sort(),
+      ["keep.ts", "sub/child.ts"],
+    );
+    assert.deepEqual(
+      (await search(["drop.test.ts", "sub", "keep.ts"], globs)).split("\n").sort(),
+      ["keep.ts", "sub/child.ts"],
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

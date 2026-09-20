@@ -14,6 +14,7 @@ import { getState } from "./state.ts";
 
 type FakeOptions = {
   lines?: string[];
+  files?: string[];
   code?: number | null;
   stderr?: string;
   error?: Error;
@@ -38,10 +39,15 @@ function rgMatch(filePath: string, lineNumber: number, text: string): string {
 
 function fakeBackend(options: FakeOptions = {}) {
   const calls: { path: string; args: string[] }[] = [];
+  const fileCalls: { directories: string[]; globs: string[] }[] = [];
   const delegates: any[][] = [];
   const backend: GrepBackend = {
     async findRg() {
       return "/fake/rg";
+    },
+    async listFiles(_path, directories, globs) {
+      fileCalls.push({ directories, globs });
+      return new Set(options.files ?? []);
     },
     async runRg(path, args, _signal, onLine) {
       calls.push({ path, args });
@@ -61,7 +67,7 @@ function fakeBackend(options: FakeOptions = {}) {
       return { content: [{ type: "text", text: "delegated" }], details: undefined };
     },
   };
-  return { backend, calls, delegates };
+  return { backend, calls, fileCalls, delegates };
 }
 
 const text = (result: any): string => result.content[0].text;
@@ -78,6 +84,27 @@ async function withEnabled<T>(enabled: boolean, fn: () => Promise<T>): Promise<T
     state.config.enabled = previous;
   }
 }
+
+test("grep TUI aligns line-number colons across file groups", () => {
+  const raw = [
+    "a.ts · 2 matches",
+    "99#ABCD│  alpha",
+    "100#ABCD│    beta",
+    "b.ts · 1 match",
+    "7#ABCD│gamma",
+  ].join("\n");
+  const tool = makeGrepOverrideWithBackend(".", {});
+  const theme = { fg: (_color: string, value: string) => value };
+  const result = { content: [{ type: "text", text: raw }] };
+  const rendered = tool.renderResult(result, { isPartial: false, expanded: true }, theme, {}).render(80);
+  assert.deepEqual(rendered.map((line) => line.trimEnd()), [
+    "a.ts · 2 matches",
+    "    99: › alpha",
+    "   100: ›   beta",
+    "b.ts · 1 match",
+    "     7: gamma",
+  ]);
+});
 
 test("formats parsed rg matches with full-line hash anchors", async () => {
   await withDir(async (dir) =>
@@ -217,7 +244,7 @@ test("passes output flags and formats files and counts", async () => {
       const b = join(dir, "b.ts");
       await writeFile(a, "Foo a.b\n");
       await writeFile(b, "foo a.b\n");
-      const fake = fakeBackend({ lines: [rgMatch(a, 1, "Foo a.b\n"), rgMatch(b, 1, "foo a.b\n")] });
+      const fake = fakeBackend({ files: [a, b], lines: [rgMatch(a, 1, "Foo a.b\n"), rgMatch(b, 1, "foo a.b\n")] });
 
       const tool = makeGrepOverrideWithBackend(dir, fake.backend);
       const globSchema: any = tool.parameters.properties.glob;
@@ -260,6 +287,30 @@ test("passes output flags and formats files and counts", async () => {
       assert.equal(text(count), "a.ts: 1\nb.ts: 1\nTotal: 2 matches in 2 files");
     }),
   );
+});
+
+test("glob filters explicit files and batches their parent directories", async () => {
+  await withDir(async (dir) => {
+    const kept = join(dir, "kept.ts");
+    const excluded = join(dir, "excluded.test.ts");
+    const nested = join(dir, "sub", "other.ts");
+    await mkdir(join(dir, "sub"));
+    await writeFile(nested, "needle\n");
+    await writeFile(kept, "needle\n");
+    await writeFile(excluded, "needle\n");
+    const fake = fakeBackend({
+      files: [kept, nested],
+      lines: [rgMatch(kept, 1, "needle\n"), rgMatch(nested, 1, "needle\n")],
+    });
+    const tool = makeGrepOverrideWithBackend(dir, fake.backend);
+    const query = { pattern: "needle", path: ["kept.ts", "excluded.test.ts", "sub/other.ts"], glob: ["*.ts", "!**/*.test.ts"] };
+    assert.match(text(await call(tool, query)), /│needle/);
+    assert.deepEqual(fake.fileCalls, [{ directories: [dir, join(dir, "sub")], globs: query.glob }]);
+    assert.deepEqual(fake.calls[0].args.slice(-3), ["--", kept, nested]);
+
+    assert.equal(text(await call(tool, { ...query, path: "excluded.test.ts" })), "No matches found");
+    assert.equal(fake.calls.length, 1);
+  });
 });
 
 test("counts only surviving matches toward the limit and stops the fake runner", async () => {
@@ -348,6 +399,16 @@ test("delegates only safe fallbacks and rejects extended missing-rg requests", a
         call(tool, { pattern: "x", glob: ["*.ts", "!**/*.test.ts"] }),
         /ripgrep \(rg\) not found/,
       );
+      const file = join(dir, "fixture.ts");
+      await writeFile(file, "x\n");
+      const delegatedBefore = absent.delegates.length;
+      await assert.rejects(
+        call(tool, { pattern: "x", path: file, glob: "*.ts" }),
+        /cannot apply glob to an explicit file/,
+      );
+      assert.equal(absent.delegates.length, delegatedBefore);
+      assert.equal(text(await call(tool, { pattern: "x", path: file })), "delegated");
+      assert.equal(text(await call(tool, { pattern: "x", path: dir, glob: "*.ts" })), "delegated");
     });
   });
 });

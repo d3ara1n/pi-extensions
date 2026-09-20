@@ -165,7 +165,7 @@ The `grep` override also covers the compound queries that otherwise push models 
 - `wordMatch` — whole words only (`rg -w`)
 - `outputMode: "files"` / `"count"` — just the file paths (`rg -l`) or per-file counts + total (`grep -c`); `"files"` output pastes straight back as a `path` array
 - `pattern` and `path` accept arrays — several patterns combined per `matchMode`, several search roots in one call
-- `glob` accepts one pattern or an ordered array of ripgrep globs, e.g. `["*.ts", "*.md", "!**/*.test.ts"]` to include TypeScript and Markdown files but exclude tests
+- `glob` accepts one pattern or an ordered array of ripgrep globs, e.g. `["*.ts", "*.md", "!**/*.test.ts"]` to include TypeScript and Markdown files but exclude tests. It also filters explicitly named files; this requires a locally available ripgrep binary.
 
 Filters run before the match limit counts, and context windows are rebuilt from surviving matches, so `limit` and `context` compose cleanly with `matchMode`/`excludePattern`.
 

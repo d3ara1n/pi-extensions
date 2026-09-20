@@ -1,6 +1,6 @@
 # pi-apply-patch — Codex 兼容的工作区补丁工具
 
-> 状态：已实现，待加载后进行真实模型验收。实现与测试见 `packages/pi-apply-patch/`。
+> 状态：已实现并通过实际使用验收。实现与测试见 `packages/pi-apply-patch/`。
 
 ## 目标与范围
 
@@ -56,4 +56,4 @@ test/integration/  真实临时目录文件操作测试
 - fixture 015 按 Codex 工具整体预校验的语义断言无落盘；023/024 明确按默认行处理模式断言，与上游实验性模式的期望区分。
 - 显式 integration：临时目录中的真实文件操作、符号链接越界、UTF-8 与 BOM、并发文件队列；测试负责清理。
 - 全仓库 `npx tsc --noEmit`。
-- 在线验收：用户加载插件并 `/reload` 或重启后，用支持 grammar 的 GPT 模型验证真实 freeform 多文件编辑。
+- 实际使用：已在真实会话中持续使用数周。

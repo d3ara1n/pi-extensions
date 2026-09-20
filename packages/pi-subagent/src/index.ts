@@ -13,7 +13,6 @@
  * - Accurate, concise output for the main model
  */
 
-import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { getModelRolesAPI } from "@d3ara1n/pi-model-roles";
@@ -90,8 +89,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
 
   const availableRoles: Record<string, SubagentRole> = {};
   // Rebuild available roles from BUILTIN_ROLES, filtered by the child
-  // allowlist. Called at init and again in session_start so repeated
-  // session_start is idempotent — overrides don't accumulate.
+  // allowlist. Repeated session_start events must not accumulate overrides.
   function refreshAvailableRoles(): void {
     for (const key of Object.keys(availableRoles)) delete availableRoles[key];
     for (const [name, role] of Object.entries(BUILTIN_ROLES)) {
@@ -100,7 +98,6 @@ export default function subagentExtension(pi: ExtensionAPI) {
       }
     }
   }
-  refreshAvailableRoles();
 
   // ── Background run registry ────────────────────────────────────
   // Process-lifetime map of background runs (queued, running, and
@@ -132,10 +129,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
     void run.promise.then(() => liveRuns.delete(run));
   }
 
-  // Mutable guidelines array — rebuilt in session_start to reflect agentOverrides
-  const guidelines: string[] = [];
-
-  function rebuildGuidelines(roles: Record<string, SubagentRole>): void {
+  function buildGuidelines(roles: Record<string, SubagentRole>): string[] {
     const entries = Object.entries(roles);
     const exampleLines: string[] = [];
     const decisionLines: string[] = [];
@@ -149,8 +143,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
       exampleLines.push(`  subagent_delegate(${name}):  ${quotedExamples}`);
     }
 
-    guidelines.length = 0;
-    guidelines.push(
+    return [
       "WHEN TO DELEGATE — offload substantial work when you only need the result:",
       "",
       "- Delegate ONLY when a task involves significant work (heavy analysis, multi-step investigation, large-scope changes) AND you only care about the conclusion, not intermediate steps. A good test: the task would clutter your context with 3+ turns of raw tool output.",
@@ -192,7 +185,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
       "- Use subagent_steer for a concrete deviation from the delegated task or new information that changes its requirements. A running status or several checks without a result is not evidence of a wrong direction or a stall. Do not ask the child to wrap up or return early merely to avoid waiting.",
       "- Cancel a run you no longer need with subagent_cancel(id) — the child stops and its partial output stays in the registry for subagent_check to collect.",
       "- Background delegation works only in the top-level session.",
-    );
+    ];
   }
 
   // Apply agent overrides on top of built-in roles
@@ -211,9 +204,6 @@ export default function subagentExtension(pi: ExtensionAPI) {
       }
     }
   }
-
-  // Initial guidelines from built-in roles
-  rebuildGuidelines(availableRoles);
 
   pi.on("session_start", async (_event, ctx) => {
     sessionGeneration += 1;
@@ -260,17 +250,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
       }
     }
 
-    rebuildGuidelines(availableRoles);
-
-    // pi-coding-agent caches `promptGuidelines` at registerTool time
-    // (`_refreshToolRegistry` → `_normalizePromptGuidelines`), so the rebuilt
-    // content — which now reflects agentOverrides added in this session — is
-    // invisible to the system prompt until we re-register the tool. Without
-    // this, custom roles defined via `agentOverrides` never appear in the
-    // AVAILABLE ROLES / DECISION FLOW / CONCRETE EXAMPLES sections, even
-    // though they're callable at runtime. See the README's "Agent Overrides"
-    // section for the promised behavior.
-    pi.registerTool(subagentDelegateTool);
+    registerTools();
   });
 
   pi.on("context", async (event, ctx) => {
@@ -320,516 +300,519 @@ export default function subagentExtension(pi: ExtensionAPI) {
   // family, so it never reads as model behavior.
   pi.registerMessageRenderer(BACKGROUND_COMPLETION_MESSAGE_TYPE, renderCompletionNotice);
 
-  const subagentDelegateTool = defineTool({
-    name: "subagent_delegate",
-    label: "Delegate to subagent",
-    description:
-      "Delegate a task to a specialized subagent. By default the call blocks until the run finishes and returns the final output — intermediate tool output stays out of your context. With background: true it returns an id immediately and you collect the result later with subagent_check. Subagents are isolated by default; inheritConversation optionally injects a filtered snapshot of the active parent branch.",
-    promptSnippet: "Delegate tasks to specialized subagents",
-    promptGuidelines: guidelines,
+  function registerTools(): void {
+    const guidelines = buildGuidelines(availableRoles);
 
-    parameters: Type.Object({
-      role: Type.String({ description: "Subagent role to use" }),
-      task: Type.String({
-        description:
-          "The work to do. Without conversation inheritance it must be self-contained, with every requirement or constraint restated here or in `context`; with inheritance it may be a delta against that history. Instructions only — background material belongs in `context`, reference file paths in `files`.",
+    pi.registerTool({
+      name: "subagent_delegate",
+      label: "Delegate to subagent",
+      description:
+        "Delegate a task to a specialized subagent. By default the call blocks until the run finishes and returns the final output — intermediate tool output stays out of your context. With background: true it returns an id immediately and you collect the result later with subagent_check. Subagents are isolated by default; inheritConversation optionally injects a filtered snapshot of the active parent branch.",
+      promptSnippet: "Delegate tasks to specialized subagents",
+      promptGuidelines: guidelines,
+
+      parameters: Type.Object({
+        role: Type.String({ description: "Subagent role to use" }),
+        task: Type.String({
+          description:
+            "The work to do. Without conversation inheritance it must be self-contained, with every requirement or constraint restated here or in `context`; with inheritance it may be a delta against that history. Instructions only — background material belongs in `context`, reference file paths in `files`.",
+        }),
+        context: Type.Optional(
+          Type.String({
+            description:
+              "Background material for the subagent — prior findings, selected code, file lists; can be long. Delivered as a separate channel from the task. Omit if the task alone is enough.",
+          }),
+        ),
+        files: Type.Optional(
+          Type.Array(Type.String(), {
+            description:
+              'Reference file paths for the subagent to read directly (e.g. ["src/auth.ts", "docs/api.md"]). Injected as @file attachments — content stays out of your context window. Prefer this over pasting file contents into context.',
+          }),
+        ),
+        inheritConversation: Type.Optional(
+          Type.Boolean({
+            description:
+              "Opt in to a text-only, compaction-aware snapshot of the active parent conversation. Omit or false for isolation; true lets task be a delta against inherited history, which may be filtered or truncated.",
+          }),
+        ),
+        background: Type.Optional(
+          Type.Boolean({
+            description:
+              "Return immediately with a run id instead of waiting for the final output. Results are pull-only: a completion notice is shown to the user, but does not deliver the result to the model or wake it.",
+          }),
+        ),
+        cwd: Type.Optional(Type.String({ description: "Working directory (defaults to current)" })),
+        model: Type.Optional(
+          Type.String({
+            description:
+              "Override the model for this call. Format: 'provider/model-id' (e.g. 'anthropic/claude-sonnet-4'). When set, bypasses the role's configured model — useful for one-off vision tasks or model-specific jobs without creating a permanent role.",
+          }),
+        ),
       }),
-      context: Type.Optional(
-        Type.String({
-          description:
-            "Background material for the subagent — prior findings, selected code, file lists; can be long. Delivered as a separate channel from the task. Omit if the task alone is enough.",
-        }),
-      ),
-      files: Type.Optional(
-        Type.Array(Type.String(), {
-          description:
-            'Reference file paths for the subagent to read directly (e.g. ["src/auth.ts", "docs/api.md"]). Injected as @file attachments — content stays out of your context window. Prefer this over pasting file contents into context.',
-        }),
-      ),
-      inheritConversation: Type.Optional(
-        Type.Boolean({
-          description:
-            "Opt in to a text-only, compaction-aware snapshot of the active parent conversation. Omit or false for isolation; true lets task be a delta against inherited history, which may be filtered or truncated.",
-        }),
-      ),
-      background: Type.Optional(
-        Type.Boolean({
-          description:
-            "Return immediately with a run id instead of waiting for the final output. Results are pull-only: a completion notice is shown to the user, but does not deliver the result to the model or wake it.",
-        }),
-      ),
-      cwd: Type.Optional(Type.String({ description: "Working directory (defaults to current)" })),
-      model: Type.Optional(
-        Type.String({
-          description:
-            "Override the model for this call. Format: 'provider/model-id' (e.g. 'anthropic/claude-sonnet-4'). When set, bypasses the role's configured model — useful for one-off vision tasks or model-specific jobs without creating a permanent role.",
-        }),
-      ),
-    }),
 
-    async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      const roleDef = availableRoles[params.role];
-      if (!roleDef) {
+      async execute(_toolCallId, params, signal, onUpdate, ctx) {
+        const roleDef = availableRoles[params.role];
+        if (!roleDef) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Unknown subagent role: ${params.role}. Available: ${Object.keys(availableRoles).join(", ")}`,
+              },
+            ],
+            details: undefined as any,
+          };
+        }
+
+        // Guard against bounded subagent nesting. A configured depth of 0 is unlimited.
+        if (config.maxDepth > 0 && CURRENT_DEPTH >= config.maxDepth) {
+          throw new Error(
+            `Cannot delegate: maximum nesting depth (${config.maxDepth}) reached (current depth ${CURRENT_DEPTH}). Return a result to the caller instead of delegating further.`,
+          );
+        }
+
+        // A subagent process exits when its task finishes, which would orphan any
+        // background run it started — background delegation is top-level only.
+        if (params.background && CURRENT_DEPTH > 0) {
+          throw new Error(
+            "Background delegation is only available in the top-level session. Delegate in the foreground instead.",
+          );
+        }
+
+        const inheritedConversation = params.inheritConversation
+          ? serializeInheritedConversation(
+              ctx.sessionManager.buildContextEntries(),
+              config.inheritance.maxChars,
+            )
+          : undefined;
+
+        const run = startSubagentRun({
+          id: `sub-${++runCounter}`,
+          toolCallId: _toolCallId,
+          role: params.role,
+          roleDef,
+          task: params.task,
+          context: params.context,
+          files: params.files,
+          inheritConversation: params.inheritConversation === true,
+          inheritedConversation: inheritedConversation?.text,
+          inheritedConversationTruncated: inheritedConversation?.truncated,
+          cwd: params.cwd ?? ctx.cwd,
+          depth: CURRENT_DEPTH + 1,
+          // Foreground runs die with the tool call; background runs outlive the turn.
+          signal: params.background ? undefined : signal,
+          modelOverride: params.model,
+          config,
+          gate: concurrencyGate,
+          getRolesApi: getModelRolesAPI,
+          getSessionId: () => ctx.sessionManager?.getSessionId(),
+        });
+        trackRun(run);
+
+        // ── Background: return the id immediately; the pipeline keeps running. ──
+        if (params.background) {
+          backgroundRuns.set(run.id, run);
+          const runGeneration = sessionGeneration;
+          void run.promise.then((result) => {
+            // Never publish completions from an old session. Within a session
+            // every completion emits its UI-only notice card once — check
+            // results never suppress it (they are not LLM-visible either way).
+            if (runGeneration !== sessionGeneration) return;
+
+            const outcome = isFailedResult(result)
+              ? "failed"
+              : result.stopReason === "cancelled"
+                ? "cancelled"
+                : "finished";
+            // Pure notification: id + outcome only. The result itself surfaces
+            // through subagent_check (model) or /subagent:status (user) — the
+            // notice never previews it.
+            pi.sendMessage(
+              {
+                customType: BACKGROUND_COMPLETION_MESSAGE_TYPE,
+                content: `Background subagent ${run.id} (${run.role}) ${outcome}: "${taskPreview(run.task)}"`,
+                display: true,
+                // Structured payload for the notice renderer; the content string
+                // stays as the non-TUI fallback (export, print mode).
+                details: { id: run.id, role: run.role, outcome, task: run.task },
+              },
+              { triggerTurn: false },
+            );
+          });
+          return {
+            content: [
+              { type: "text", text: `Background subagent started — id: ${run.id} (${params.role}).` },
+            ],
+            details: {
+              id: run.id,
+              role: params.role,
+              task: params.task,
+              context: params.context,
+              files: params.files,
+              inheritConversation: params.inheritConversation === true,
+              inheritedConversationChars: inheritedConversation?.text.length,
+              inheritedConversationTruncated: inheritedConversation?.truncated,
+            },
+          };
+        }
+
+        // ── Foreground: the same async engine, blocked on here. Archived
+        // for the view at creation — like a background run, it stays
+        // browsable after the call returns. ──
+        foregroundRuns.add(run);
+        const emit = (results: SubagentResult[], text: string) => {
+          onUpdate?.({
+            content: [{ type: "text", text }],
+            details: { results },
+          });
+        };
+        const progressText = (f: SubagentResult): string =>
+          `${params.role}  ${formatTimePart(f) ?? "0s"}  ${f.usage.turns} turn${f.usage.turns !== 1 ? "s" : ""}`;
+
+        let pendingFrame: SubagentResult | undefined;
+        const progressThrottle = createThrottler(() => {
+          const f = pendingFrame;
+          pendingFrame = undefined;
+          if (f) emit([f], progressText(f));
+        });
+
+        const unsubscribe = run.subscribe(() => {
+          if (run.result) return; // the terminal frame is emitted explicitly below
+          if (!onUpdate) return;
+          pendingFrame = run.snapshot;
+          progressThrottle.notify();
+        });
+
+        // Emit a queued placeholder only when this call will actually wait.
+        if (onUpdate && concurrencyGate.isAtCapacity) {
+          emit([run.snapshot], `${params.role}: queued...`);
+        }
+
+        try {
+          const result = await run.promise;
+
+          // Fallback note: the main model must know the answer came from the
+          // fallback model, not the role's primary — on success AND failure.
+          // Budget note: budget stops are intentional successes, but the model
+          // must know the output is partial.
+          const fallbackNote = formatFallbackNote(result);
+          const budgetNote = formatBudgetNote(result);
+
+          // Aborts and spawn crashes arrive here too: the engine resolves them
+          // into failed results that keep the partial frame (task, activity,
+          // output, usage), so the TUI renders them like any failure instead
+          // of collapsing to a bare error line.
+          if (isFailedResult(result)) {
+            const failedText =
+              `${params.role}: failed — ${result.errorMessage || result.stderr || "unknown error"}\n\nPartial output:\n${result.output}` +
+              fallbackNote +
+              formatUsageFooter(result);
+            emit([result], failedText);
+            return {
+              content: [{ type: "text", text: failedText }],
+              details: { results: [result] },
+            };
+          }
+
+          const finalText = `${params.role}: finished\n\n${result.output}${budgetNote}${fallbackNote}${formatUsageFooter(result)}`;
+          emit([result], finalText);
+          return {
+            content: [{ type: "text", text: finalText }],
+            details: { results: [result] },
+          };
+        } finally {
+          // Cancel any trailing throttled onUpdate regardless of how we exited.
+          // A stale "still running" progress event fired after the tool returns
+          // corrupts framework tool state and crashes the TUI.
+          progressThrottle.cancel();
+          unsubscribe();
+        }
+      },
+
+      // TUI rendering lives in ./render.ts (foreground) and ./render-async.ts
+      // (background input block) — call row and result view.
+      renderCall(args, theme, context) {
+        return (args as any).background
+          ? renderBackgroundDelegateCall(args, theme, context)
+          : renderDelegateCall(args, theme, context);
+      },
+      renderResult(result, options, theme, context) {
+        // The background flag is not part of the result — route on details shape:
+        // background results carry BackgroundDelegateDetails (id), foreground ones
+        // carry SubagentDetails (mode/results, never an id field).
+        const details = result.details as { id?: unknown } | undefined;
+        return typeof details?.id === "string"
+          ? renderBackgroundDelegateResult(result, options, theme, context)
+          : renderDelegateResult(result, options, theme, context);
+      },
+    });
+
+    pi.registerTool({
+      name: "subagent_wait",
+      label: "Wait for background subagents",
+      description:
+        "Wait until all specified background subagent runs end. Omit ids to wait for all current background runs. Returns status and usage for each run; use subagent_check to retrieve results. Cancelling the wait leaves the runs running.",
+      promptSnippet: "Wait for background subagents to finish",
+      parameters: Type.Object({
+        ids: Type.Optional(
+          Type.Array(Type.String(), {
+            minItems: 1,
+            description:
+              "Run ids returned by background delegate calls. Omit to wait for all current background runs.",
+          }),
+        ),
+        // Timeout is hidden from the tool schema; restore with the timeoutMs expression below.
+        // timeout: Type.Optional(
+        //   Type.Number({
+        //     description: "Max time to wait in seconds. Omit to wait until all specified runs end.",
+        //   }),
+        // ),
+      }),
+
+      async execute(_toolCallId, params, signal, onUpdate, _ctx) {
+        const ids = params.ids ? [...new Set(params.ids)] : [...backgroundRuns.keys()];
+        if (ids.length === 0) {
+          throw new Error(
+            "No background runs to wait for — start one with subagent_delegate(background: true) first.",
+          );
+        }
+        const unknown = ids.filter((id) => !backgroundRuns.has(id));
+        if (unknown.length > 0) {
+          const active = [...backgroundRuns.values()].map((r) => `${r.id} (${r.role})`);
+          throw new Error(
+            `Unknown subagent id(s): ${unknown.join(", ")}. Active: ${active.length > 0 ? active.join(", ") : "(none)"}.`,
+          );
+        }
+        const runs = ids.map((id) => backgroundRuns.get(id)!);
+        // Keep the timeout machinery available while the tool exposes completion-only waiting.
+        // const timeoutMs = typeof params.timeout === "number" && params.timeout > 0 ? params.timeout * 1000 : 0;
+        const timeoutMs = 0;
+
+        // ── Live mirror: forward combined snapshots into this tool row ──
+        const entries = () => runs.map((r) => ({ id: r.id, role: r.role, result: r.snapshot }));
+        const emit = () => {
+          const counts = { queued: 0, running: 0, finished: 0, failed: 0 };
+          for (const r of runs) counts[r.state]++;
+          const parts: string[] = [];
+          if (counts.running) parts.push(`${counts.running} running`);
+          if (counts.queued) parts.push(`${counts.queued} queued`);
+          parts.push(`${counts.finished} finished`);
+          parts.push(`${counts.failed} failed`);
+          onUpdate?.({
+            content: [{ type: "text", text: `waiting: ${parts.join(", ")}` }],
+            details: { entries: entries() },
+          });
+        };
+        const liveThrottle = createThrottler(emit);
+        const unsubscribers = runs.map((r) =>
+          r.subscribe(() => {
+            if (onUpdate) liveThrottle.notify();
+          }),
+        );
+        // First frame right away so the row shows entries immediately.
+        if (onUpdate) emit();
+
+        let timedOut = false;
+        let cancelled = false;
+        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+        let onAbort: (() => void) | undefined;
+        try {
+          await new Promise<void>((resolve, reject) => {
+            Promise.all(runs.map((r) => r.promise)).then(() => resolve());
+            if (timeoutMs > 0) {
+              timeoutHandle = setTimeout(() => {
+                timedOut = true;
+                reject(new Error("timeout"));
+              }, timeoutMs);
+            }
+            if (signal) {
+              onAbort = () => {
+                cancelled = true;
+                reject(new Error("cancelled"));
+              };
+              if (signal.aborted) {
+                onAbort();
+                return;
+              }
+              signal.addEventListener("abort", onAbort, { once: true });
+            }
+          });
+        } catch (err) {
+          if (cancelled) {
+            throw new Error(
+              "wait was cancelled — the watched subagents keep running. Call wait or check again later.",
+            );
+          }
+          if (!timedOut) throw err; // timeout is handled below via the timedOut flag
+        } finally {
+          if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+          if (onAbort && signal) signal.removeEventListener("abort", onAbort);
+          liveThrottle.cancel();
+          for (const u of unsubscribers) u();
+        }
+
+        // One roll-call line per run — the same `id (role): state (stats)`
+        // shape cancel uses, so the model can map ids to roles and gauge
+        // task scale from wait output alone; the output itself stays
+        // check's to deliver. Timeout reuses the same lines: live runs carry
+        // their so-far usage.
+        const perId = () => runs.map((r) => formatRunLine(r.id, r.role, r.snapshot)).join("\n");
+        if (timedOut) {
+          const unfinished = runs.filter((r) => r.state === "queued" || r.state === "running");
+          const text =
+            `Timed out after ${Math.round(timeoutMs / 1000)}s — ${unfinished.length} of ${runs.length} subagents not finished. ` +
+            `Call wait again later, or check ids individually.\n${perId()}`;
+          return {
+            content: [{ type: "text", text }],
+            details: { entries: entries(), timedOut: true },
+          };
+        }
+        return {
+          content: [{ type: "text", text: perId() }],
+          details: { entries: entries() },
+        };
+      },
+
+      renderCall: renderWaitCall,
+      renderResult: renderWaitResult,
+    });
+
+    pi.registerTool({
+      name: "subagent_check",
+      label: "Check a background subagent",
+      description:
+        "Get an instant snapshot of ONE background subagent run: queued / running (with current activity, elapsed/budget, and usage so far) / finished (with the full output and usage) / failed or cancelled (with reason, partial output, and usage). Does not wait — use subagent_wait for that. Idempotent: checking a terminal run again re-delivers the same snapshot, so the result stays reachable even after branch navigation or compaction. One id per call because results can be large.",
+      promptSnippet: "Inspect a background subagent run",
+      parameters: Type.Object({
+        id: Type.String({ description: "Run id returned by a background delegate call" }),
+      }),
+
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+        const run = backgroundRuns.get(params.id);
+        if (!run) {
+          const active = [...backgroundRuns.values()].map((r) => `${r.id} (${r.role})`);
+          throw new Error(
+            `Unknown subagent id: ${params.id}. Active: ${active.length > 0 ? active.join(", ") : "(none)"}.`,
+          );
+        }
+
+        // Freeze live frames so the snapshot's elapsed time stays static.
+        const snap = run.result ? run.snapshot : freezeFrame(run.snapshot);
+
+        return {
+          content: [{ type: "text", text: formatCheckText(run.id, run.role, snap) }],
+          details: { id: run.id, role: run.role, result: snap },
+        };
+      },
+
+      renderCall: renderCheckCall,
+      renderResult: renderCheckResult,
+    });
+
+    pi.registerTool({
+      name: "subagent_steer",
+      label: "Steer a running background subagent",
+      description:
+        "Queue a correction or updated requirement into ONE running background subagent. The message is delivered after the child finishes its current tool batch, before its next LLM call; the run keeps its progress. Only running runs accept steering; queued and terminal runs reject it.",
+      promptSnippet: "Send a mid-run correction to a background subagent",
+      parameters: Type.Object({
+        id: Type.String({ description: "Run id returned by a background delegate call" }),
+        message: Type.String({
+          description: "The concrete correction or updated requirement for the child to follow.",
+        }),
+      }),
+
+      async execute(_toolCallId, params) {
+        const run = backgroundRuns.get(params.id);
+        if (!run) {
+          const active = [...backgroundRuns.values()].map((r) => `${r.id} (${r.role})`);
+          throw new Error(
+            `Unknown subagent id: ${params.id}. Active: ${active.length > 0 ? active.join(", ") : "(none)"}.`,
+          );
+        }
+        if (run.state === "queued") {
+          throw new Error(
+            `${params.id} (${run.role}) is still queued for a concurrency slot — steer once it is running.`,
+          );
+        }
+        if (run.state !== "running") {
+          throw new Error(
+            `${params.id} (${run.role}) is ${run.state} — only running runs can be steered. subagent_check(${params.id}) returns its result.`,
+          );
+        }
+        run.steer(params.message);
         return {
           content: [
             {
               type: "text",
-              text: `Unknown subagent role: ${params.role}. Available: ${Object.keys(availableRoles).join(", ")}`,
+              text: `Steer queued for ${params.id} (${run.role}) — delivered after its current tool batch.`,
             },
           ],
-          details: undefined as any,
+          details: { id: params.id, role: run.role, message: params.message },
         };
-      }
+      },
 
-      // Guard against bounded subagent nesting. A configured depth of 0 is unlimited.
-      if (config.maxDepth > 0 && CURRENT_DEPTH >= config.maxDepth) {
-        throw new Error(
-          `Cannot delegate: maximum nesting depth (${config.maxDepth}) reached (current depth ${CURRENT_DEPTH}). Return a result to the caller instead of delegating further.`,
-        );
-      }
+      renderCall: createSteerCallRender((id) => backgroundRuns.get(id)?.role),
+      renderResult: renderSteerResult,
+    });
 
-      // A subagent process exits when its task finishes, which would orphan any
-      // background run it started — background delegation is top-level only.
-      if (params.background && CURRENT_DEPTH > 0) {
-        throw new Error(
-          "Background delegation is only available in the top-level session. Delegate in the foreground instead.",
-        );
-      }
+    pi.registerTool({
+      name: "subagent_cancel",
+      label: "Cancel a background subagent",
+      description:
+        "Cancel ONE background subagent run (queued or running): the child process is killed and the run settles as cancelled (its own stop reason, same family as timeout — partial output kept), NOT as a plain failure. The reason is recorded with the run: whoever reads the partial output later via subagent_check sees why it was stopped. Cancelling does not remove the run — check still returns the partial output. A finished/failed run cannot be cancelled; check it instead.",
+      promptSnippet: "Cancel a background subagent run",
+      parameters: Type.Object({
+        id: Type.String({ description: "Run id returned by a background delegate call" }),
+        reason: Type.Optional(
+          Type.String({
+            description:
+              "Why the run is no longer needed (a few words suffice). Recorded with the run — whoever reads the partial output later (via subagent_check or history) sees why it was stopped.",
+          }),
+        ),
+      }),
 
-      const inheritedConversation = params.inheritConversation
-        ? serializeInheritedConversation(
-            ctx.sessionManager.buildContextEntries(),
-            config.inheritance.maxChars,
-          )
-        : undefined;
-
-      const run = startSubagentRun({
-        id: `sub-${++runCounter}`,
-        toolCallId: _toolCallId,
-        role: params.role,
-        roleDef,
-        task: params.task,
-        context: params.context,
-        files: params.files,
-        inheritConversation: params.inheritConversation === true,
-        inheritedConversation: inheritedConversation?.text,
-        inheritedConversationTruncated: inheritedConversation?.truncated,
-        cwd: params.cwd ?? ctx.cwd,
-        depth: CURRENT_DEPTH + 1,
-        // Foreground runs die with the tool call; background runs outlive the turn.
-        signal: params.background ? undefined : signal,
-        modelOverride: params.model,
-        config,
-        gate: concurrencyGate,
-        getRolesApi: getModelRolesAPI,
-        getSessionId: () => ctx.sessionManager?.getSessionId(),
-      });
-      trackRun(run);
-
-      // ── Background: return the id immediately; the pipeline keeps running. ──
-      if (params.background) {
-        backgroundRuns.set(run.id, run);
-        const runGeneration = sessionGeneration;
-        void run.promise.then((result) => {
-          // Never publish completions from an old session. Within a session
-          // every completion emits its UI-only notice card once — check
-          // results never suppress it (they are not LLM-visible either way).
-          if (runGeneration !== sessionGeneration) return;
-
-          const outcome = isFailedResult(result)
-            ? "failed"
-            : result.stopReason === "cancelled"
-              ? "cancelled"
-              : "finished";
-          // Pure notification: id + outcome only. The result itself surfaces
-          // through subagent_check (model) or /subagent:status (user) — the
-          // notice never previews it.
-          pi.sendMessage(
-            {
-              customType: BACKGROUND_COMPLETION_MESSAGE_TYPE,
-              content: `Background subagent ${run.id} (${run.role}) ${outcome}: "${taskPreview(run.task)}"`,
-              display: true,
-              // Structured payload for the notice renderer; the content string
-              // stays as the non-TUI fallback (export, print mode).
-              details: { id: run.id, role: run.role, outcome, task: run.task },
-            },
-            { triggerTurn: false },
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+        const run = backgroundRuns.get(params.id);
+        if (!run) {
+          const active = [...backgroundRuns.values()].map((r) => `${r.id} (${r.role})`);
+          throw new Error(
+            `Unknown subagent id: ${params.id}. Active: ${active.length > 0 ? active.join(", ") : "(none)"}.`,
           );
-        });
-        return {
-          content: [
-            { type: "text", text: `Background subagent started — id: ${run.id} (${params.role}).` },
-          ],
-          details: {
-            id: run.id,
-            role: params.role,
-            task: params.task,
-            context: params.context,
-            files: params.files,
-            inheritConversation: params.inheritConversation === true,
-            inheritedConversationChars: inheritedConversation?.text.length,
-            inheritedConversationTruncated: inheritedConversation?.truncated,
-          },
-        };
-      }
+        }
 
-      // ── Foreground: the same async engine, blocked on here. Archived
-      // for the view at creation — like a background run, it stays
-      // browsable after the call returns. ──
-      foregroundRuns.add(run);
-      const emit = (results: SubagentResult[], text: string) => {
-        onUpdate?.({
-          content: [{ type: "text", text }],
-          details: { results },
-        });
-      };
-      const progressText = (f: SubagentResult): string =>
-        `${params.role}  ${formatTimePart(f) ?? "0s"}  ${f.usage.turns} turn${f.usage.turns !== 1 ? "s" : ""}`;
-
-      let pendingFrame: SubagentResult | undefined;
-      const progressThrottle = createThrottler(() => {
-        const f = pendingFrame;
-        pendingFrame = undefined;
-        if (f) emit([f], progressText(f));
-      });
-
-      const unsubscribe = run.subscribe(() => {
-        if (run.result) return; // the terminal frame is emitted explicitly below
-        if (!onUpdate) return;
-        pendingFrame = run.snapshot;
-        progressThrottle.notify();
-      });
-
-      // Emit a queued placeholder only when this call will actually wait.
-      if (onUpdate && concurrencyGate.isAtCapacity) {
-        emit([run.snapshot], `${params.role}: queued...`);
-      }
-
-      try {
-        const result = await run.promise;
-
-        // Fallback note: the main model must know the answer came from the
-        // fallback model, not the role's primary — on success AND failure.
-        // Budget note: budget stops are intentional successes, but the model
-        // must know the output is partial.
-        const fallbackNote = formatFallbackNote(result);
-        const budgetNote = formatBudgetNote(result);
-
-        // Aborts and spawn crashes arrive here too: the engine resolves them
-        // into failed results that keep the partial frame (task, activity,
-        // output, usage), so the TUI renders them like any failure instead
-        // of collapsing to a bare error line.
-        if (isFailedResult(result)) {
-          const failedText =
-            `${params.role}: failed — ${result.errorMessage || result.stderr || "unknown error"}\n\nPartial output:\n${result.output}` +
-            fallbackNote +
-            formatUsageFooter(result);
-          emit([result], failedText);
+        // Terminal runs cannot be cancelled — point at check instead.
+        if (run.state === "finished" || run.state === "failed") {
+          const what =
+            run.state === "finished" ? "its result" : "the failure reason and partial output";
+          const text =
+            `${params.id} (${run.role}) already ${run.state} — nothing to cancel. ` +
+            `subagent_check(${params.id}) returns ${what}.`;
           return {
-            content: [{ type: "text", text: failedText }],
-            details: { results: [result] },
+            content: [{ type: "text", text }],
+            details: { id: run.id, role: run.role, result: run.snapshot },
           };
         }
 
-        const finalText = `${params.role}: finished\n\n${result.output}${budgetNote}${fallbackNote}${formatUsageFooter(result)}`;
-        emit([result], finalText);
+        // Abort, then wait for the terminal frame: SIGTERM → child cleanup →
+        // cancelled frame carrying the partial output. Bounded by the kill
+        // escalation grace (SIGKILL after 5s), so this await cannot hang.
+        // The reason becomes the terminal errorMessage verbatim — check and
+        // history readers see it prefixed "cancelled — ...".
+        run.abort(params.reason?.trim() || "no longer needed");
+        const result = await run.promise;
         return {
-          content: [{ type: "text", text: finalText }],
-          details: { results: [result] },
+          content: [{ type: "text", text: formatCancelText(run.id, run.role, result) }],
+          details: { id: run.id, role: run.role, result },
         };
-      } finally {
-        // Cancel any trailing throttled onUpdate regardless of how we exited.
-        // A stale "still running" progress event fired after the tool returns
-        // corrupts framework tool state and crashes the TUI.
-        progressThrottle.cancel();
-        unsubscribe();
-      }
-    },
+      },
 
-    // TUI rendering lives in ./render.ts (foreground) and ./render-async.ts
-    // (background input block) — call row and result view.
-    renderCall(args, theme, context) {
-      return (args as any).background
-        ? renderBackgroundDelegateCall(args, theme, context)
-        : renderDelegateCall(args, theme, context);
-    },
-    renderResult(result, options, theme, context) {
-      // The background flag is not part of the result — route on details shape:
-      // background results carry BackgroundDelegateDetails (id), foreground ones
-      // carry SubagentDetails (mode/results, never an id field).
-      const details = result.details as { id?: unknown } | undefined;
-      return typeof details?.id === "string"
-        ? renderBackgroundDelegateResult(result, options, theme, context)
-        : renderDelegateResult(result, options, theme, context);
-    },
-  });
-  pi.registerTool(subagentDelegateTool);
-
-  pi.registerTool({
-    name: "subagent_wait",
-    label: "Wait for background subagents",
-    description:
-      "Wait until all specified background subagent runs end. Omit ids to wait for all current background runs. Returns status and usage for each run; use subagent_check to retrieve results. Cancelling the wait leaves the runs running.",
-    promptSnippet: "Wait for background subagents to finish",
-    parameters: Type.Object({
-      ids: Type.Optional(
-        Type.Array(Type.String(), {
-          minItems: 1,
-          description:
-            "Run ids returned by background delegate calls. Omit to wait for all current background runs.",
-        }),
-      ),
-      // Timeout is hidden from the tool schema; restore with the timeoutMs expression below.
-      // timeout: Type.Optional(
-      //   Type.Number({
-      //     description: "Max time to wait in seconds. Omit to wait until all specified runs end.",
-      //   }),
-      // ),
-    }),
-
-    async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-      const ids = params.ids ? [...new Set(params.ids)] : [...backgroundRuns.keys()];
-      if (ids.length === 0) {
-        throw new Error(
-          "No background runs to wait for — start one with subagent_delegate(background: true) first.",
-        );
-      }
-      const unknown = ids.filter((id) => !backgroundRuns.has(id));
-      if (unknown.length > 0) {
-        const active = [...backgroundRuns.values()].map((r) => `${r.id} (${r.role})`);
-        throw new Error(
-          `Unknown subagent id(s): ${unknown.join(", ")}. Active: ${active.length > 0 ? active.join(", ") : "(none)"}.`,
-        );
-      }
-      const runs = ids.map((id) => backgroundRuns.get(id)!);
-      // Keep the timeout machinery available while the tool exposes completion-only waiting.
-      // const timeoutMs = typeof params.timeout === "number" && params.timeout > 0 ? params.timeout * 1000 : 0;
-      const timeoutMs = 0;
-
-      // ── Live mirror: forward combined snapshots into this tool row ──
-      const entries = () => runs.map((r) => ({ id: r.id, role: r.role, result: r.snapshot }));
-      const emit = () => {
-        const counts = { queued: 0, running: 0, finished: 0, failed: 0 };
-        for (const r of runs) counts[r.state]++;
-        const parts: string[] = [];
-        if (counts.running) parts.push(`${counts.running} running`);
-        if (counts.queued) parts.push(`${counts.queued} queued`);
-        parts.push(`${counts.finished} finished`);
-        parts.push(`${counts.failed} failed`);
-        onUpdate?.({
-          content: [{ type: "text", text: `waiting: ${parts.join(", ")}` }],
-          details: { entries: entries() },
-        });
-      };
-      const liveThrottle = createThrottler(emit);
-      const unsubscribers = runs.map((r) =>
-        r.subscribe(() => {
-          if (onUpdate) liveThrottle.notify();
-        }),
-      );
-      // First frame right away so the row shows entries immediately.
-      if (onUpdate) emit();
-
-      let timedOut = false;
-      let cancelled = false;
-      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-      let onAbort: (() => void) | undefined;
-      try {
-        await new Promise<void>((resolve, reject) => {
-          Promise.all(runs.map((r) => r.promise)).then(() => resolve());
-          if (timeoutMs > 0) {
-            timeoutHandle = setTimeout(() => {
-              timedOut = true;
-              reject(new Error("timeout"));
-            }, timeoutMs);
-          }
-          if (signal) {
-            onAbort = () => {
-              cancelled = true;
-              reject(new Error("cancelled"));
-            };
-            if (signal.aborted) {
-              onAbort();
-              return;
-            }
-            signal.addEventListener("abort", onAbort, { once: true });
-          }
-        });
-      } catch (err) {
-        if (cancelled) {
-          throw new Error(
-            "wait was cancelled — the watched subagents keep running. Call wait or check again later.",
-          );
-        }
-        if (!timedOut) throw err; // timeout is handled below via the timedOut flag
-      } finally {
-        if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
-        if (onAbort && signal) signal.removeEventListener("abort", onAbort);
-        liveThrottle.cancel();
-        for (const u of unsubscribers) u();
-      }
-
-      // One roll-call line per run — the same `id (role): state (stats)`
-      // shape cancel uses, so the model can map ids to roles and gauge
-      // task scale from wait output alone; the output itself stays
-      // check's to deliver. Timeout reuses the same lines: live runs carry
-      // their so-far usage.
-      const perId = () => runs.map((r) => formatRunLine(r.id, r.role, r.snapshot)).join("\n");
-      if (timedOut) {
-        const unfinished = runs.filter((r) => r.state === "queued" || r.state === "running");
-        const text =
-          `Timed out after ${Math.round(timeoutMs / 1000)}s — ${unfinished.length} of ${runs.length} subagents not finished. ` +
-          `Call wait again later, or check ids individually.\n${perId()}`;
-        return {
-          content: [{ type: "text", text }],
-          details: { entries: entries(), timedOut: true },
-        };
-      }
-      return {
-        content: [{ type: "text", text: perId() }],
-        details: { entries: entries() },
-      };
-    },
-
-    renderCall: renderWaitCall,
-    renderResult: renderWaitResult,
-  });
-
-  pi.registerTool({
-    name: "subagent_check",
-    label: "Check a background subagent",
-    description:
-      "Get an instant snapshot of ONE background subagent run: queued / running (with current activity, elapsed/budget, and usage so far) / finished (with the full output and usage) / failed or cancelled (with reason, partial output, and usage). Does not wait — use subagent_wait for that. Idempotent: checking a terminal run again re-delivers the same snapshot, so the result stays reachable even after branch navigation or compaction. One id per call because results can be large.",
-    promptSnippet: "Inspect a background subagent run",
-    parameters: Type.Object({
-      id: Type.String({ description: "Run id returned by a background delegate call" }),
-    }),
-
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const run = backgroundRuns.get(params.id);
-      if (!run) {
-        const active = [...backgroundRuns.values()].map((r) => `${r.id} (${r.role})`);
-        throw new Error(
-          `Unknown subagent id: ${params.id}. Active: ${active.length > 0 ? active.join(", ") : "(none)"}.`,
-        );
-      }
-
-      // Freeze live frames so the snapshot's elapsed time stays static.
-      const snap = run.result ? run.snapshot : freezeFrame(run.snapshot);
-
-      return {
-        content: [{ type: "text", text: formatCheckText(run.id, run.role, snap) }],
-        details: { id: run.id, role: run.role, result: snap },
-      };
-    },
-
-    renderCall: renderCheckCall,
-    renderResult: renderCheckResult,
-  });
-
-  pi.registerTool({
-    name: "subagent_steer",
-    label: "Steer a running background subagent",
-    description:
-      "Queue a correction or updated requirement into ONE running background subagent. The message is delivered after the child finishes its current tool batch, before its next LLM call; the run keeps its progress. Only running runs accept steering; queued and terminal runs reject it.",
-    promptSnippet: "Send a mid-run correction to a background subagent",
-    parameters: Type.Object({
-      id: Type.String({ description: "Run id returned by a background delegate call" }),
-      message: Type.String({
-        description: "The concrete correction or updated requirement for the child to follow.",
-      }),
-    }),
-
-    async execute(_toolCallId, params) {
-      const run = backgroundRuns.get(params.id);
-      if (!run) {
-        const active = [...backgroundRuns.values()].map((r) => `${r.id} (${r.role})`);
-        throw new Error(
-          `Unknown subagent id: ${params.id}. Active: ${active.length > 0 ? active.join(", ") : "(none)"}.`,
-        );
-      }
-      if (run.state === "queued") {
-        throw new Error(
-          `${params.id} (${run.role}) is still queued for a concurrency slot — steer once it is running.`,
-        );
-      }
-      if (run.state !== "running") {
-        throw new Error(
-          `${params.id} (${run.role}) is ${run.state} — only running runs can be steered. subagent_check(${params.id}) returns its result.`,
-        );
-      }
-      run.steer(params.message);
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Steer queued for ${params.id} (${run.role}) — delivered after its current tool batch.`,
-          },
-        ],
-        details: { id: params.id, role: run.role, message: params.message },
-      };
-    },
-
-    renderCall: createSteerCallRender((id) => backgroundRuns.get(id)?.role),
-    renderResult: renderSteerResult,
-  });
-
-  pi.registerTool({
-    name: "subagent_cancel",
-    label: "Cancel a background subagent",
-    description:
-      "Cancel ONE background subagent run (queued or running): the child process is killed and the run settles as cancelled (its own stop reason, same family as timeout — partial output kept), NOT as a plain failure. The reason is recorded with the run: whoever reads the partial output later via subagent_check sees why it was stopped. Cancelling does not remove the run — check still returns the partial output. A finished/failed run cannot be cancelled; check it instead.",
-    promptSnippet: "Cancel a background subagent run",
-    parameters: Type.Object({
-      id: Type.String({ description: "Run id returned by a background delegate call" }),
-      reason: Type.Optional(
-        Type.String({
-          description:
-            "Why the run is no longer needed (a few words suffice). Recorded with the run — whoever reads the partial output later (via subagent_check or history) sees why it was stopped.",
-        }),
-      ),
-    }),
-
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const run = backgroundRuns.get(params.id);
-      if (!run) {
-        const active = [...backgroundRuns.values()].map((r) => `${r.id} (${r.role})`);
-        throw new Error(
-          `Unknown subagent id: ${params.id}. Active: ${active.length > 0 ? active.join(", ") : "(none)"}.`,
-        );
-      }
-
-      // Terminal runs cannot be cancelled — point at check instead.
-      if (run.state === "finished" || run.state === "failed") {
-        const what =
-          run.state === "finished" ? "its result" : "the failure reason and partial output";
-        const text =
-          `${params.id} (${run.role}) already ${run.state} — nothing to cancel. ` +
-          `subagent_check(${params.id}) returns ${what}.`;
-        return {
-          content: [{ type: "text", text }],
-          details: { id: run.id, role: run.role, result: run.snapshot },
-        };
-      }
-
-      // Abort, then wait for the terminal frame: SIGTERM → child cleanup →
-      // cancelled frame carrying the partial output. Bounded by the kill
-      // escalation grace (SIGKILL after 5s), so this await cannot hang.
-      // The reason becomes the terminal errorMessage verbatim — check and
-      // history readers see it prefixed "cancelled — ...".
-      run.abort(params.reason?.trim() || "no longer needed");
-      const result = await run.promise;
-      return {
-        content: [{ type: "text", text: formatCancelText(run.id, run.role, result) }],
-        details: { id: run.id, role: run.role, result },
-      };
-    },
-
-    // Confirmation-only view — the partial output renders only in a check
-    // row (layer contract: cancel intervenes, check fetches).
-    renderCall: renderCancelCall,
-    renderResult: renderCancelResult,
-  });
+      // Confirmation-only view — the partial output renders only in a check
+      // row (layer contract: cancel intervenes, check fetches).
+      renderCall: renderCancelCall,
+      renderResult: renderCancelResult,
+    });
+  }
 
   // ── Subagent activity view ─────────────────────────────────────────
   // Shared by the /subagent:view command and the native command-palette

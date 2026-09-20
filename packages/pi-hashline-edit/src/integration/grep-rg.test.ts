@@ -46,6 +46,31 @@ test("real rg emits anchored matches from a temporary directory", {
   }
 });
 
+test("real rg combines include and exclude globs in order", {
+  skip: rgPath === null,
+}, async () => {
+  const directory = await mkdtemp(join(tmpdir(), "hl-grep-globs-"));
+  try {
+    for (const name of ["first.ts", "second.ts", "first.test.ts", "notes.md", "notes.txt"]) {
+      await writeFile(join(directory, name), "needle\n");
+    }
+    const tool = makeGrepOverrideWithBackend(directory, {
+      findRg: async () => rgPath,
+      delegate: async () => {
+        throw new Error("integration test must not invoke the built-in grep delegate");
+      },
+    });
+    const result: any = await tool.execute("0", {
+      pattern: "needle",
+      glob: ["*.ts", "*.md", "!**/*.test.ts"],
+      outputMode: "files",
+    }, undefined, undefined);
+    assert.deepEqual(result.content[0].text.split("\n").sort(), ["first.ts", "notes.md", "second.ts"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("real rg and line filters honor explicit case settings and Unicode folding", {
   skip: rgPath === null,
 }, async () => {

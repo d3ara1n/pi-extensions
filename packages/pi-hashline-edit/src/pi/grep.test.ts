@@ -219,10 +219,13 @@ test("passes output flags and formats files and counts", async () => {
       await writeFile(b, "foo a.b\n");
       const fake = fakeBackend({ lines: [rgMatch(a, 1, "Foo a.b\n"), rgMatch(b, 1, "foo a.b\n")] });
 
-      const files = await call(makeGrepOverrideWithBackend(dir, fake.backend), {
+      const tool = makeGrepOverrideWithBackend(dir, fake.backend);
+      const globSchema: any = tool.parameters.properties.glob;
+      assert.deepEqual(globSchema.anyOf.map((option: any) => option.type), ["string", "array"]);
+      const files = await call(tool, {
         pattern: ["Foo", "a.b"],
         path: ["a.ts", "b.ts"],
-        glob: "*.ts",
+        glob: ["*.ts", "!**/*.test.ts"],
         ignoreCase: true,
         literal: true,
         wordMatch: true,
@@ -239,6 +242,8 @@ test("passes output flags and formats files and counts", async () => {
         "--word-regexp",
         "--glob",
         "*.ts",
+        "--glob",
+        "!**/*.test.ts",
         "-e",
         "Foo",
         "-e",
@@ -335,6 +340,12 @@ test("delegates only safe fallbacks and rejects extended missing-rg requests", a
           pattern: ["x", "y"],
           matchMode: "all",
         }),
+        /ripgrep \(rg\) not found/,
+      );
+      await call(tool, { pattern: "x", glob: "*.ts" });
+      assert.deepEqual(absent.delegates.at(-1)?.[1], { pattern: "x", glob: "*.ts" });
+      await assert.rejects(
+        call(tool, { pattern: "x", glob: ["*.ts", "!**/*.test.ts"] }),
         /ripgrep \(rg\) not found/,
       );
     });

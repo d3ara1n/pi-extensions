@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-provider-stepfun",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "type": "module",
   "description": "StepFun provider for pi — Step 5 Preview and Flash via pay-as-you-go or Step Plan",
   "homepage": "https://github.com/d3ara1n/pi-extensions/tree/main/packages/pi-provider-stepfun#readme",

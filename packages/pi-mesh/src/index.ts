@@ -47,7 +47,7 @@ function refreshWidget(ctx: ExtensionContext, name: string, count: number): void
   if (!ctx.hasUI) return;
   const theme = ctx.ui.theme;
   if (!theme) return;
-  const label = theme.fg("dim", "mesh");
+  const label = theme.fg("muted", "mesh");
   const who = theme.fg("accent", name);
   const n = theme.fg(count > 0 ? "success" : "dim", `(${count})`);
   ctx.ui.setStatus("mesh", `${label} ${who} ${n}`);
@@ -195,7 +195,7 @@ export default function registerMeshExtension(pi: ExtensionAPI): void {
       if (theme) {
         ctx.ui.setStatus(
           "mesh",
-          `${theme.fg("dim", "mesh")} ${theme.fg("accent", newName)} ${theme.fg("success", `(${count})`)}`,
+          `${theme.fg("muted", "mesh")} ${theme.fg("accent", newName)} ${theme.fg("success", `(${count})`)}`,
         );
       }
       ctx.ui.notify(`mesh renamed to ${newName}`, "info");

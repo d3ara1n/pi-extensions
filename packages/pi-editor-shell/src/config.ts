@@ -19,6 +19,7 @@ export interface EditorShellIcons {
   context: string;
   cache: string;
   hitRate: string;
+  turn: string;
   timer: string;
   folder: string;
 }
@@ -37,8 +38,8 @@ export interface EditorShellConfig {
   pinnedStatus: string[];
   /**
    * Per-slot border-icon overrides. Any subset; missing keys fall back to
-   * the built-in Nerd Font set. Values are raw characters — JSON `"\uf0e7"`
-   * for a Nerd Font glyph, or `"🤖"` for an emoji, etc.
+   * the built-in icon set. Values are raw characters — JSON `"\uf0e7"`
+   * for a Nerd Font glyph, or `"↻"` for a Unicode symbol, etc.
    */
   icons: Partial<EditorShellIcons>;
   /**
@@ -61,6 +62,7 @@ const ICON_KEYS: ReadonlyArray<keyof EditorShellIcons> = [
   "context",
   "cache",
   "hitRate",
+  "turn",
   "timer",
   "folder",
 ];

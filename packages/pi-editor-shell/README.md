@@ -2,12 +2,12 @@
 
 [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-editor-shell)](https://www.npmjs.com/package/@d3ara1n/pi-editor-shell) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-editor-shell)](https://www.npmjs.com/package/@d3ara1n/pi-editor-shell) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-editor-shell)](https://www.npmjs.com/package/@d3ara1n/pi-editor-shell)
 
-Replaces pi's default editor and status bar with a unified rounded-corner shell drawn with box-drawing glyphs (`╭╮││╰╯`), with status info embedded in the border. The frame and spinner use only standard Unicode; the six border icons are Nerd Font glyphs (overridable — see [Configuration](#configuration)).
+Replaces pi's default editor and status bar with a unified rounded-corner shell drawn with box-drawing glyphs (`╭╮││╰╯`), with status info embedded in the border. The frame and spinner use only standard Unicode; border icons use Nerd Font glyphs or standard Unicode symbols and are overridable — see [Configuration](#configuration).
 
 ## What shows up where
 
 - **Top border** — `  model ·  thinking-level ` (left) + pinned extension statuses (right, via `pinnedStatus` config)
-- **Bottom border** — `  ctx NN%/NNk|N.NM · ⚡cacheRead(total)  hitRate% · NN.N e2e t/s · $N.NNN ·  Nm ` (left) + `  ~/Projects (main +2 ~1 *4) ` (right, shows git branch plus staged, unstaged, and untracked file counts when in a repo; inside a linked worktree the branch carries an `@<name>` tag, e.g. `(feature-x @feature-x +2 ~1)`, so sibling worktrees of one repo are told apart at a glance). Response throughput defaults to client-observed end-to-end visible-text throughput, including local request preparation, network and queue latency, hidden reasoning, and visible generation. It can instead show generation throughput or be hidden; see [Throughput display](#throughput-display). A new turn clears the previous measurement, so unavailable samples never leave stale data in the border. Session cost includes assistant, tool, compaction, and branch-summary usage; the dollar segment is hidden when the provider reports no priced usage. The trailing timer counts whole minutes since the session's last activity — see [Idle timer](#idle-timer). Session hit rate and detailed response timing are available via `/editor-shell:status`.
+- **Bottom border** — `  ctx NN%/NNk|N.NM · ⚡cacheRead(total)  hitRate% · NN.N e2e t/s · $N.NNN · ↻ N ·  Nm ` (left) + `  ~/Projects (main +2 ~1 *4) ` (right, shows git branch plus staged, unstaged, and untracked file counts when in a repo; inside a linked worktree the branch carries an `@<name>` tag, e.g. `(feature-x @feature-x +2 ~1)`, so sibling worktrees of one repo are told apart at a glance). Response throughput defaults to client-observed end-to-end visible-text throughput, including local request preparation, network and queue latency, hidden reasoning, and visible generation. It can instead show generation throughput or be hidden; see [Throughput display](#throughput-display). A new turn clears the previous measurement, so unavailable samples never leave stale data in the border. Session cost includes assistant, tool, compaction, and branch-summary usage; the dollar segment is hidden when the provider reports no priced usage. `↻ N` counts persisted user messages on the current session branch, and the trailing timer counts whole minutes since the session's last activity — see [Idle timer](#idle-timer). Session hit rate and detailed response timing are available via `/editor-shell:status`.
 - **Below shell** — Auto-wrapping extension status line (all `setStatus` entries not pinned to the top)
 - **Border color** follows pi's thinking-level / bash-mode indicator automatically.
 
@@ -32,15 +32,20 @@ In `~/.pi/agent/settings.json` under the `editorShell` key:
 
 ### Default icons
 
-| Slot | Glyph | Nerd Font name |
-|------|-------|----------------|
+| Slot | Glyph | Icon source |
+|------|-------|-------------|
 | `model` | `` | oct-cpu |
 | `thinking` | `` | oct-light_bulb |
 | `context` | `` | oct-cache |
 | `cache` | `⚡` | oct-zap |
 | `hitRate` | `` | fa-bullseye |
+| `turn` | `↻` | Unicode clockwise open circle arrow |
 | `timer` | `` | fa-clock-o |
 | `folder` | `` | fa-folder_open |
+
+### Branch counter
+
+The `↻ N` segment counts persisted user messages on the current session branch. Tool loops do not increase it, while steering and follow-up prompts count when they enter the branch. The value is rebuilt from branch history, so restored sessions, edited history, and branch switches show the correct branch-local count.
 
 ### Idle timer
 

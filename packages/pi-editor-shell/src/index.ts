@@ -7,6 +7,7 @@ import * as path from "node:path";
 import { CardEditor, type FrameProvider, type SpinnerPhase } from "./card-editor.ts";
 import { DEFAULT_CONFIG, loadEditorShellConfig, type EditorShellConfig, type EditorShellIcons } from "./config.ts";
 import { TickScheduler } from "./tick.ts";
+import { countUserMessages } from "./turn-count.ts";
 import {
   formatIdleMinutes,
   formatIdleTimerLabel,
@@ -67,16 +68,16 @@ function formatContextWindow(tokens: number): string {
   return `${(tokens / 1_000).toFixed(0)}k`;
 }
 
-// ── Built-in icon set (Nerd Font). Users can override any subset via the
-//    `editorShell.icons` config — see config.ts. `cache` uses U+26A1, which
-//    Nerd Fonts maps `oct-zap` to directly (no dedicated glyph), so it is
-//    the same glyph in and out of a Nerd Font terminal.
+// ── Built-in icon set. Users can override any subset via the
+//    `editorShell.icons` config — see config.ts. `turn` is standard Unicode;
+//    `cache` uses U+26A1, which Nerd Fonts map to oct-zap directly.
 const DEFAULT_ICONS: EditorShellIcons = {
   model: "\uf4bc", //   oct-cpu
   thinking: "\uf400", //   oct-light_bulb
   context: "\uf49b", //   oct-cache
   cache: "\u26a1", // ⚡  oct-zap (NF maps this codepoint to U+26A1)
   hitRate: "\uf140", //   fa-bullseye（靶心，缓存命中率）
+  turn: "\u21bb", // ↻  Unicode clockwise open circle arrow
   timer: "\uf017", //  fa-clock-o
   folder: "\uf07c", //   fa-folder_open
 };
@@ -389,6 +390,17 @@ export default function (pi: ExtensionAPI) {
     _costLeafId = ctx.sessionManager.getLeafId();
   };
 
+  // Branch-local user-message count, re-derived only when the active leaf
+  // changes so restored sessions and branch switches cannot drift.
+  let _turnCount = 0;
+  let _turnCountLeafId: string | null = null;
+  const refreshTurnCount = (ctx: {
+    sessionManager: { getBranch(): unknown[]; getLeafId(): string | null };
+  }): void => {
+    _turnCount = countUserMessages(ctx.sessionManager.getBranch());
+    _turnCountLeafId = ctx.sessionManager.getLeafId();
+  };
+
   // ── Idle timer ─────────────────────────────────────────────────
   // Wall-clock anchor of the last observable activity (prompt, streaming,
   // tool run). Events touch it; session_start seeds it from the newest
@@ -484,6 +496,8 @@ export default function (pi: ExtensionAPI) {
     _latestPerformance = undefined;
     _sessionCost = 0;
     _costLeafId = null;
+    _turnCount = 0;
+    _turnCountLeafId = null;
     editor?.setSpinner(null);
     _ticker?.stop();
     _ticker = undefined;
@@ -492,10 +506,12 @@ export default function (pi: ExtensionAPI) {
   });
   pi.on("session_compact", (_event, ctx) => {
     refreshSessionCost(ctx);
+    refreshTurnCount(ctx);
     editor?.requestRender();
   });
   pi.on("session_tree", (_event, ctx) => {
     refreshSessionCost(ctx);
+    refreshTurnCount(ctx);
     editor?.requestRender();
   });
 
@@ -564,6 +580,7 @@ export default function (pi: ExtensionAPI) {
     _sawThinking = false;
     _latestPerformance = undefined;
     refreshSessionCost(ctx);
+    refreshTurnCount(ctx);
     refreshGitDirty(ctx.cwd, () => editor?.requestRender());
 
     // Fresh segments on every render — reads live ctx state, so thinking /
@@ -571,7 +588,9 @@ export default function (pi: ExtensionAPI) {
     // The border color itself is left to pi (editor.borderColor), matching
     // the default editor's behavior.
     const provider: FrameProvider = () => {
-      if (_costLeafId !== ctx.sessionManager.getLeafId()) refreshSessionCost(ctx);
+      const leafId = ctx.sessionManager.getLeafId();
+      if (_costLeafId !== leafId) refreshSessionCost(ctx);
+      if (_turnCountLeafId !== leafId) refreshTurnCount(ctx);
       const theme = ctx.ui.theme;
 
       // Resolve pinned status keys → already-themed text, " · "-joined.
@@ -625,6 +644,7 @@ export default function (pi: ExtensionAPI) {
         _sessionCost > 0
           ? `${theme.fg("dim", " · ")}${theme.fg("muted", `$${_sessionCost.toFixed(3)}`)}`
           : "";
+      const turnPart = `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.turn} ${_turnCount}`)}`;
 
       // The idle interval begins only after the agent loop finishes. While it
       // is active, an ellipsis replaces the minute count and remains muted.
@@ -655,7 +675,7 @@ export default function (pi: ExtensionAPI) {
         topLeft: ` ${theme.fg("accent", `${icons.model} ${model}`)}${theme.fg("dim", " · ")}${theme.fg(thinkingColor, `${icons.thinking} ${thinking}`)} `,
         topRight: buildPinned(),
         // Context in severity color; cwd stays muted so it never competes.
-        bottomLeft: ` ${theme.fg(contextToken(pct), `${icons.context} ${ctxText}`)}${cachePart}${tpsPart}${costPart}${timerPart} `,
+        bottomLeft: ` ${theme.fg(contextToken(pct), `${icons.context} ${ctxText}`)}${cachePart}${tpsPart}${costPart}${turnPart}${timerPart} `,
         bottomRight: theme.fg("muted", ` ${cwdDisplay} `),
       };
     };
@@ -709,7 +729,7 @@ export default function (pi: ExtensionAPI) {
 
   // ── Debug command ──────────────────────────────────────────────
   pi.registerCommand("editor-shell:status", {
-    description: "Show editor-shell debug state: status keys, performance, and usage totals",
+    description: "Show editor-shell debug state: status keys, branch count, performance, and usage totals",
     handler: async (_args, ctx) => {
       // Refresh git dirty first so the status output reflects the current
       // working tree — the event-driven cache is otherwise only updated at
@@ -759,6 +779,11 @@ export default function (pi: ExtensionAPI) {
       lines.push(`  this turn cacheRead: ${formatTokens(now)}`);
       const hr = cacheHitRate(latest);
       lines.push(`  this turn hit rate: ${hr != null ? `${hr.toFixed(1)}%` : "n/a"}`);
+
+      refreshTurnCount(ctx);
+      lines.push("");
+      lines.push("[branch counter]");
+      lines.push(`  user messages: ${_turnCount}`);
 
       lines.push("");
       lines.push("[idle timer]");

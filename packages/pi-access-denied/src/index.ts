@@ -75,14 +75,14 @@ function updateStatus(ctx: ExtensionContext) {
   const state = getState();
   if (!state.alive) return;
   const icon = MODE_ICON[state.mode];
-  // Only color the mode word after the colon; the icon + label stay default.
+  const prefix = ctx.ui.theme.fg("muted", `${icon} access:`);
   const modeWord =
     state.mode === "deny"
       ? ctx.ui.theme.fg("error", state.mode)
       : state.mode === "allow"
         ? ctx.ui.theme.fg("success", state.mode)
-        : state.mode;
-  ctx.ui.setStatus(STATUS_KEY, `${icon} access:${modeWord}`);
+        : ctx.ui.theme.fg("text", state.mode);
+  ctx.ui.setStatus(STATUS_KEY, `${prefix}${modeWord}`);
 }
 
 function formatPaths(paths: string[]): string {

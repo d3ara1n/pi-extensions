@@ -68,7 +68,7 @@ const editOpSchema = Type.Object({
 	end: anchorRef(
 		"Last line of the range to replace/delete, inclusive: the op touches exactly [anchor..end]. Omit only for a single-line change (end == anchor). A multi-line change that forgets `end` succeeds silently with the rest of the intended range left in the file — a corrupted file, not an error.",
 	),
-	body: Type.Optional(Type.Array(Type.String(), { description: "New content lines (required for replace/insert/append/prepend; omit for delete)" })),
+	body: Type.Optional(Type.Array(Type.String(), { minItems: 1, description: "New content lines (non-empty; required for replace/insert/append/prepend; omit for delete)" })),
 });
 
 const editSchema = Type.Object({
@@ -213,7 +213,7 @@ export function makeEditOverride(cwd: string) {
 		"Prefer one `edit` with multiple ops for several changes to the same file, rather than several separate `edit` calls.",
 			"op ∈ replace | delete | insert_after | insert_before | append | prepend.",
 		"anchor & end = {line, hash} copied from your latest read, grep, replace, or edit result (the `#HASH` after each line number); grep's `-C` context lines are anchored and editable too. replace/delete take anchor (+ optional end for a range); insert_after/insert_before take anchor; append/prepend take neither.",
-			"body = string[] of new content lines (required for replace/insert/append/prepend; omit for delete).",
+			"body = non-empty string[] of new content lines (required for replace/insert/append/prepend; omit for delete).",
 			"A successful edit returns `Updated anchors` for the changed lines — use those (not stale line numbers) for the next edit to the same file; re-read only if you need lines outside that set.",
 		],
 		parameters: editSchema,

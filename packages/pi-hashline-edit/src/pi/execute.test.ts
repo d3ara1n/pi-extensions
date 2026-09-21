@@ -230,6 +230,19 @@ test("edit execute: malformed op (replace without body) → throws", async () =>
 	});
 });
 
+test("edit schema: empty body rejected at the schema layer (minItems 1)", () => {
+	const override: any = makeEditOverride("/tmp");
+	for (const op of ["replace", "insert_after"] as const) {
+		assert.throws(
+			() => validateToolArguments(override, {
+				name: "edit",
+				arguments: { path: "f.txt", edits: [{ op, anchor: { line: 1, hash: "XX" }, body: [] }] },
+			} as any),
+			/Validation failed/,
+		);
+	}
+});
+
 test("edit execute: delete op", async () => {
 	await withDir(async (dir) => {
 		const f = join(dir, "f.txt");

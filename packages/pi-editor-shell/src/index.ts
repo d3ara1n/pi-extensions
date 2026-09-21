@@ -69,7 +69,8 @@ function formatContextWindow(tokens: number): string {
 }
 
 // ── Built-in icon set. Users can override any subset via the
-//    `editorShell.icons` config — see config.ts. `turn` is standard Unicode;
+//    `editorShell.icons` config — see config.ts.
+//    `turn` and `timer` use Octicons, matching the model and thinking icons.
 //    `cache` uses U+26A1, which Nerd Fonts map to oct-zap directly.
 const DEFAULT_ICONS: EditorShellIcons = {
   model: "\uf4bc", //   oct-cpu
@@ -77,8 +78,8 @@ const DEFAULT_ICONS: EditorShellIcons = {
   context: "\uf49b", //   oct-cache
   cache: "\u26a1", // ⚡  oct-zap (NF maps this codepoint to U+26A1)
   hitRate: "\uf140", //   fa-bullseye（靶心，缓存命中率）
-  turn: "\u21bb", // ↻  Unicode clockwise open circle arrow
-  timer: "\uf017", //  fa-clock-o
+  turn: "\uf442", //   oct-comment_discussion
+  timer: "\uf43a", //   oct-clock
   folder: "\uf07c", //   fa-folder_open
 };
 
@@ -647,7 +648,7 @@ export default function (pi: ExtensionAPI) {
       const turnPart = `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.turn} ${_turnCount}`)}`;
 
       // The idle interval begins only after the agent loop finishes. While it
-      // is active, an ellipsis replaces the minute count and remains muted.
+      // is active, hide the entire timer segment, including its separator.
       // Once idle, the timer turns amber near the cache TTL and red past it.
       const idleElapsed = Date.now() - _lastActivityAt;
       const idleTtl = promptCacheTtlMs(ctx.model, process.env.PI_CACHE_RETENTION);
@@ -655,7 +656,9 @@ export default function (pi: ExtensionAPI) {
       const idleToken = _agentActive ? "muted" : idleTimerToken(idleElapsed, idleTtl);
       // Sync the tick's change-detection key with what is now on screen.
       _lastTimerKey = `${idleLabel}|${idleToken}`;
-      const timerPart = `${theme.fg("dim", " · ")}${theme.fg(idleToken, `${icons.timer} ${idleLabel}`)}`;
+      const timerPart = idleLabel
+        ? `${theme.fg("dim", " · ")}${theme.fg(idleToken, `${icons.timer} ${idleLabel}`)}`
+        : "";
 
       // Git branch + worktree badge + dirty state — pi's format:
       // ~/Projects (main). Inside a linked worktree the branch carries an

@@ -23,13 +23,13 @@ export function formatIdleMinutes(elapsedMs: number): string {
 }
 
 /**
- * Display label for the idle timer. While the agent is active there is no
- * idle interval to measure, so render an ellipsis instead of a misleading 0m.
+ * Display label for the idle timer. An empty label hides the entire segment
+ * while the agent is active, when there is no idle interval to measure.
  *
  * @internal — exported for testing.
  */
 export function formatIdleTimerLabel(elapsedMs: number, agentActive: boolean): string {
-  return agentActive ? "…" : formatIdleMinutes(elapsedMs);
+  return agentActive ? "" : formatIdleMinutes(elapsedMs);
 }
 
 /**

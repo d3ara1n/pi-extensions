@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-peek-agent",
-  "version": "0.5.3",
+  "version": "1.0.0",
   "type": "module",
   "description": "Cross-instance peek for pi — built on @d3ara1n/pi-mesh. Registers an 'investigate' handler that serves remote peeks via @d3ara1n/pi-peek's read-after-burn investigation, plus the `peek` LLM tool. Discovery, transport, and identity live in pi-mesh.",
   "homepage": "https://github.com/d3ara1n/pi-extensions/tree/main/packages/pi-peek-agent#readme",

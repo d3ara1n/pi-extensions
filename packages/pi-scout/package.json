@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-scout",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "type": "module",
   "description": "Per-turn side agent decision framework for pi — uses a cheap model to select skills and route models before each conversation turn",
   "homepage": "https://github.com/d3ara1n/pi-extensions/tree/main/packages/pi-scout#readme",

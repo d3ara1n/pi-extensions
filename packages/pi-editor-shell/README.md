@@ -7,7 +7,7 @@ Replaces pi's default editor and status bar with a unified rounded-corner shell 
 ## What shows up where
 
 - **Top border** — `  model ·  thinking-level ` (left) + pinned extension statuses (right, via `pinnedStatus` config)
-- **Bottom border** — `  ctx NN%/NNk|N.NM · ⚡ cacheRead(total)  hitRate% · NN.N e2e t/s · $N.NNN ` (left) + `  ~/Projects (main +2 ~1 *4) ` (right, shows git branch plus staged, unstaged, and untracked file counts when in a repo; inside a linked worktree the branch carries an `@<name>` tag, e.g. `(feature-x @feature-x +2 ~1)`, so sibling worktrees of one repo are told apart at a glance). Response throughput defaults to client-observed end-to-end visible-text throughput, including local request preparation, network and queue latency, hidden reasoning, and visible generation. It can instead show generation throughput or be hidden; see [Throughput display](#throughput-display). A new turn clears the previous measurement, so unavailable samples never leave stale data in the border. Session cost includes assistant, tool, compaction, and branch-summary usage; the dollar segment is hidden when the provider reports no priced usage. Session hit rate and detailed response timing are available via `/editor-shell:status`.
+- **Bottom border** — `  ctx NN%/NNk|N.NM · ⚡ cacheRead(total)  hitRate% · NN.N e2e t/s · $N.NNN ·  Nm ` (left) + `  ~/Projects (main +2 ~1 *4) ` (right, shows git branch plus staged, unstaged, and untracked file counts when in a repo; inside a linked worktree the branch carries an `@<name>` tag, e.g. `(feature-x @feature-x +2 ~1)`, so sibling worktrees of one repo are told apart at a glance). Response throughput defaults to client-observed end-to-end visible-text throughput, including local request preparation, network and queue latency, hidden reasoning, and visible generation. It can instead show generation throughput or be hidden; see [Throughput display](#throughput-display). A new turn clears the previous measurement, so unavailable samples never leave stale data in the border. Session cost includes assistant, tool, compaction, and branch-summary usage; the dollar segment is hidden when the provider reports no priced usage. The trailing timer counts whole minutes since the session's last activity — see [Idle timer](#idle-timer). Session hit rate and detailed response timing are available via `/editor-shell:status`.
 - **Below shell** — Auto-wrapping extension status line (all `setStatus` entries not pinned to the top)
 - **Border color** follows pi's thinking-level / bash-mode indicator automatically.
 
@@ -38,10 +38,16 @@ In `~/.pi/agent/settings.json` under the `editorShell` key:
 | `thinking` | `` | oct-light_bulb |
 | `context` | `` | oct-cache |
 | `cache` | `⚡` | oct-zap |
-| `hitRate` | `` | fa-bullseye |
+| `hitRate` | `` | fa-bullseye |
+| `timer` | `` | fa-clock-o |
 | `folder` | `` | fa-folder_open |
 
-### Model display
+### Idle timer
+
+The last segment of the bottom border shows how long the session has been idle: whole minutes since the last observable activity (a submitted prompt, streaming text, or a running tool), floored — `4m` covers everything from 4:00 to 4:59. The anchor is seeded from the newest session-entry timestamp when a session starts, so a restored session opens with its true idle time already on screen instead of restarting from zero. A shared 1 Hz tick repaints the border on minute rollovers (and only then), so the display stays live even when nothing else is happening.
+
+The timer is information, not an alarm: it renders in the theme's muted tone (the same secondary gray as the cwd display) by default. When the current model declares a prompt-cache lifetime (`promptCache` in pi's model catalog, `PI_CACHE_RETENTION=long` selects the long tier), the text turns amber within the last tenth of that lifetime and red past it — a hint that the next prompt will likely miss the provider's prompt cache. Models without a declared lifetime never indicate; unknown means "assume not expired."
+
 
 How the model is labeled in the top-left border (`"name"` by default):
 

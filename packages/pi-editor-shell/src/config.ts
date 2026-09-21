@@ -19,6 +19,7 @@ export interface EditorShellIcons {
   context: string;
   cache: string;
   hitRate: string;
+  timer: string;
   folder: string;
 }
 
@@ -60,6 +61,7 @@ const ICON_KEYS: ReadonlyArray<keyof EditorShellIcons> = [
   "context",
   "cache",
   "hitRate",
+  "timer",
   "folder",
 ];
 

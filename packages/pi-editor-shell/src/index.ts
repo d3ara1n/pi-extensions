@@ -6,6 +6,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { CardEditor, type FrameProvider, type SpinnerPhase } from "./card-editor.ts";
 import { DEFAULT_CONFIG, loadEditorShellConfig, type EditorShellConfig, type EditorShellIcons } from "./config.ts";
+import { TickScheduler } from "./tick.ts";
+import { formatIdleMinutes, idleTimerToken, lastActivityFromEntries, promptCacheTtlMs } from "./timer.ts";
 import { calculateResponsePerformance, type ResponsePerformance } from "./tps.ts";
 
 /**
@@ -69,6 +71,7 @@ const DEFAULT_ICONS: EditorShellIcons = {
   context: "\uf49b", //   oct-cache
   cache: "\u26a1", // ⚡  oct-zap (NF maps this codepoint to U+26A1)
   hitRate: "\uf140", //   fa-bullseye（靶心，缓存命中率）
+  timer: "\uf017", //  fa-clock-o
   folder: "\uf07c", //   fa-folder_open
 };
 
@@ -380,10 +383,29 @@ export default function (pi: ExtensionAPI) {
     _costLeafId = ctx.sessionManager.getLeafId();
   };
 
+  // ── Idle timer ─────────────────────────────────────────────────
+  // Wall-clock anchor of the last observable activity (prompt, streaming,
+  // tool run). Events touch it; session_start seeds it from the newest
+  // session-entry timestamp so restored sessions open with their true idle
+  // time already on screen.
+  let _lastActivityAt = Date.now();
+  // Displayed timer state at the last paint ("minutes|token"). The tick
+  // callback re-derives this key and only asks for a repaint when it
+  // changes; the frame provider re-syncs it whenever it draws the segment.
+  let _lastTimerKey = "";
+  // Shared low-frequency tick driving repaints the frame needs on its own
+  // (idle-minute rollovers, TTL color transitions). Stopped at
+  // session_shutdown so the interval never leaks across sessions.
+  let _ticker: TickScheduler | undefined;
+  const touchActivity = (): void => {
+    _lastActivityAt = Date.now();
+  };
+
   // ── Phase-aware spinner + lifecycle ────────────────────────────
   // Each event asks the editor for a phase; CardEditor.setSpinner is itself
   // a same-phase no-op, so rapid event streams never reset the animation.
   pi.on("turn_start", (_event, ctx) => {
+    touchActivity();
     _turnStartedAt = performance.now();
     _firstVisibleTextAt = undefined;
     _responseEndedAt = undefined;
@@ -395,11 +417,13 @@ export default function (pi: ExtensionAPI) {
   });
   pi.on("message_start", (event) => {
     if (event.message.role !== "assistant") return;
+    touchActivity();
     _firstVisibleTextAt = undefined;
     _responseEndedAt = undefined;
     _sawThinking = false;
   });
   pi.on("message_update", (event) => {
+    touchActivity();
     const update = event.assistantMessageEvent;
     const t = update.type;
     if (t === "text_delta" && update.delta.length > 0) {
@@ -417,6 +441,9 @@ export default function (pi: ExtensionAPI) {
   pi.on("message_end", (event) => {
     if (event.message.role !== "assistant") return;
     _responseEndedAt = performance.now();
+    // Non-streaming providers fire no message_update at all — touch here so
+    // a long response still counts as activity right up to its last byte.
+    touchActivity();
     const message = event.message as MsgSnap;
     const hasVisibleText = message.content?.some(
       (part) => part.type === "text" && typeof part.text === "string" && part.text.length > 0,
@@ -424,7 +451,10 @@ export default function (pi: ExtensionAPI) {
     // Non-streaming providers expose visible text only when the response completes.
     if (hasVisibleText) _firstVisibleTextAt ??= _responseEndedAt;
   });
-  pi.on("tool_execution_start", () => editor?.setSpinner("exec"));
+  pi.on("tool_execution_start", () => {
+    touchActivity();
+    editor?.setSpinner("exec");
+  });
   pi.on("agent_end", (_event, ctx) => {
     // cacheRead totals + latest usage are stable once a turn finishes —
     // recompute here instead of on every render frame.
@@ -443,6 +473,9 @@ export default function (pi: ExtensionAPI) {
     _sessionCost = 0;
     _costLeafId = null;
     editor?.setSpinner(null);
+    _ticker?.stop();
+    _ticker = undefined;
+    _lastTimerKey = "";
     editor = undefined;
   });
   pi.on("session_compact", (_event, ctx) => {
@@ -479,6 +512,7 @@ export default function (pi: ExtensionAPI) {
       _reasoningExpected = false;
       _sawThinking = false;
       editor?.requestRender();
+      touchActivity();
     }
     if (_cwd) refreshGitDirty(_cwd, () => editor?.requestRender());
   });
@@ -491,6 +525,22 @@ export default function (pi: ExtensionAPI) {
     config = loadEditorShellConfig(ctx.cwd);
     icons = { ...DEFAULT_ICONS, ...config.icons };
     _cacheTotal = sumCacheRead(ctx);
+    _latestUsage = latestAssistantUsage(ctx);
+    _lastActivityAt = lastActivityFromEntries(ctx.sessionManager.getEntries());
+    _lastTimerKey = "";
+    // One shared tick per session. Stopped above at session_shutdown; the
+    // defensive stop() here covers any session_start that arrives without
+    // a matching shutdown, so repeated starts can never stack intervals.
+    _ticker?.stop();
+    _ticker = new TickScheduler();
+    _ticker.subscribe(() => {
+      const elapsed = Date.now() - _lastActivityAt;
+      const ttl = promptCacheTtlMs(ctx.model, process.env.PI_CACHE_RETENTION);
+      const key = `${formatIdleMinutes(elapsed)}|${idleTimerToken(elapsed, ttl)}`;
+      // The frame provider re-syncs _lastTimerKey when it draws the
+      // segment, so a mismatch here simply means the display is stale.
+      if (key !== _lastTimerKey) editor?.requestRender();
+    });
     _latestUsage = latestAssistantUsage(ctx);
     _turnStartedAt = undefined;
     _firstVisibleTextAt = undefined;
@@ -561,6 +611,17 @@ export default function (pi: ExtensionAPI) {
           ? `${theme.fg("dim", " · ")}${theme.fg("warning", `$${_sessionCost.toFixed(3)}`)}`
           : "";
 
+      // Idle timer — information, not an alarm. Plain text while fresh
+      // (or forever, for models that declare no prompt-cache TTL); amber
+      // inside the last tenth of the TTL and red past it are the actual
+      // indicators. Floored to whole minutes: 4:59 reads as 4m.
+      const idleElapsed = Date.now() - _lastActivityAt;
+      const idleTtl = promptCacheTtlMs(ctx.model, process.env.PI_CACHE_RETENTION);
+      const idleToken = idleTimerToken(idleElapsed, idleTtl);
+      // Sync the tick's change-detection key with what is now on screen.
+      _lastTimerKey = `${formatIdleMinutes(idleElapsed)}|${idleToken}`;
+      const timerPart = `${theme.fg("dim", " · ")}${theme.fg(idleToken, `${icons.timer} ${formatIdleMinutes(idleElapsed)}`)}`;
+
       // Git branch + worktree badge + dirty state — pi's format:
       // ~/Projects (main). Inside a linked worktree the branch carries an
       // @<name> tag, so sibling worktrees of one repo are told apart at a glance.
@@ -579,7 +640,7 @@ export default function (pi: ExtensionAPI) {
         topLeft: ` ${theme.fg("accent", `${icons.model} ${model}`)}${theme.fg("dim", " · ")}${theme.fg(thinkingColor, `${icons.thinking} ${thinking}`)} `,
         topRight: buildPinned(),
         // Context in severity color; cwd stays muted so it never competes.
-        bottomLeft: ` ${theme.fg(contextToken(pct), `${icons.context} ${ctxText}`)}${cachePart}${tpsPart}${costPart} `,
+        bottomLeft: ` ${theme.fg(contextToken(pct), `${icons.context} ${ctxText}`)}${cachePart}${tpsPart}${costPart}${timerPart} `,
         bottomRight: theme.fg("muted", ` ${cwdDisplay} `),
       };
     };
@@ -684,6 +745,16 @@ export default function (pi: ExtensionAPI) {
       const hr = cacheHitRate(latest);
       lines.push(`  this turn hit rate: ${hr != null ? `${hr.toFixed(1)}%` : "n/a"}`);
 
+      lines.push("");
+      lines.push("[idle timer]");
+      const idleElapsed = Date.now() - _lastActivityAt;
+      const idleTtl = promptCacheTtlMs(ctx.model, process.env.PI_CACHE_RETENTION);
+      lines.push(`  since last activity: ${formatIdleMinutes(idleElapsed)}`);
+      lines.push(
+        `  prompt-cache TTL: ${idleTtl != null ? `${Math.round(idleTtl / 1000)}s (${process.env.PI_CACHE_RETENTION === "long" ? "long" : "short"} tier)` : "unknown — timer never indicates"}`,
+      );
+      lines.push(`  color token: ${idleTimerToken(idleElapsed, idleTtl)}`);
+      lines.push(`  ticker: ${_ticker?.running ? "running" : "stopped"}`);
       lines.push("");
       lines.push("[response performance]");
       const perf = _latestPerformance;

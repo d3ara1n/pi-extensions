@@ -404,8 +404,8 @@ pi 有四种会话模式（`tui | rpc | print | json`）。注册交互 UI 的�
 
 | token | 用途 | 例 |
 |-------|------|-----|
-| `dim` | 排版符号 | 分隔符 `·`、装饰点、`↑↓ navigate` 按键提示 |
-| `muted` | 二级文本：要能读但不抢眼的信息 | cwd、计时器数字、未选中项 |
-| `text` | 编辑器输入正文专用 | 留给 editor 里的用户输入 |
+| `dim` | 三级信息：排版符号与最低层级提示 | 分隔符 `·`、装饰点、`↑↓ navigate` 按键提示 |
+| `muted` | 二级文本：要能读但不抢眼的常规信息 | cwd、计时器数字、未选中项、status 标签 |
+| `text` | 中性强调：比 `muted` 更醒目、弱于 `accent` | 当前模式、当前选项等需要突出但不带语义色的信息 |
 
-周边 UI 用 `text` 会与编辑器正文同级、抢视觉层级（pi-editor-shell 计时器初版踩坑，后改 `muted`）。语义色（success/warning/error/accent）按语义用，不在这条层级里。pi 官方文档只有 token 清单（docs/tui.md），此为本仓库约定，与 pi 自身示例用法一致。
+周边 UI 默认使用 `muted` 承载常规信息；只有需要突出且不适合 `accent` 或 success/warning/error 语义色的信息才使用 `text`。`text` 在编辑区周边已经很显眼，不应用于整段常规信息；`accent` 留给焦点、品牌或更强强调。pi 官方将 `muted` / `dim` 定义为 secondary / tertiary text，本仓库进一步约定排版符号和最低层级提示使用 `dim`。

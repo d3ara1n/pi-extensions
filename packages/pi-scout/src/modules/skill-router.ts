@@ -64,7 +64,7 @@ export const skillRouterModule: ScoutModule<string[]> = {
       value.length <= 3
         ? value.join(", ")
         : `${value.slice(0, 2).join(", ")} +${value.length - 2}`;
-    return ctx.theme.fg("dim", "skills: ") + ctx.theme.fg("accent", names);
+    return ctx.theme.fg("muted", "skills: ") + ctx.theme.fg("accent", names);
   },
 
   describe: (value) => (value.length > 0 ? value.join(", ") : "(none)"),

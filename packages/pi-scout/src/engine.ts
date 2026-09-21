@@ -14,9 +14,9 @@
 import type { InjectedMessage, ScoutContext, ScoutDecision } from "./types.ts";
 import { MODULES, enabledModules } from "./modules/registry.ts";
 
-/** Status-bar prefix: icon in its state color, the "scout:" label always dim. */
+/** Status-bar prefix: icon in its state color, the "scout:" label always muted. */
 export function scoutPrefix(icon: string, color: string, theme: any): string {
-  return theme.fg(color, icon) + theme.fg("dim", " scout:") + " ";
+  return theme.fg(color, icon) + theme.fg("muted", " scout:") + " ";
 }
 
 /** Build a one-line status summary from a scout decision. */
@@ -27,7 +27,7 @@ export function formatDecisionStatus(decision: ScoutDecision, ctx: ScoutContext)
   }
 
   if (decision.source === "short-circuit") {
-    return scoutPrefix("✓", "success", theme) + theme.fg("dim", `(skipped) ${decision.reasoning}`);
+    return scoutPrefix("✓", "success", theme) + theme.fg("muted", `(skipped) ${decision.reasoning}`);
   }
 
   const parts: string[] = [];
@@ -37,7 +37,7 @@ export function formatDecisionStatus(decision: ScoutDecision, ctx: ScoutContext)
   }
 
   if (parts.length === 0) {
-    return scoutPrefix("✓", "success", theme) + theme.fg("dim", "no changes");
+    return scoutPrefix("✓", "success", theme) + theme.fg("muted", "no changes");
   }
 
   return scoutPrefix("✓", "success", theme) + parts.join(theme.fg("dim", " | "));

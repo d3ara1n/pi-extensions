@@ -53,7 +53,7 @@ function previewPrompt(text: string, max = 72): string {
 function buildPendingWidget(prompt: string, modelLabel: string, theme: any): string[] {
   return [
     theme.fg("accent", "◎") +
-      theme.fg("dim", " scout analyzing via ") +
+      theme.fg("muted", " scout analyzing via ") +
       theme.fg("accent", modelLabel) +
       theme.fg("dim", "…"),
     theme.fg("dim", "  › ") + theme.fg("muted", previewPrompt(prompt)),
@@ -336,7 +336,7 @@ export default function scoutExtension(pi: ExtensionAPI) {
     // Show in-progress indicator
     ctx.ui.setStatus(
       STATUS_KEY,
-      scoutPrefix("◎", "accent", theme) + theme.fg("dim", "scouting..."),
+      scoutPrefix("◎", "accent", theme) + theme.fg("muted", "scouting..."),
     );
 
     // Resolve side agent model (sync — auth is resolved inside completeWithRole())

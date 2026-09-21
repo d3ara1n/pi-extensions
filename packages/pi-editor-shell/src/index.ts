@@ -595,7 +595,7 @@ export default function (pi: ExtensionAPI) {
       const hitRate = cacheHitRate(_latestUsage);
       const cachePart =
         _cacheTotal > 0
-          ? `${theme.fg("dim", " · ")}${theme.fg("warning", `${icons.cache} ${formatTokens(cacheReadNow)}(${formatTokens(_cacheTotal)})${hitRate != null ? ` ${icons.hitRate} ${hitRate.toFixed(1)}%` : ""}`)}`
+          ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.cache}${formatTokens(cacheReadNow)}(${formatTokens(_cacheTotal)})${hitRate != null ? ` ${icons.hitRate} ${hitRate.toFixed(1)}%` : ""}`)}`
           : "";
       const displayedTps = config.tpsDisplay === "end-to-end"
         ? _latestPerformance?.e2eTps
@@ -604,11 +604,11 @@ export default function (pi: ExtensionAPI) {
           : undefined;
       const tpsLabel = config.tpsDisplay === "end-to-end" ? "e2e" : "gen";
       const tpsPart = displayedTps != null
-        ? `${theme.fg("dim", " · ")}${theme.fg("warning", `${formatTps(displayedTps)} ${tpsLabel} t/s`)}`
+        ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${formatTps(displayedTps)} ${tpsLabel} t/s`)}`
         : "";
       const costPart =
         _sessionCost > 0
-          ? `${theme.fg("dim", " · ")}${theme.fg("warning", `$${_sessionCost.toFixed(3)}`)}`
+          ? `${theme.fg("dim", " · ")}${theme.fg("muted", `$${_sessionCost.toFixed(3)}`)}`
           : "";
 
       // Idle timer — information, not an alarm. Plain text while fresh

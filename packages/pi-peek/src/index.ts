@@ -6,7 +6,7 @@
  * tools/commands and NO cross-instance machinery — installing pi-peek alone
  * does nothing observable. It only provides capability for consumers:
  *
- *   - pi-peek-user  → /peek overlay asks THIS instance (local consult)
+ *   - pi-peek-user  → /peek overlay investigates THIS instance (local)
  *   - pi-peek-agent → cross-instance peek tool + UDS mesh + discovery
  *
  * Cross-instance transport (UDS) and peer discovery are pi-peek-agent's job.
@@ -20,13 +20,12 @@ import { loadPeekConfig } from "./config.ts";
 export { getPeekAPI } from "./api.ts";
 export { PeekContextOverflowError } from "./types.ts";
 export type {
-  AskOptions,
+  InvestigateOptions,
   PeekReferenceOptions,
   PeekAPI,
-  PeekConsult,
+  PeekInvestigation,
   InvestigateStage,
   MainAgentStatus,
-  InvestigateOptions,
   InvestigateResult,
   PeekConfig,
 } from "./types.ts";

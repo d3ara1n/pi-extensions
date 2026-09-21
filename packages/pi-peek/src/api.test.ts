@@ -6,7 +6,7 @@ import { PEEK_GLOBAL_KEY } from "./types.ts";
 
 const globalState = globalThis as unknown as Record<string, unknown>;
 
-test("one-shot calls capture fresh records, while persistent consults pin their snapshot and model", async () => {
+test("one-shot calls capture fresh records, while persistent investigations pin their snapshot and model", async () => {
   const saved = globalState[PEEK_GLOBAL_KEY];
   delete globalState[PEEK_GLOBAL_KEY];
   let value = "old source";
@@ -18,7 +18,7 @@ test("one-shot calls capture fresh records, while persistent consults pin their 
       requests.push({ context: structuredClone(context), modelId: options.model.id });
       const stream = createAssistantMessageEventStream();
       const message = {
-        role: "assistant", content: [{ type: "text", text: "answer" }], stopReason: "stop", timestamp: 1,
+        role: "assistant", content: [{ type: "text", text: "report" }], stopReason: "stop", timestamp: 1,
         api: "openai-completions", provider: "offline", model: options.model.id,
         usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
       } satisfies AssistantMessage;
@@ -38,11 +38,11 @@ test("one-shot calls capture fresh records, while persistent consults pin their 
         } },
       ] },
     });
-    const consult = api.createConsult();
-    await consult.ask("first");
+    const investigation = api.createInvestigation();
+    await investigation.investigate("first");
     value = "new source";
     selectedModel = "second-model";
-    await consult.ask("follow-up");
+    await investigation.investigate("follow-up");
     await api.investigate("one-shot");
     assert.equal(requests[0]!.context.systemPrompt, requests[1]!.context.systemPrompt);
     assert.match(requests[2]!.context.systemPrompt!, /new source/);
@@ -54,8 +54,8 @@ test("one-shot calls capture fresh records, while persistent consults pin their 
     assert.match(api.serializeMainConversation({ includeThinking: true }), /optional saved thinking/);
     shutdownPeekAPI();
     assert.equal(tryGetPeekAPI(), undefined);
-    await assert.rejects(consult.ask("after shutdown"), /closed/);
-    assert.throws(() => api.createConsult(), /closed/);
+    await assert.rejects(investigation.investigate("after shutdown"), /closed/);
+    assert.throws(() => api.createInvestigation(), /closed/);
   } finally {
     shutdownPeekAPI();
     if (saved === undefined) delete globalState[PEEK_GLOBAL_KEY];

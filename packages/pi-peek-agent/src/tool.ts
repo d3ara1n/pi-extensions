@@ -1,15 +1,15 @@
 /**
  * pi-peek-agent tool — exposes cross-instance peek to the main agent (LLM).
  *
- * One tool: peek({ question, at?, sessionId? }) asks a peer a question.
+ * One tool: peek({ question, at?, sessionId? }) investigates a peer's session record.
  * `question` is required (enforced by schema). Peer discovery moved to
  * @d3ara1n/pi-mesh (its `mesh_list` tool) — resolvePeer/connect come from there.
  *
  * Rendering follows the built-in tool convention: the call cell already shows
  * the tool name, so renderResult MUST NOT repeat it. Collapsed shows the first
- * line of the answer; expanded shows the original question (read from
+ * line of the report; expanded shows the original question (read from
  * ToolRenderContext.args, which pi shares across call/result renders for one
- * tool call) above the full answer, so the whole exchange is visible when
+ * tool call) above the full report, so the whole exchange is visible when
  * expanded.
  */
 
@@ -20,8 +20,8 @@ import type { Component } from "@earendil-works/pi-tui";
 import { getMeshAPI } from "@d3ara1n/pi-mesh";
 import type { PeerInfo } from "@d3ara1n/pi-mesh";
 import { loadPeekConfig } from "./config.ts";
-import { ASK_TYPE } from "./types.ts";
-import type { AskResponseData } from "./types.ts";
+import { INVESTIGATE_TYPE } from "./types.ts";
+import type { InvestigateResponseData } from "./types.ts";
 
 /** Build a tool result (AgentToolResult requires a `details` field). */
 function textResult(text: string) {
@@ -37,7 +37,7 @@ export function registerPeekTool(pi: ExtensionAPI): void {
     label: "Peek at another instance",
     description:
       "Peek at another pi instance — observe its session without disturbing it. " +
-      "Read-only: a helper model answers from the peer's existing session record; the peer's agent never sees the question and cannot act on it — not a communication channel. " +
+      "Read-only: a helper model investigates the peer's existing session record and reports findings; the peer's agent never sees the question and cannot act on it — not a communication channel. " +
       "Use mesh_list first to discover names. " +
       "Best for focused summaries, explanations, or details in the peer's saved tool results that its replies did not mention. " +
       "Strictly observation, not consultation: it reports only what the record contains — do not use it for design input, decisions, or advice. " +
@@ -65,13 +65,13 @@ export function registerPeekTool(pi: ExtensionAPI): void {
       ),
     }),
 
-    // Call cell: tool name + target. The answer appears in the result cell.
+    // Call cell: tool name + target. The report appears in the result cell.
     renderCall(args, theme) {
       const target = (args as any).at ? ` → ${(args as any).at}` : " → (auto)";
       return new Text(theme.fg("toolTitle", theme.bold("peek")) + theme.fg("accent", target), 0, 0);
     },
 
-    // Result cell: NO tool name. Collapsed = first line of the answer; expanded = question + full answer.
+    // Result cell: NO tool name. Collapsed = first line of the report; expanded = question + full report.
     renderResult(result, { expanded }, theme, context) {
       const isError = context.isError;
       const isPartial = context.isPartial;
@@ -85,7 +85,7 @@ export function registerPeekTool(pi: ExtensionAPI): void {
       if (expanded) {
         const c = new Container();
         // The question asked (shared across call/result renders for this tool
-        // call via ToolRenderContext.args). Surfaced above the answer so the
+        // call via ToolRenderContext.args). Surfaced above the report so the
         // full Q&A exchange is visible when expanded.
         const question =
           typeof context.args?.question === "string" ? context.args.question : "";
@@ -152,10 +152,10 @@ export function registerPeekTool(pi: ExtensionAPI): void {
         try {
           signal?.throwIfAborted();
           const result = await conn.request(
-            ASK_TYPE,
+            INVESTIGATE_TYPE,
             { question: params.question, ...(params.includeThinking === true ? { includeThinking: true } : {}) },
             {
-              signal, timeoutMs: cfg.askTimeoutMs,
+              signal, timeoutMs: cfg.investigateTimeoutMs,
               onEmit: (type, data) => {
                 if (type === "stage" && data && typeof data === "object" && "stage" in data && typeof data.stage === "string") {
                   onUpdate?.(textResult(`Peek ${peer.name}: ${data.stage}`));
@@ -163,10 +163,10 @@ export function registerPeekTool(pi: ExtensionAPI): void {
               },
             },
           );
-          const response = result as AskResponseData | undefined;
-          const resultText = textResult(response?.answer ?? "");
+          const response = result as InvestigateResponseData | undefined;
+          const resultText = textResult(response?.report ?? "");
           if (response?.stopReason === "length") {
-            resultText.content.push({ type: "text", text: "Output limit reached; the answer is incomplete." });
+            resultText.content.push({ type: "text", text: "Output limit reached; the report is incomplete." });
           }
           return {
             ...resultText,

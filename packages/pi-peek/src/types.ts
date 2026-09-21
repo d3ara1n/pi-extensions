@@ -1,4 +1,4 @@
-/** Public contracts for ephemeral, full-context session consults. */
+/** Public contracts for ephemeral, full-context session investigations. */
 
 export interface PeekConfig {
   /** Total deadline per question, including authentication and streaming. */
@@ -25,23 +25,21 @@ export interface PeekReferenceOptions {
   includeThinking?: boolean;
 }
 
-export type InvestigateStage = "answering" | "done" | "error";
+export type InvestigateStage = "investigating" | "done" | "error";
 
-export interface AskOptions {
+export interface InvestigateOptions {
   onToken?: (delta: string) => void;
   onStage?: (stage: InvestigateStage) => void;
   signal?: AbortSignal;
 }
 
-export interface InvestigateOptions extends AskOptions, PeekReferenceOptions {}
-
 export interface InvestigateResult {
-  /** Model answer only; limit notices are separate metadata. */
-  answer: string;
+  /** Model report only; limit notices are separate metadata. */
+  report: string;
   referenceLength: number;
   snapshotAt: string;
   model: string;
-  /** A length stop preserves the partial answer without automatically continuing. */
+  /** A length stop preserves the partial report without automatically continuing. */
   stopReason: "stop" | "length";
   usage: {
     input: number;
@@ -53,7 +51,7 @@ export interface InvestigateResult {
   };
 }
 
-/** Upstream context overflow; prior successful consult turns remain intact. */
+/** Upstream context overflow; prior successful investigation turns remain intact. */
 export class PeekContextOverflowError extends Error {
   readonly code = "context_overflow";
   constructor(cause?: unknown) {
@@ -62,19 +60,19 @@ export class PeekContextOverflowError extends Error {
   }
 }
 
-export interface PeekConsult {
+export interface PeekInvestigation {
   readonly snapshotAt: string;
-  /** One stream request per question, using the full fixed reference and prior answers. */
-  ask(question: string, opts?: AskOptions): Promise<InvestigateResult>;
+  /** One stream request per question, using the full fixed reference and prior reports. */
+  investigate(question: string, opts?: InvestigateOptions): Promise<InvestigateResult>;
   /** Abort pending work and release the snapshot and history. Idempotent. */
   dispose(): void;
 }
 
 export interface PeekAPI {
   /** Pin the current branch, thinking inclusion and resolved model for follow-ups. */
-  createConsult(options?: PeekReferenceOptions): PeekConsult;
-  /** One question in a temporary consult, disposed after completion or failure. */
-  investigate(question: string, opts?: InvestigateOptions): Promise<InvestigateResult>;
+  createInvestigation(options?: PeekReferenceOptions): PeekInvestigation;
+  /** One question in a temporary investigation, disposed after completion or failure. */
+  investigate(question: string, opts?: InvestigateOptions & PeekReferenceOptions): Promise<InvestigateResult>;
   /** Complete text reference without token or character-budget truncation. */
   serializeMainConversation(options?: PeekReferenceOptions): string;
   getMainAgentStatus(): MainAgentStatus;

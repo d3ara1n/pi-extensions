@@ -2,23 +2,23 @@
 
 [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-peek-agent)](https://www.npmjs.com/package/@d3ara1n/pi-peek-agent) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-peek-agent)](https://www.npmjs.com/package/@d3ara1n/pi-peek-agent) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-peek-agent)](https://www.npmjs.com/package/@d3ara1n/pi-peek-agent)
 
-Cross-instance peek for [pi](https://github.com/earendil-works/pi) — ask another pi instance a question without disturbing its main conversation. Built on [`@d3ara1n/pi-mesh`](../pi-mesh) for discovery and transport.
+Cross-instance peek for [pi](https://github.com/earendil-works/pi) — investigate another pi instance's session without disturbing its main conversation. Built on [`@d3ara1n/pi-mesh`](../pi-mesh) for discovery and transport.
 
 Adds the `peek` tool. Discovery, identity, and the socket mesh live in pi-mesh — load pi-mesh alongside this package.
 
 ## How it works
 
-- **Read-after-burn**: the peeked instance creates a temporary consult via [`pi-peek`](../pi-peek), makes one streaming completion, then disposes its reference and history. Its main agent is never touched. The caller receives a normal tool result that may be saved in its own session; model-provider retention is separate.
+- **Read-after-burn**: the peeked instance creates a temporary investigation via [`pi-peek`](../pi-peek), makes one streaming completion, then disposes its reference and history. Its main agent is never touched. The caller receives a normal tool result that may be saved in its own session; model-provider retention is separate.
 - **Full context**: the large-context utility model receives the complete supported current-branch text, including full saved tool arguments/results. No internal tools, retrieval loop, pagination, or local content budget. Thinking is excluded unless the caller explicitly sets `includeThinking: true`.
 - **Independent calls**: every request captures a fresh snapshot. There is no remote conversation handle, so include sufficient context when asking a follow-up.
-- **Progress and limits**: plain-text tool updates work in TUI and non-TUI hosts. Final result details include the snapshot time, usage, and stop reason when supplied by the peer. An upstream output limit adds a separate notice alongside the unchanged answer; context overflow is surfaced as an error without automatic compression or retry.
-- **On the mesh**: this package registers an `"ask"` handler on the pi-mesh transport; a remote `peek` call routes there and is answered locally. Identity, discovery, and peer listing are pi-mesh's job — use `mesh_list` to see who's online.
+- **Progress and limits**: plain-text tool updates work in TUI and non-TUI hosts. Final result details include the snapshot time, usage, and stop reason when supplied by the peer. An upstream output limit adds a separate notice alongside the unchanged report; context overflow is surfaced as an error without automatic compression or retry.
+- **On the mesh**: this package registers an `"investigate"` handler on the pi-mesh transport; a remote `peek` call routes there and runs locally. Identity, discovery, and peer listing are pi-mesh's job — use `mesh_list` to see who's online.
 
 ## Tool
 
 ### `peek`
 
-Ask another instance a question without disturbing its main conversation.
+Investigate another instance's session without disturbing its main conversation.
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
@@ -54,7 +54,7 @@ Or add to `~/.pi/agent/settings.json`:
 ## Dependencies
 
 - [`@d3ara1n/pi-mesh`](../pi-mesh) — peer discovery + transport
-- [`@d3ara1n/pi-peek`](../pi-peek) — temporary full-context consults
+- [`@d3ara1n/pi-peek`](../pi-peek) — temporary full-context investigations
 
 ## Configuration
 
@@ -63,14 +63,14 @@ Optional, in `~/.pi/agent/settings.json` under `peek`:
 ```json
 {
   "peek": {
-    "askTimeoutMs": 120000,
+    "investigateTimeoutMs": 120000,
     "timeoutMs": 90000,
     "role": "utility"
   }
 }
 ```
 
-`askTimeoutMs` is the caller's transport wait timeout. `timeoutMs` is the serving instance's independent request deadline, including authentication and streaming. Set the caller's wait timeout longer than the serving instance's investigation timeout, allowing for transport overhead.
+`investigateTimeoutMs` is the caller's transport wait timeout. `timeoutMs` is the serving instance's independent request deadline, including authentication and streaming. Set the caller's wait timeout longer than the serving instance's request deadline, allowing for transport overhead.
 
 Cancelling a caller's request or disconnecting does **not** currently propagate cancellation to the serving handler through the mesh protocol. Remote work is bounded by its own deadline and is aborted on session shutdown. No mesh protocol changes are required.
 

@@ -1,10 +1,10 @@
 /**
- * pi-peek-user — user-facing /peek command that opens the local consult overlay.
+ * pi-peek-user — user-facing /peek command that opens the local investigation overlay.
  *
- * Asks THIS instance: the user questions their own session without disturbing
- * the main agent. Depends only on @d3ara1n/pi-peek (no cross-instance machinery).
+ * Investigates THIS instance: the user inspects their own session without
+ * disturbing the main agent. Depends only on @d3ara1n/pi-peek (no cross-instance machinery).
  *
- * The overlay draws its own complete frame (header / answer / composer / info
+ * The overlay draws its own complete frame (header / report / composer / info
  * panels separated by borders, bottom border holding hotkeys) so it never
  * blends into pi's own footer below it. A small bottom margin keeps the two
  * visually distinct.
@@ -37,14 +37,14 @@ async function openPeekOverlay(ctx: ExtensionContext, options: PeekReferenceOpti
 
 export default function registerPeekUserExtension(pi: ExtensionAPI): void {
   pi.registerCommand("peek", {
-    description: "Aside consult: ask this session a question without disturbing the main agent",
+    description: "Aside investigation: inspect this session without disturbing the main agent",
     handler: async (_args, ctx: ExtensionContext) => {
       await openPeekOverlay(ctx);
     },
   });
 
   pi.registerCommand("peek:thinking", {
-    description: "Ask this session with its recorded thinking included",
+    description: "Inspect this session with its recorded thinking included",
     handler: async (_args, ctx: ExtensionContext) => {
       await openPeekOverlay(ctx, { includeThinking: true });
     },
@@ -52,8 +52,8 @@ export default function registerPeekUserExtension(pi: ExtensionAPI): void {
 
   paletteCommandRegistry.register({
     id: "peek-user:open",
-    label: "Peek: Ask This Session",
-    description: "Ask this session a question without disturbing the main agent",
+    label: "Peek: Inspect This Session",
+    description: "Inspect this session without disturbing the main agent",
     run: (_pi, ctx) => openPeekOverlay(ctx),
   });
 }

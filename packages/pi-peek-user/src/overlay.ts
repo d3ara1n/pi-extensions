@@ -1,9 +1,9 @@
 /**
- * PeekOverlay — the /peek TUI overlay (LOCAL consult / "aside").
+ * PeekOverlay — the /peek TUI overlay (LOCAL investigation / "aside").
  *
- * Asks THIS instance: serialize the main conversation + answer via the utility
- * model, read-after-burn. The user questions their own session without
- * disturbing the main agent.
+ * Investigates THIS instance: serialize the main conversation + investigate via
+ * the utility model, read-after-burn. The user inspects their own session
+ * without disturbing the main agent.
  *
  * Layout (regions separated by `├───┤` dividers, closed at the bottom with
  * `╰───╯`). `margin:{bottom:2}` in overlayOptions keeps pi's own footer
@@ -12,7 +12,7 @@
  *   ╭──────────────────────────────────────────────────────╮  top border
  *   │ peek (main agent: <activity>, turn N)                │  title
  *   ├──────────────────────────────────────────────────────┤
- *   │ <answer region: auto-height, scrollable, streaming>  │
+ *   │ <report region: auto-height, scrollable, streaming>  │
  *   ├──────────────────────────────────────────────────────┤
  *   │ <editor: input or waiting…>                        │  composer
  *   ├──────────────────────────────────────────────────────┤
@@ -21,7 +21,7 @@
  *   │ Esc close · ↑↓ scroll · Enter send                   │  hotkeys
  *   ╰──────────────────────────────────────────────────────╯  bottom border
  *
- * Auto-height: the answer region grows with content up to a cap derived from
+ * Auto-height: the report region grows with content up to a cap derived from
  * the REAL terminal height (read via tui.terminal.rows). Once content exceeds
  * the cap, it scrolls (↑/↓) and auto-follows the tail while streaming.
  */
@@ -35,7 +35,7 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { getPeekAPI, type InvestigateResult, type MainAgentStatus, type PeekAPI, type PeekConsult, type PeekReferenceOptions } from "@d3ara1n/pi-peek";
+import { getPeekAPI, type InvestigateResult, type MainAgentStatus, type PeekAPI, type PeekInvestigation, type PeekReferenceOptions } from "@d3ara1n/pi-peek";
 import {
   getMarkdownTheme,
   type ExtensionContext,
@@ -65,15 +65,15 @@ interface HistoryItem {
   notice?: string;
 }
 
-type Mode = "input" | "asking";
+type Mode = "input" | "investigating";
 
-/** Rows occupied by everything EXCEPT the answer region and composer:
+/** Rows occupied by everything EXCEPT the report region and composer:
  *  top border(1) + title(1) + 4 dividers(4) + status(1) + hotkeys(1) + bottom border(1) = 9.
  *  Composer rows are added dynamically when the input wraps. */
 const FIXED_OVERHEAD_NO_COMPOSER = 9;
-/** Composer rows cap so a huge paste doesn't push the answer region off-screen. */
+/** Composer rows cap so a huge paste doesn't push the report region off-screen. */
 const MAX_COMPOSER_LINES = 5;
-/** Floor for the answer region so tiny terminals still show something. */
+/** Floor for the report region so tiny terminals still show something. */
 const MIN_BODY_ROWS = 4;
 
 export class PeekOverlay {
@@ -88,15 +88,15 @@ export class PeekOverlay {
   private editor!: Editor;
   private history: HistoryItem[] = [];
 
-  // asking state
+  // investigation state
   private stage = "";
-  private askStart = 0;
+  private investigateStart = 0;
   private streamText = "";
   private markdownTheme = getMarkdownTheme();
   private streamMarkdown = new Markdown("", 0, 0, this.markdownTheme);
 
-  // The consult owns the full reference and model history; this history is for display.
-  private consult: PeekConsult | null = null;
+  // The investigation owns the full reference and model history; this history is for display.
+  private investigation: PeekInvestigation | null = null;
   private requestGeneration = 0;
   private requestAbort: AbortController | null = null;
 
@@ -113,7 +113,7 @@ export class PeekOverlay {
   // composer: how many rows the composer occupies (≥1); set during render
   private composerRows = 1;
 
-  // last utility model used (status line before the first answer)
+  // last utility model used (status line before the first report)
   private lastUtilityModel: string | null = null;
 
   constructor(tui: PeekTui, theme: PeekTheme, done: () => void, ctx: ExtensionContext, api: PeekAPI = getPeekAPI(), referenceOptions: PeekReferenceOptions = {}) {
@@ -186,11 +186,11 @@ export class PeekOverlay {
       this.tui.requestRender();
       return;
     }
-    if (this.mode === "asking") return;
+    if (this.mode === "investigating") return;
     // The Editor owns all text editing: typed characters, backspace, cursor
     // movement (Left/Right/Home/End, Ctrl+A/E, word moves), undo, and Enter
     // (which fires onSubmit → submit). Up/Down and PageUp/PageDown stay ours
-    // for answer navigation, so they are NOT forwarded.
+    // for question navigation, so they are NOT forwarded.
     this.editor.handleInput(data);
     this.tui.requestRender();
   }
@@ -249,9 +249,9 @@ export class PeekOverlay {
     const q = value.trim();
     if (!q) return;
 
-    this.mode = "asking";
-    this.stage = "answering";
-    this.askStart = Date.now();
+    this.mode = "investigating";
+    this.stage = "investigating";
+    this.investigateStart = Date.now();
     this.streamText = "";
     this.streamMarkdown.setText("");
     this.history.push({ role: "user", text: q });
@@ -264,8 +264,8 @@ export class PeekOverlay {
     this.requestAbort = requestAbort;
     Promise.resolve().then(() => {
       if (this.closed) throw new Error("peek: overlay closed.");
-      this.consult ??= this.api.createConsult(this.referenceOptions);
-      return this.consult.ask(q, {
+      this.investigation ??= this.api.createInvestigation(this.referenceOptions);
+      return this.investigation.investigate(q, {
         signal: requestAbort.signal,
         onStage: (s) => {
           if (this.closed || generation !== this.requestGeneration) return;
@@ -285,11 +285,11 @@ export class PeekOverlay {
         if (this.closed || generation !== this.requestGeneration) return;
         this.history.push({
           role: "assistant",
-          text: result.answer,
+          text: result.report,
           notice: result.stopReason === "length" ? "Output limit reached" : undefined,
           usage: result.usage,
           model: result.model,
-          markdown: new Markdown(result.answer, 0, 0, this.markdownTheme),
+          markdown: new Markdown(result.report, 0, 0, this.markdownTheme),
         });
         if (result.model) this.lastUtilityModel = result.model;
         this.mode = "input";
@@ -326,8 +326,8 @@ export class PeekOverlay {
     this.requestGeneration++;
     this.requestAbort?.abort();
     this.requestAbort = null;
-    this.consult?.dispose();
-    this.consult = null;
+    this.investigation?.dispose();
+    this.investigation = null;
     this.history = [];
     this.streamText = "";
     this.streamMarkdown.setText("");
@@ -349,7 +349,7 @@ export class PeekOverlay {
   }
 
   /**
-   * Answer region height for the current render.
+   * Report region height for the current render.
    * Grows with content up to a cap derived from the real terminal height
    * (matches the `maxHeight: "80%"` in overlayOptions). Content beyond the
    * cap scrolls.
@@ -384,9 +384,9 @@ export class PeekOverlay {
     this.userMessageAnchors = [];
     const wrapW = Math.max(10, innerW - 2);
 
-    if (this.history.length === 0 && this.mode !== "asking") {
+    if (this.history.length === 0 && this.mode !== "investigating") {
       // Welcome / placeholder so the body isn't an empty hole on first open.
-      const welcome = "Ask about this session.";
+      const welcome = "Investigate this session.";
       this.bodyLines.push(th.fg("dim", "aside · read-after-burn"));
       for (const ln of wrapTextWithAnsi(th.fg("dim", welcome), wrapW)) {
         this.bodyLines.push(ln);
@@ -414,9 +414,9 @@ export class PeekOverlay {
       }
     }
 
-    if (this.mode === "asking") {
-      const elapsed = ((Date.now() - this.askStart) / 1000).toFixed(1);
-      const stateText = this.stage || "answering";
+    if (this.mode === "investigating") {
+      const elapsed = ((Date.now() - this.investigateStart) / 1000).toFixed(1);
+      const stateText = this.stage || "investigating";
       const stateLabel =
         this.stage === "done"
           ? th.fg("success", stateText)
@@ -430,7 +430,7 @@ export class PeekOverlay {
       );
       // Stream placeholder so the region doesn't look frozen before the
       // first token lands. Once text arrives, render it with pi's Markdown
-      // component so partial and completed answers use identical formatting.
+      // component so partial and completed reports use identical formatting.
       if (this.streamText) {
         this.bodyLines.push(...this.streamMarkdown.render(wrapW));
       } else {
@@ -443,11 +443,11 @@ export class PeekOverlay {
     // Left/Right, word moves, undo), and word-wrap. Its render() frames the
     // text with a top/bottom rule; we slice those off (the surrounding
     // dividers below already frame the region) and cap the row count so a
-    // huge paste can't push the answer region off-screen. Rendered at
+    // huge paste can't push the report region off-screen. Rendered at
     // innerW-1 with a leading indent space, matching the body rows.
     const composerLines: string[] = [];
-    if (this.mode === "asking") {
-      composerLines.push(th.fg("dim", " waiting for reply…"));
+    if (this.mode === "investigating") {
+      composerLines.push(th.fg("dim", " investigating…"));
     } else {
       const editorLines = this.editor.render(innerW - 1).slice(1, -1);
       for (let i = 0; i < editorLines.length && composerLines.length < MAX_COMPOSER_LINES; i++) {
@@ -487,7 +487,7 @@ export class PeekOverlay {
     // ── divider separating the title from the content region ────────
     out.push(divider());
 
-    // ── answer region: auto-height, scrollable ──────────────────────
+    // ── report region: auto-height, scrollable ──────────────────────
     const start = this.scrollOffset;
     const visible = this.bodyLines.slice(start, start + bodyH);
     for (let i = 0; i < bodyH; i++) {

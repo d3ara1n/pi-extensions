@@ -1,10 +1,10 @@
 /**
  * Read pi-peek-agent configuration from the `peek` settings block.
  *
- * Only the ask timeout lives here — discovery/registry/heartbeat config moved
+ * Only the investigate timeout lives here — discovery/registry/heartbeat config moved
  * to @d3ara1n/pi-mesh's `mesh` block. This package shares the `peek` block with
  * @d3ara1n/pi-peek (which reads serialize-tuning fields there); we read only
- * `askTimeoutMs`.
+ * `investigateTimeoutMs`.
  */
 
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -45,6 +45,6 @@ export function loadPeekConfig(cwd?: string): PeekConfig {
   if (!raw) return { ...DEFAULT_PEEK_CONFIG };
 
   return {
-    askTimeoutMs: positiveNumber(raw.askTimeoutMs, DEFAULT_PEEK_CONFIG.askTimeoutMs),
+    investigateTimeoutMs: positiveNumber(raw.investigateTimeoutMs, DEFAULT_PEEK_CONFIG.investigateTimeoutMs),
   };
 }

@@ -3,7 +3,7 @@
  *
  * Only peek-specific types live here. Peer identity, discovery, and the
  * cross-instance transport moved to @d3ara1n/pi-mesh; import those from there.
- * What remains is the "ask" wire protocol and the ask-timeout config.
+ * What remains is the "investigate" wire protocol and the investigate-timeout config.
  */
 
 // ---------------------------------------------------------------------------
@@ -11,28 +11,28 @@
 // ---------------------------------------------------------------------------
 
 export interface PeekConfig {
-  /** Synchronous wait timeout for a remote ask. Default 120s. */
-  askTimeoutMs?: number;
+  /** Synchronous wait timeout for a remote investigation. Default 120s. */
+  investigateTimeoutMs?: number;
 }
 
-export const DEFAULT_PEEK_CONFIG: Required<Pick<PeekConfig, "askTimeoutMs">> = {
-  askTimeoutMs: 120_000,
+export const DEFAULT_PEEK_CONFIG: Required<Pick<PeekConfig, "investigateTimeoutMs">> = {
+  investigateTimeoutMs: 120_000,
 };
 
 // ---------------------------------------------------------------------------
-// "ask" wire protocol (carried over the mesh's "ask" request channel)
+// "investigate" wire protocol (carried over the mesh's request channel)
 // ---------------------------------------------------------------------------
 
-/** Mesh request type string for a peek ask. */
-export const ASK_TYPE = "ask";
+/** Mesh request type string for a peek investigation. */
+export const INVESTIGATE_TYPE = "investigate";
 
-export interface AskRequestData {
+export interface InvestigateRequestData {
   question: string;
   includeThinking?: boolean;
 }
 
-export interface AskResponseData {
-  answer: string;
+export interface InvestigateResponseData {
+  report: string;
   snapshotAt?: string;
   stopReason?: "stop" | "length";
   usage?: import("@d3ara1n/pi-peek").InvestigateResult["usage"];

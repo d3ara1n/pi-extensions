@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { PeekContextOverflowError, type InvestigateResult, type PeekAPI, type PeekConsult, type PeekReferenceOptions } from "@d3ara1n/pi-peek";
+import { PeekContextOverflowError, type InvestigateResult, type PeekAPI, type PeekInvestigation, type PeekReferenceOptions } from "@d3ara1n/pi-peek";
 import { PeekOverlay } from "./overlay.ts";
 
-const result = (answer: string, stopReason: "stop" | "length" = "stop"): InvestigateResult => ({
-  answer, snapshotAt: "2026-01-01T00:00:00Z", referenceLength: 10, stopReason, model: "fake/model",
+const result = (report: string, stopReason: "stop" | "length" = "stop"): InvestigateResult => ({
+  report, snapshotAt: "2026-01-01T00:00:00Z", referenceLength: 10, stopReason, model: "fake/model",
   usage: { input: 10, output: 1, cacheRead: 0, cacheWrite: 0, total: 11, cost: 0 },
 });
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
@@ -22,46 +22,46 @@ function panel(api: PeekAPI, options: PeekReferenceOptions = {}) {
   };
   return { overlay, state };
 }
-function apiFor(createConsult: (options?: PeekReferenceOptions) => PeekConsult): PeekAPI {
+function apiFor(createInvestigation: (options?: PeekReferenceOptions) => PeekInvestigation): PeekAPI {
   return {
-    createConsult,
+    createInvestigation,
     investigate: async () => { throw new Error("one-shot path must not be used by the overlay"); },
     serializeMainConversation: () => { throw new Error("UI must not rebuild model history"); },
     getMainAgentStatus: () => ({ activity: "idle", toolIndex: 0, turn: 0, lastUpdated: "2026-01-01T00:00:00Z" }),
   };
 }
 
-test("overlay reuses one consult for follow-ups and disposes on close", async () => {
+test("overlay reuses one investigation for follow-ups and disposes on close", async () => {
   let created = 0;
   let disposed = 0;
   const questions: string[] = [];
   let shown = "";
-  const consult: PeekConsult = {
+  const investigation: PeekInvestigation = {
     snapshotAt: "2026-01-01T00:00:00Z",
-    async ask(question, opts) {
+    async investigate(question, opts) {
       questions.push(question);
-      opts?.onStage?.("answering");
-      opts?.onToken?.(`Answer ${questions.length}`);
+      opts?.onStage?.("investigating");
+      opts?.onToken?.(`Report ${questions.length}`);
       shown = state.streamText;
-      return result(`Answer ${questions.length}`);
+      return result(`Report ${questions.length}`);
     },
     dispose() { disposed++; },
   };
   const { overlay, state } = panel(apiFor(options => {
     assert.equal(options?.includeThinking, undefined);
     created++;
-    return consult;
+    return investigation;
   }));
   try {
     state.submit("first question");
     await flush();
-    assert.equal(shown, "Answer 1");
+    assert.equal(shown, "Report 1");
     state.submit("follow-up question");
     await flush();
     assert.equal(created, 1);
-    assert.equal(shown, "Answer 2");
+    assert.equal(shown, "Report 2");
     assert.deepEqual(questions, ["first question", "follow-up question"]);
-    assert.deepEqual(state.history.map(h => h.text), ["first question", "Answer 1", "follow-up question", "Answer 2"]);
+    assert.deepEqual(state.history.map(h => h.text), ["first question", "Report 1", "follow-up question", "Report 2"]);
   } finally { overlay.dispose(); }
   assert.equal(disposed, 1);
   assert.equal(state.history.length, 0);
@@ -69,15 +69,15 @@ test("overlay reuses one consult for follow-ups and disposes on close", async ()
   assert.equal(disposed, 1);
 });
 
-test("explicit thinking mode is passed to consult creation without adding default UI instructions", async () => {
+test("explicit thinking mode is passed to investigation creation without adding default UI instructions", async () => {
   let includeThinking: boolean | undefined;
   const { overlay, state } = panel(apiFor(options => {
     includeThinking = options?.includeThinking;
-    return { snapshotAt: "fixed", ask: async () => result("answer"), dispose() {} };
+    return { snapshotAt: "fixed", investigate: async () => result("report"), dispose() {} };
   }), { includeThinking: true });
   try {
     const screen = overlay.render(80).join("\n");
-    assert.match(screen, /Ask about this session\./);
+    assert.match(screen, /Investigate this session\./);
     assert.doesNotMatch(screen, /snapshot|search or expand|Follow-ups reuse|close and reopen/i);
     state.submit("question");
     await flush();
@@ -85,30 +85,30 @@ test("explicit thinking mode is passed to consult creation without adding defaul
   } finally { overlay.dispose(); }
 });
 
-test("output and context limits are separate notices, not additions to the answer text", async () => {
-  let asks = 0;
+test("output and context limits are separate notices, not additions to the report text", async () => {
+  let turns = 0;
   const { overlay, state } = panel(apiFor(() => ({
     snapshotAt: "fixed",
-    async ask() {
-      if (++asks === 2) throw new PeekContextOverflowError("prompt too long");
-      return result("partial answer", "length");
+    async investigate() {
+      if (++turns === 2) throw new PeekContextOverflowError("prompt too long");
+      return result("partial report", "length");
     },
     dispose() {},
   })));
   try {
     state.submit("first");
     await flush();
-    assert.equal(state.history[1]!.text, "partial answer");
+    assert.equal(state.history[1]!.text, "partial report");
     assert.equal(state.history[1]!.notice, "Output limit reached");
     state.submit("second");
     await flush();
-    assert.equal(state.history[1]!.text, "partial answer");
+    assert.equal(state.history[1]!.text, "partial report");
     assert.equal(state.history[3]!.text, "");
     assert.equal(state.history[3]!.notice, "Context limit reached");
   } finally { overlay.dispose(); }
 });
 
-test("consult creation failures restore the input state instead of escaping submit", async () => {
+test("investigation creation failures restore the input state instead of escaping submit", async () => {
   const { overlay, state } = panel(apiFor(() => { throw new Error("model unavailable"); }));
   try {
     state.submit("question");
@@ -124,7 +124,7 @@ test("closing the overlay aborts its request and ignores late output", async () 
   let lateToken: ((text: string) => void) | undefined;
   const { overlay, state } = panel(apiFor(() => ({
     snapshotAt: "fixed",
-    ask(_question, opts) {
+    investigate(_question, opts) {
       signal = opts?.signal;
       lateToken = opts?.onToken;
       return new Promise(resolve => { complete = resolve; });
@@ -136,7 +136,7 @@ test("closing the overlay aborts its request and ignores late output", async () 
   overlay.dispose();
   assert.equal(signal?.aborted, true);
   lateToken?.("late text");
-  complete(result("late answer"));
+  complete(result("late report"));
   await flush();
   assert.equal(state.history.length, 0);
   assert.equal(state.streamText, "");

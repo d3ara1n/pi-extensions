@@ -2,9 +2,9 @@
 
 [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-peek-user)](https://www.npmjs.com/package/@d3ara1n/pi-peek-user) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-peek-user)](https://www.npmjs.com/package/@d3ara1n/pi-peek-user) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-peek-user)](https://www.npmjs.com/package/@d3ara1n/pi-peek-user)
 
-`/peek` overlay for [pi](https://github.com/earendil-works/pi) — ask your own session a question without disturbing the main agent.
+`/peek` overlay for [pi](https://github.com/earendil-works/pi) — investigate your own session without disturbing the main agent.
 
-Opens a centered overlay backed by a large-context `utility` model. Each question gets one streaming answer from the complete session text. The main agent keeps running, completely unaware.
+Opens a centered overlay backed by a large-context `utility` model. Each question triggers one streaming investigation over the complete session text. The main agent keeps running, completely unaware.
 
 ```
 ╭──────────────────────────────────────────────────╮
@@ -26,14 +26,14 @@ Opens a centered overlay backed by a large-context `utility` model. Each questio
 
 ## Features
 
-- **Streaming Markdown** — the answer appears token-by-token with pi's native Markdown rendering and syntax highlighting
+- **Streaming Markdown** — the report appears token-by-token with pi's native Markdown rendering and syntax highlighting
 - **Auto-height** — the message region grows with content up to ~80% of the terminal, then scrolls (↑/↓, auto-follows the tail while streaming)
 - **Message navigation** — prominent turn dividers and PageUp/PageDown jumps across the full local history (Fn+↑/Fn+↓ on MacBook)
-- **Multi-turn** — follow-ups reuse one complete snapshot and the previous questions/answers; no internal retrieval loop
+- **Multi-turn** — follow-ups reuse one complete snapshot and the previous questions/reports; no internal retrieval loop
 - **Live status** — header shows the main agent's current activity; the status line shows the utility model and cumulative tokens
-- **Limit notices** — upstream output/context limits are shown separately from answer text, without automatic truncation, compression, or retries
-- **Read-after-burn** — closing aborts the consult and discards its local reference and history; the main session is never touched
-- **Command palette entry** — "Peek: Ask This Session" runs directly from the palette, mid-draft
+- **Limit notices** — upstream output/context limits are shown separately from report text, without automatic truncation, compression, or retries
+- **Read-after-burn** — closing aborts the investigation and discards its local reference and history; the main session is never touched
+- **Command palette entry** — "Peek: Inspect This Session" runs directly from the palette, mid-draft
 
 ## Installation
 
@@ -57,7 +57,7 @@ Or add to `~/.pi/agent/settings.json`:
 
 ## Dependencies
 
-- [`@d3ara1n/pi-peek`](../pi-peek) — consult core (tracker hooks + investigate backend)
+- [`@d3ara1n/pi-peek`](../pi-peek) — investigation core (tracker hooks + investigate backend)
 - [`@d3ara1n/pi-command-palette-core`](../pi-command-palette-core) — native command-palette registry (pure npm library, installed automatically; entries appear when [`pi-command-palette`](../pi-command-palette) is installed)
 
 ## Usage
@@ -66,9 +66,9 @@ Or add to `~/.pi/agent/settings.json`:
 /peek
 ```
 
-Or pick **Peek: Ask This Session** in the command palette (Ctrl+Shift+P, via [`pi-command-palette`](../pi-command-palette)) — it opens the same overlay directly, without needing an empty editor.
+Or pick **Peek: Inspect This Session** in the command palette (Ctrl+Shift+P, via [`pi-command-palette`](../pi-command-palette)) — it opens the same overlay directly, without needing an empty editor.
 
-Type a question, press Enter. The answer streams in. Ask follow-ups, use PageUp/PageDown to jump between your questions (Fn+↑/Fn+↓ on MacBook), or press Esc to close.
+Type what you want to find out, press Enter. The report streams in. Ask follow-ups, use PageUp/PageDown to jump between your questions (Fn+↑/Fn+↓ on MacBook), or press Esc to close.
 
 The snapshot is captured on the first question and stays fixed during follow-ups, even while the main agent continues working. **Close and reopen for a fresh snapshot.**
 

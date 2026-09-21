@@ -2,15 +2,15 @@
 
 [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-peek)](https://www.npmjs.com/package/@d3ara1n/pi-peek) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-peek)](https://www.npmjs.com/package/@d3ara1n/pi-peek) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-peek)](https://www.npmjs.com/package/@d3ara1n/pi-peek)
 
-Full-context session questions for [pi](https://github.com/earendil-works/pi): focused summaries, explanations, and details from saved tool evidence that the main assistant may not have mentioned.
+Read-only session investigation for [pi](https://github.com/earendil-works/pi): a large-context utility model digs through the saved session record and reports focused summaries, explanations, and details from saved tool evidence that the main assistant may not have mentioned.
 
-**Core extension**: registers lifecycle/tracker hooks, but no tools or commands. Load it alongside [`pi-peek-user`](../pi-peek-user) for local questions or [`pi-peek-agent`](../pi-peek-agent) for cross-instance questions.
+**Core extension**: registers lifecycle/tracker hooks, but no tools or commands. Load it alongside [`pi-peek-user`](../pi-peek-user) for investigating your own session or [`pi-peek-agent`](../pi-peek-agent) for cross-instance investigation.
 
 ## Design
 
-Peek sends the complete supported text of the current branch to a **large-context utility model**, then makes one streaming completion per question. It is a session information view, not a retrieval agent: no internal tools, search loop, pagination, automatic compression, or application-level text/token-budget truncation.
+Peek sends the complete supported text of the current branch to a **large-context utility model**, then runs one streaming investigation per question. It is a read-only record view, not a retrieval agent: no internal tools, search loop, pagination, automatic compression, or application-level text/token-budget truncation.
 
-The model should have enough context for the source session and any follow-up questions. A fast, inexpensive model is appropriate; autonomous investigation or reasoning capability is not required.
+The model should have enough context for the source session and any follow-up questions. A fast, inexpensive model is appropriate; no agentic search or tool use is involved.
 
 ### Included information
 
@@ -26,17 +26,17 @@ Images, the main system prompt, extension-private state, other branches, and ext
 
 ### Follow-ups and limits
 
-A consult pins its complete snapshot and resolved model. Each follow-up sends that same reference plus the prior consult questions and answers. A failed request leaves prior successful turns intact. Close and reopen to capture newer source messages.
+An investigation pins its complete snapshot and resolved model. Each follow-up sends that same reference plus the prior questions and reports. A failed request leaves prior successful turns intact. Close and reopen to capture newer source messages.
 
 Peek requests the model's declared output allowance rather than imposing a smaller custom cap. Provider/SDK limits still apply:
 
-- **Output limit:** preserve the partial answer and return `stopReason: "length"` separately. No automatic continuation or warning appended to the answer.
+- **Output limit:** preserve the partial report and return `stopReason: "length"` separately. No automatic continuation or warning appended to the report.
 - **Context limit:** surface a recognized upstream overflow as `PeekContextOverflowError` (`code: "context_overflow"`). Do not trim history, compress, or automatically retry. A sufficiently long source session can exceed the model context on the first question.
 - **Other failures:** preserve the error rather than guessing it was a context overflow. Silent provider-side truncation cannot always be detected.
 
-The stable reference and append-only question/answer history are cache-friendly. Capture time is carried with the first question, outside the large system prefix. Requests use `cacheRetention: "short"`; cache support, pricing, and retention depend on the provider.
+The stable reference and append-only question/report history are cache-friendly. Capture time is carried with the first question, outside the large system prefix. Requests use `cacheRetention: "short"`; cache support, pricing, and retention depend on the provider.
 
-**Read-after-burn means no local persistence by this extension.** Closing releases the reference and history; shutdown aborts active consults. Model-provider retention is separate, and a remote caller may save its returned answer in its own session.
+**Read-after-burn means no local persistence by this extension.** Closing releases the reference and history; shutdown aborts active investigations. Model-provider retention is separate, and a remote caller may save the report it receives in its own session.
 
 ## Installation
 
@@ -84,27 +84,27 @@ import { getPeekAPI } from "@d3ara1n/pi-peek";
 
 const api = getPeekAPI();
 
-// One completion, then dispose the temporary consult.
+// One completion, then dispose the temporary investigation.
 const result = await api.investigate("What did the final reply leave out?");
 
 // Explicitly include readable thinking saved in the source session.
 await api.investigate("Explain the recorded reasoning.", { includeThinking: true });
 
-// User-driven follow-ups: one completion per ask, one fixed reference.
-const consult = api.createConsult(); // Or { includeThinking: true }.
+// User-driven follow-ups: one investigation per question, one fixed reference.
+const investigation = api.createInvestigation(); // Or { includeThinking: true }.
 try {
-  await consult.ask("Summarize the authentication work.");
-  const detail = await consult.ask("Explain the failed test.", {
-    onToken: delta => { /* append answer text */ },
-    onStage: stage => { /* answering / done / error */ },
+  await investigation.investigate("Summarize the authentication work.");
+  const detail = await investigation.investigate("Explain the failed test.", {
+    onToken: delta => { /* append report text */ },
+    onStage: stage => { /* investigating / done / error */ },
   });
-  // Render detail.answer unchanged; show a separate notice if stopReason === "length".
+  // Render detail.report unchanged; show a separate notice if stopReason === "length".
 } finally {
-  consult.dispose();
+  investigation.dispose();
 }
 ```
 
-Calls within one consult must be sequential. `serializeMainConversation({ includeThinking? })` returns the complete supported text reference. `getMainAgentStatus()` returns live main-agent activity, independently of the fixed consult snapshot.
+Calls within one investigation must be sequential. `serializeMainConversation({ includeThinking? })` returns the complete supported text reference. `getMainAgentStatus()` returns live main-agent activity, independently of the fixed investigation snapshot.
 
 ## License
 

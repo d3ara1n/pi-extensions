@@ -1,9 +1,9 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getModelRolesAPI, type ModelRolesAPI } from "@d3ara1n/pi-model-roles";
-import { createConsult } from "./investigate.ts";
+import { createInvestigation } from "./investigate.ts";
 import { SessionSnapshot } from "./snapshot.ts";
 import * as tracker from "./tracker.ts";
-import type { PeekAPI, PeekConfig, PeekConsult } from "./types.ts";
+import type { PeekAPI, PeekConfig, PeekInvestigation } from "./types.ts";
 import { DEFAULT_PEEK_CONFIG, PEEK_GLOBAL_KEY } from "./types.ts";
 
 type LiveAPI = PeekAPI & { shutdown(): void };
@@ -18,39 +18,39 @@ export interface PeekDeps {
 export function initPeekAPI(deps: PeekDeps): PeekAPI {
   shutdownPeekAPI();
   const cfg = { ...DEFAULT_PEEK_CONFIG, ...deps.config };
-  const consults = new Set<PeekConsult>();
+  const investigations = new Set<PeekInvestigation>();
   let closed = false;
   const capture = () => {
     if (closed) throw new Error("peek: session has closed.");
     return new SessionSnapshot(deps.sessionManager.getBranch());
   };
   const api: LiveAPI = {
-    createConsult(options = {}) {
+    createInvestigation(options = {}) {
       if (closed) throw new Error("peek: session has closed.");
       const roles = deps.modelRoles ?? getModelRolesAPI();
       const { model } = roles.resolveRole(cfg.role);
       if (!model) throw new Error(`peek: model unavailable for role "${cfg.role}".`);
-      const inner = createConsult({
+      const inner = createInvestigation({
         snapshot: capture(), model, config: cfg, includeThinking: options.includeThinking,
         stream: (context, options) => roles.streamWithRole(cfg.role, context, { ...options, model }),
       });
-      const consult: PeekConsult = {
+      const investigation: PeekInvestigation = {
         snapshotAt: inner.snapshotAt,
-        ask: (question, options) => inner.ask(question, options),
+        investigate: (question, options) => inner.investigate(question, options),
         dispose() {
           inner.dispose();
-          consults.delete(consult);
+          investigations.delete(investigation);
         },
       };
-      consults.add(consult);
-      return consult;
+      investigations.add(investigation);
+      return investigation;
     },
     async investigate(question, options) {
-      const consult = api.createConsult(options);
+      const investigation = api.createInvestigation(options);
       try {
-        return await consult.ask(question, options);
+        return await investigation.investigate(question, options);
       } finally {
-        consult.dispose();
+        investigation.dispose();
       }
     },
     serializeMainConversation(options = {}) {
@@ -61,14 +61,14 @@ export function initPeekAPI(deps: PeekDeps): PeekAPI {
     getMainAgentStatus: tracker.getMainAgentStatus,
     shutdown() {
       closed = true;
-      for (const consult of consults) consult.dispose();
+      for (const investigation of investigations) investigation.dispose();
     },
   };
   (globalThis as any)[PEEK_GLOBAL_KEY] = api;
   return api;
 }
 
-/** @internal Release ephemeral consults on shutdown/reload. */
+/** @internal Release ephemeral investigations on shutdown/reload. */
 export function shutdownPeekAPI(): void {
   const api = (globalThis as any)[PEEK_GLOBAL_KEY] as LiveAPI | undefined;
   api?.shutdown?.();

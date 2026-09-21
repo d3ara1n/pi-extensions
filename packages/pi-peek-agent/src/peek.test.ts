@@ -4,25 +4,25 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { InvestigateOptions } from "@d3ara1n/pi-peek";
+import type { InvestigateOptions, PeekReferenceOptions } from "@d3ara1n/pi-peek";
 import register from "./index.ts";
 import { MESH_GLOBAL_KEY } from "../../pi-mesh/src/types.ts";
 import { PEEK_GLOBAL_KEY } from "../../pi-peek/src/types.ts";
 
 const globals = globalThis as unknown as Record<string, unknown>;
 
-test("remote handler creates independent asks, forwards stages and keeps the answer protocol", async () => {
+test("remote handler creates independent investigations, forwards stages and keeps the report protocol", async () => {
   const saved = globals[PEEK_GLOBAL_KEY];
   const questions: string[] = [];
   const thinkingFlags: (boolean | undefined)[] = [];
   const usage = { input: 10, output: 2, cacheRead: 30, cacheWrite: 0, total: 42, cost: 0.01 };
   globals[PEEK_GLOBAL_KEY] = {
-    async investigate(question: string, opts: InvestigateOptions) {
+    async investigate(question: string, opts: InvestigateOptions & PeekReferenceOptions) {
       questions.push(question);
       thinkingFlags.push(opts.includeThinking);
-      opts.onStage?.("answering");
-      opts.onToken?.("answer");
-      return { answer: `answer ${question}`, snapshotAt: "fixed", stopReason: "stop", usage };
+      opts.onStage?.("investigating");
+      opts.onToken?.("report");
+      return { report: `report ${question}`, snapshotAt: "fixed", stopReason: "stop", usage };
     },
   };
   try {
@@ -37,9 +37,9 @@ test("remote handler creates independent asks, forwards stages and keeps the ans
     const first = await handler({ question: "one" }, type => { emitted.push(type); });
     const second = await handler({ question: "two", includeThinking: true }, () => {});
     assert.deepEqual(questions, ["one", "two"]);
-    assert.deepEqual(first, { answer: "answer one", snapshotAt: "fixed", stopReason: "stop", usage });
+    assert.deepEqual(first, { report: "report one", snapshotAt: "fixed", stopReason: "stop", usage });
     assert.deepEqual(thinkingFlags, [false, true]);
-    assert.equal((second as any).answer, "answer two");
+    assert.equal((second as any).report, "report two");
     assert.deepEqual(emitted, ["stage", "token"]);
   } finally {
     if (saved === undefined) delete globals[PEEK_GLOBAL_KEY];
@@ -64,8 +64,8 @@ test("remote client forwards progress, closes connections, and does not send aft
       request: async (_type: string, data: unknown, options: any) => {
         requestCount++;
         requestData = data;
-        options.onEmit("stage", { stage: "answering" });
-        return { answer: "remote answer", snapshotAt: "fixed", stopReason: "length" };
+        options.onEmit("stage", { stage: "investigating" });
+        return { report: "remote report", snapshotAt: "fixed", stopReason: "length" };
       },
       close: () => { closed++; },
       };
@@ -77,8 +77,8 @@ test("remote client forwards progress, closes connections, and does not send aft
     const updates: unknown[] = [];
     const result = await tool.execute("id", { question: "focus", includeThinking: true }, undefined, (update: unknown) => updates.push(update), { cwd: root });
     assert.deepEqual(requestData, { question: "focus", includeThinking: true });
-    assert.match(JSON.stringify(updates), /answering/);
-    assert.equal(result.content[0].text, "remote answer");
+    assert.match(JSON.stringify(updates), /investigating/);
+    assert.equal(result.content[0].text, "remote report");
     assert.equal(result.details.snapshotAt, "fixed");
     assert.match(result.content[1].text, /Output limit reached/);
     assert.equal(closed, 1);

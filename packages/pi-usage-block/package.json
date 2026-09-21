@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-usage-block",
-  "version": "1.12.0",
+  "version": "1.12.1",
   "type": "module",
   "description": "Usage quota status bar block for pi — polls registered UsageProviders and displays in powerline",
   "homepage": "https://github.com/d3ara1n/pi-extensions/tree/main/packages/pi-usage-block#readme",

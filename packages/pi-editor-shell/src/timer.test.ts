@@ -1,6 +1,12 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatIdleMinutes, idleTimerToken, lastActivityFromEntries, promptCacheTtlMs } from "./timer.ts";
+import {
+  formatIdleMinutes,
+  formatIdleTimerLabel,
+  idleTimerToken,
+  lastActivityFromEntries,
+  promptCacheTtlMs,
+} from "./timer.ts";
 
 const MIN = 60_000;
 
@@ -18,6 +24,13 @@ test("formatIdleMinutes clamps negative and non-finite input to 0m", () => {
   assert.equal(formatIdleMinutes(-MIN), "0m");
   assert.equal(formatIdleMinutes(Number.NaN), "0m");
   assert.equal(formatIdleMinutes(Number.POSITIVE_INFINITY), "0m");
+});
+
+test("formatIdleTimerLabel shows an ellipsis while the agent is active", () => {
+  assert.equal(formatIdleTimerLabel(0, true), "…");
+  assert.equal(formatIdleTimerLabel(5 * MIN, true), "…");
+  assert.equal(formatIdleTimerLabel(0, false), "0m");
+  assert.equal(formatIdleTimerLabel(5 * MIN, false), "5m");
 });
 
 test("idleTimerToken stays muted while fresh and when the TTL is unknown", () => {

@@ -7,7 +7,13 @@ import * as path from "node:path";
 import { CardEditor, type FrameProvider, type SpinnerPhase } from "./card-editor.ts";
 import { DEFAULT_CONFIG, loadEditorShellConfig, type EditorShellConfig, type EditorShellIcons } from "./config.ts";
 import { TickScheduler } from "./tick.ts";
-import { formatIdleMinutes, idleTimerToken, lastActivityFromEntries, promptCacheTtlMs } from "./timer.ts";
+import {
+  formatIdleMinutes,
+  formatIdleTimerLabel,
+  idleTimerToken,
+  lastActivityFromEntries,
+  promptCacheTtlMs,
+} from "./timer.ts";
 import { calculateResponsePerformance, type ResponsePerformance } from "./tps.ts";
 
 /**
@@ -389,6 +395,8 @@ export default function (pi: ExtensionAPI) {
   // session-entry timestamp so restored sessions open with their true idle
   // time already on screen.
   let _lastActivityAt = Date.now();
+  // The idle interval does not begin until the full agent loop finishes.
+  let _agentActive = false;
   // Displayed timer state at the last paint ("minutes|token"). The tick
   // callback re-derives this key and only asks for a repaint when it
   // changes; the frame provider re-syncs it whenever it draws the segment.
@@ -406,6 +414,7 @@ export default function (pi: ExtensionAPI) {
   // a same-phase no-op, so rapid event streams never reset the animation.
   pi.on("turn_start", (_event, ctx) => {
     touchActivity();
+    _agentActive = true;
     _turnStartedAt = performance.now();
     _firstVisibleTextAt = undefined;
     _responseEndedAt = undefined;
@@ -456,6 +465,8 @@ export default function (pi: ExtensionAPI) {
     editor?.setSpinner("exec");
   });
   pi.on("agent_end", (_event, ctx) => {
+    _agentActive = false;
+    touchActivity();
     // cacheRead totals + latest usage are stable once a turn finishes —
     // recompute here instead of on every render frame.
     _cacheTotal = sumCacheRead(ctx);
@@ -464,6 +475,7 @@ export default function (pi: ExtensionAPI) {
     editor?.setSpinner(null);
   });
   pi.on("session_shutdown", () => {
+    _agentActive = false;
     _turnStartedAt = undefined;
     _firstVisibleTextAt = undefined;
     _responseEndedAt = undefined;
@@ -527,6 +539,7 @@ export default function (pi: ExtensionAPI) {
     _cacheTotal = sumCacheRead(ctx);
     _latestUsage = latestAssistantUsage(ctx);
     _lastActivityAt = lastActivityFromEntries(ctx.sessionManager.getEntries());
+    _agentActive = false;
     _lastTimerKey = "";
     // One shared tick per session. Stopped above at session_shutdown; the
     // defensive stop() here covers any session_start that arrives without
@@ -536,7 +549,9 @@ export default function (pi: ExtensionAPI) {
     _ticker.subscribe(() => {
       const elapsed = Date.now() - _lastActivityAt;
       const ttl = promptCacheTtlMs(ctx.model, process.env.PI_CACHE_RETENTION);
-      const key = `${formatIdleMinutes(elapsed)}|${idleTimerToken(elapsed, ttl)}`;
+      const label = formatIdleTimerLabel(elapsed, _agentActive);
+      const token = _agentActive ? "muted" : idleTimerToken(elapsed, ttl);
+      const key = `${label}|${token}`;
       // The frame provider re-syncs _lastTimerKey when it draws the
       // segment, so a mismatch here simply means the display is stale.
       if (key !== _lastTimerKey) editor?.requestRender();
@@ -611,16 +626,16 @@ export default function (pi: ExtensionAPI) {
           ? `${theme.fg("dim", " · ")}${theme.fg("muted", `$${_sessionCost.toFixed(3)}`)}`
           : "";
 
-      // Idle timer — information, not an alarm. Plain text while fresh
-      // (or forever, for models that declare no prompt-cache TTL); amber
-      // inside the last tenth of the TTL and red past it are the actual
-      // indicators. Floored to whole minutes: 4:59 reads as 4m.
+      // The idle interval begins only after the agent loop finishes. While it
+      // is active, an ellipsis replaces the minute count and remains muted.
+      // Once idle, the timer turns amber near the cache TTL and red past it.
       const idleElapsed = Date.now() - _lastActivityAt;
       const idleTtl = promptCacheTtlMs(ctx.model, process.env.PI_CACHE_RETENTION);
-      const idleToken = idleTimerToken(idleElapsed, idleTtl);
+      const idleLabel = formatIdleTimerLabel(idleElapsed, _agentActive);
+      const idleToken = _agentActive ? "muted" : idleTimerToken(idleElapsed, idleTtl);
       // Sync the tick's change-detection key with what is now on screen.
-      _lastTimerKey = `${formatIdleMinutes(idleElapsed)}|${idleToken}`;
-      const timerPart = `${theme.fg("dim", " · ")}${theme.fg(idleToken, `${icons.timer} ${formatIdleMinutes(idleElapsed)}`)}`;
+      _lastTimerKey = `${idleLabel}|${idleToken}`;
+      const timerPart = `${theme.fg("dim", " · ")}${theme.fg(idleToken, `${icons.timer} ${idleLabel}`)}`;
 
       // Git branch + worktree badge + dirty state — pi's format:
       // ~/Projects (main). Inside a linked worktree the branch carries an
@@ -749,11 +764,12 @@ export default function (pi: ExtensionAPI) {
       lines.push("[idle timer]");
       const idleElapsed = Date.now() - _lastActivityAt;
       const idleTtl = promptCacheTtlMs(ctx.model, process.env.PI_CACHE_RETENTION);
-      lines.push(`  since last activity: ${formatIdleMinutes(idleElapsed)}`);
+      lines.push(`  state: ${_agentActive ? "agent active" : "idle"}`);
+      lines.push(`  since last activity: ${_agentActive ? "not started" : formatIdleMinutes(idleElapsed)}`);
       lines.push(
         `  prompt-cache TTL: ${idleTtl != null ? `${Math.round(idleTtl / 1000)}s (${process.env.PI_CACHE_RETENTION === "long" ? "long" : "short"} tier)` : "unknown — timer never indicates"}`,
       );
-      lines.push(`  color token: ${idleTimerToken(idleElapsed, idleTtl)}`);
+      lines.push(`  color token: ${_agentActive ? "muted" : idleTimerToken(idleElapsed, idleTtl)}`);
       lines.push(`  ticker: ${_ticker?.running ? "running" : "stopped"}`);
       lines.push("");
       lines.push("[response performance]");

@@ -23,6 +23,16 @@ export function formatIdleMinutes(elapsedMs: number): string {
 }
 
 /**
+ * Display label for the idle timer. While the agent is active there is no
+ * idle interval to measure, so render an ellipsis instead of a misleading 0m.
+ *
+ * @internal — exported for testing.
+ */
+export function formatIdleTimerLabel(elapsedMs: number, agentActive: boolean): string {
+  return agentActive ? "…" : formatIdleMinutes(elapsedMs);
+}
+
+/**
  * Theme token for the timer text. The timer is information, not an alarm:
  * muted (the shell's secondary tone, same as the cwd display) while fresh —
  * and forever when the model declares no TTL, unknown means "assume not

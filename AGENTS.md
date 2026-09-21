@@ -397,3 +397,15 @@ pi 有四种会话模式（`tui | rpc | print | json`）。注册交互 UI 的�
 - **fire-and-forget 类 UI 在 RPC 原生可用**：`setStatus`、`setWidget(string[])`、`notify` 经 `extension_ui_request` 子协议转发。组件工厂类（`custom/setFooter/setEditorComponent/getEditorText`）是 TUI-only，RPC 下 no-op 或返回空值——用它们的功能要么双轨降级（见上条），要么接受静默缺席。
 - **extension commands 当前在主流 ACP 适配器中不可达**：依赖命令入口的交互功能要么加 `ctx.mode` 守卫并给出可执行提示，要么同时注册工具等价物。
 - **改完跑一遍模式自查**：这个插件在 Zed + pi-acp 里会怎样？工具能调、进度能看、交互有降级或明确不可达——三者之一即可，不允许「调用即崩」。
+
+### 编辑区周边 UI 的前景色层级（dim / muted / text）
+
+插件在编辑区周边渲染的任何 UI——editor chrome（pi-editor-shell 一类替换编辑器边框的）、`setWidget`、`setStatus` 条目、自定义 footer——选前景色时按层级递减：
+
+| token | 用途 | 例 |
+|-------|------|-----|
+| `dim` | 排版符号 | 分隔符 `·`、装饰点、`↑↓ navigate` 按键提示 |
+| `muted` | 二级文本：要能读但不抢眼的信息 | cwd、计时器数字、未选中项 |
+| `text` | 编辑器输入正文专用 | 留给 editor 里的用户输入 |
+
+周边 UI 用 `text` 会与编辑器正文同级、抢视觉层级（pi-editor-shell 计时器初版踩坑，后改 `muted`）。语义色（success/warning/error/accent）按语义用，不在这条层级里。pi 官方文档只有 token 清单（docs/tui.md），此为本仓库约定，与 pi 自身示例用法一致。

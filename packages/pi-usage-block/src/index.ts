@@ -135,22 +135,22 @@ function fmtWindow(w: QuotaWindow, theme: Theme): string {
   const ratio = w.limit > 0 && Number.isFinite(w.used) ? w.used / w.limit : 0;
   const level = quotaLevel(ratio);
   const icon = w.used === 0 ? "\ueabc" : "\uf111";
-  let text = `${theme.fg(level, icon)}${theme.fg("dim", fmtPct(w.used, w.limit))}`;
-  if (w.resetAt) text += theme.fg("dim", ` ↺${fmtCountdown(w.resetAt.getTime() - Date.now())}`);
+  let text = `${theme.fg(level, icon)}${theme.fg("muted", fmtPct(w.used, w.limit))}`;
+  if (w.resetAt) text += theme.fg("muted", ` ↺${fmtCountdown(w.resetAt.getTime() - Date.now())}`);
   return text;
 }
 
 function fmtBalance(info: BalanceInfo, theme: Theme): string {
   const level = balanceLevel(info.amount, info.currency);
   // The amount + currency symbol already carry the colour; no icon needed
-  // (unlike quota, where only the icon is coloured and the percentage is dim).
+  // (unlike quota, where only the icon is coloured and the percentage is muted).
   return theme.fg(level, fmtBalanceAmount(info.amount, info.currency));
 }
 
 function fmtProviderQuota(name: string, windows: QuotaWindow[], theme: Theme): string {
   if (!windows.length) return name;
   const parts = windows.map((w) => fmtWindow(w, theme));
-  return `${theme.fg("dim", name)} ${parts.join(" ")}`;
+  return `${theme.fg("muted", name)} ${parts.join(" ")}`;
 }
 
 // ── Extension ─────────────────────────────────────────────────────────────
@@ -185,14 +185,14 @@ export default function (pi: ExtensionAPI) {
 
     const err = lastError.get(provider.id);
     if (err) {
-      ctx.ui.setStatus(STATUS_KEY, `${theme.fg("dim", provider.name)} ${theme.fg("warning", err)}`);
+      ctx.ui.setStatus(STATUS_KEY, `${theme.fg("muted", provider.name)} ${theme.fg("warning", err)}`);
       return;
     }
 
     if (provider.kind === "balance") {
       const info = lastBalance.get(provider.id);
       if (!info) { clear(); return; }
-      ctx.ui.setStatus(STATUS_KEY, `${theme.fg("dim", provider.name)} ${fmtBalance(info, theme)}`);
+      ctx.ui.setStatus(STATUS_KEY, `${theme.fg("muted", provider.name)} ${fmtBalance(info, theme)}`);
       return;
     }
 

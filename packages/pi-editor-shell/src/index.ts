@@ -807,7 +807,6 @@ export default function (pi: ExtensionAPI) {
       lines.push(
         `  prompt-cache TTL: ${idleTtl != null ? `${Math.round(idleTtl / 1000)}s (${process.env.PI_CACHE_RETENTION === "long" ? "long" : "short"} tier)` : "unknown — timer never indicates"}`,
       );
-      lines.push(`  color token: ${_agentActive ? "muted" : idleTimerToken(idleElapsed, idleTtl)}`);
       lines.push(`  ticker: ${_ticker?.running ? "running" : "stopped"}`);
       lines.push("");
       lines.push("[response performance]");

@@ -16,7 +16,9 @@ export async function compressOutput(
   text: string,
   task: string,
   summaryConfig: SubagentConfig["summary"],
+  signal?: AbortSignal,
 ): Promise<{ text: string; method: "compressed" | "truncated" }> {
+  if (signal?.aborted) return { text: truncateOutput(text), method: "truncated" };
   try {
     // Cap input to the summary model to avoid blowing its context window
     let input = text;
@@ -41,7 +43,7 @@ export async function compressOutput(
           },
         ],
       },
-      { maxTokens: 16000 },
+      { maxTokens: 16000, signal },
     );
 
     const compressed =
@@ -71,8 +73,10 @@ export async function generateSummary(
   rolesApi: ModelRolesAPI,
   outputText: string,
   summaryConfig: SubagentConfig["summary"],
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
   if (!summaryConfig.enabled || !outputText.trim()) return undefined;
+  if (signal?.aborted) return firstLineSummary(outputText);
 
   // Short outputs don't justify an extra API call — reuse the first line directly
   if (outputText.trim().length <= 150) return firstLineSummary(outputText);
@@ -98,7 +102,7 @@ export async function generateSummary(
           "Summarize the following agent output in one concise sentence (max 60 characters). Respond in the same language as the input. Focus on what was accomplished, not how. Output only the summary, no preamble.",
         messages: [{ role: "user", content: summaryInput, timestamp: Date.now() }],
       },
-      { maxTokens: 100 },
+      { maxTokens: 100, signal },
     );
 
     const text = (result.content as Array<{ type: string; text?: string }> | undefined)

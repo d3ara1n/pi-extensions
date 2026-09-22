@@ -147,7 +147,7 @@ test("a throwing spawn resolves the promise with a failed result carrying the er
   assert.strictEqual(result.activityLog.length, 1);
 });
 
-test("spawned runs persist to history on every terminal path; pre-run failures do not", async () => {
+test("every terminal path persists, including pre-run failures", async () => {
   const persisted: SubagentResult[] = [];
   const persistImpl = (
     _sessionId: string | undefined,
@@ -181,7 +181,7 @@ test("spawned runs persist to history on every terminal path; pre-run failures d
   assert.match(persisted[0].errorMessage!, /aborted/);
   assert.equal(persisted[0].activityLog.length, 1);
 
-  // Pre-run failure (roles api unavailable): never spawned, not audited.
+  // Pre-run failures are recoverable terminal results too.
   const prerun = startSubagentRun(
     makeDeps({
       config: historyConfig,
@@ -192,7 +192,7 @@ test("spawned runs persist to history on every terminal path; pre-run failures d
     }),
   );
   await prerun.promise;
-  assert.equal(persisted.length, 1);
+  assert.equal(persisted.length, 2);
 
   // Normal success is audited too.
   const ok = startSubagentRun(
@@ -203,7 +203,7 @@ test("spawned runs persist to history on every terminal path; pre-run failures d
     }),
   );
   await ok.promise;
-  assert.equal(persisted.length, 2);
+  assert.equal(persisted.length, 3);
 });
 
 test("provider error on first attempt retries on the fallback role", async () => {
@@ -328,6 +328,8 @@ test("handle.abort() reaps a queued background run (no caller signal)", async ()
 
 test("handle.abort(reason) fails a running run with the reason in the error message", async () => {
   const signals: AbortSignal[] = [];
+  let entered!: () => void;
+  const running = new Promise<void>((resolve) => { entered = resolve; });
   // Mirrors real spawn's abort handling: pre-aborted signals settle immediately
   // (an "abort" listener alone would never fire — the event already happened).
   const honoringSpawn: SpawnImpl = (_m, _t, options) =>
@@ -336,9 +338,11 @@ test("handle.abort(reason) fails a running run with the reason in the error mess
       const die = () => reject(new Error("Subagent was aborted"));
       if (options.signal?.aborted) die();
       else options.signal?.addEventListener("abort", die, { once: true });
+      entered();
     });
 
   const run = startSubagentRun(makeDeps({ spawnImpl: honoringSpawn }));
+  await running;
   run.abort("session shutdown");
   const result = await run.promise;
 
@@ -390,4 +394,100 @@ test("subscribers are notified on progress and terminal frames", async () => {
   await new Promise((r) => setTimeout(r, 5));
   assert.strictEqual(notifications, after);
   assert.ok(notifications >= 3, `progress x2 + terminal, got ${notifications}`);
+});
+
+test("history retains the session identity captured before asynchronous work", async () => {
+  let sessionId = "original-session";
+  const recorded: string[] = [];
+  const gate = new AsyncSemaphore(1);
+  await gate.acquire();
+  const run = startSubagentRun(makeDeps({
+    gate, config: { ...testConfig, history: { enabled: true } },
+    getSessionId: () => sessionId,
+    persistImpl: (id) => { recorded.push(id!); },
+    spawnImpl: async () => makeResult({ output: "done" }),
+  }));
+  sessionId = "replacement-session";
+  gate.release();
+  await run.promise;
+  assert.deepEqual(recorded, ["original-session"]);
+});
+
+test("shutdown cancellation reaches pending summary and compression requests", async () => {
+  for (const outputSize of [200, 60_000]) {
+    let entered!: () => void;
+    const processing = new Promise<void>((resolve) => { entered = resolve; });
+    let requestSignal: AbortSignal | undefined;
+    const api = {
+      ...fakeRolesApi,
+      resolveRole: () => ({ model: { provider: "test", id: "summary" } }),
+      completeWithRole: async (_role: string, _context: unknown, options: { signal: AbortSignal }) => {
+        requestSignal = options.signal;
+        entered();
+        await new Promise<void>((_resolve, reject) => {
+          options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        });
+      },
+    } as unknown as ModelRolesAPI;
+    const run = startSubagentRun(makeDeps({
+      config: { ...testConfig, summary: { enabled: true, role: "utility" } },
+      getRolesApi: () => api,
+      spawnImpl: async () => makeResult({ output: "x".repeat(outputSize) }),
+    }));
+    await processing;
+    run.abort("session shutdown");
+    const result = await run.promise;
+    assert.equal(requestSignal?.aborted, true);
+    assert.equal(result.stopReason, "cancelled");
+    assert.equal(result.errorMessage, "session shutdown");
+    assert.ok(result.output.length > 0, "the completed child output survives cancellation of post-processing");
+    if (outputSize > 50_000) assert.equal(result.outputMethod, "truncated");
+  }
+});
+
+test("abort settles stalled initial and fallback role resolution without spawning again", async () => {
+  for (const fallback of [false, true]) {
+    let entered!: () => void;
+    const resolving = new Promise<void>((resolve) => { entered = resolve; });
+    let spawnCount = 0;
+    const api = {
+      resolveRoleAsync: async (role: string) => {
+        if (fallback && role === "fast") return { model: { provider: "test", id: "primary" }, config: {} };
+        entered();
+        return new Promise(() => {});
+      },
+    } as unknown as ModelRolesAPI;
+    const run = startSubagentRun(makeDeps({
+      roleDef: { ...roleDef, fallbackRole: "fallback" },
+      getRolesApi: () => api,
+      spawnImpl: async () => {
+        spawnCount++;
+        return makeResult({ exitCode: 1, errorMessage: "429 quota exceeded", output: "first attempt output" });
+      },
+    }));
+    await resolving;
+    run.abort("session shutdown");
+    const result = await run.promise;
+    assert.equal(result.stopReason, "cancelled");
+    assert.equal(spawnCount, fallback ? 1 : 0);
+    assert.equal(result.output, fallback ? "first attempt output" : "");
+  }
+});
+
+test("abort settles post-processing even if the request ignores its signal", async () => {
+  let entered!: () => void;
+  const processing = new Promise<void>((resolve) => { entered = resolve; });
+  const api = {
+    ...fakeRolesApi,
+    resolveRole: () => ({ model: { provider: "test", id: "summary" } }),
+    completeWithRole: async () => { entered(); return new Promise(() => {}); },
+  } as unknown as ModelRolesAPI;
+  const run = startSubagentRun(makeDeps({
+    config: { ...testConfig, summary: { enabled: true, role: "utility" } },
+    getRolesApi: () => api,
+    spawnImpl: async () => makeResult({ output: "x".repeat(200) }),
+  }));
+  await processing;
+  run.abort("session shutdown");
+  assert.equal((await run.promise).stopReason, "cancelled");
 });

@@ -42,6 +42,8 @@ import {
 } from "./utils.ts";
 import { startSubagentRun, type RunHandle } from "./run.ts";
 import { buildInboxReminder, injectReminder } from "./reminder.ts";
+import { RunStore } from "./store.ts";
+import { historyDirectory } from "./history.ts";
 import {
   availabilityFilePath,
   buildAvailabilityReminder,
@@ -72,7 +74,14 @@ const BACKGROUND_COMPLETION_MESSAGE_TYPE = "subagent-completion";
 
 // ── Extension entry ────────────────────────────────────────────────
 
-export default function subagentExtension(pi: ExtensionAPI) {
+/** @internal — dependency injection for offline lifecycle tests. */
+export interface SubagentDependencies {
+  startRun?: typeof startSubagentRun;
+  historyDirectory?: typeof historyDirectory;
+  availabilityPath?: string;
+}
+
+export default function subagentExtension(pi: ExtensionAPI, dependencies: SubagentDependencies = {}) {
   let config: SubagentConfig = DEFAULT_CONFIG;
   let concurrencyGate = new AsyncSemaphore(DEFAULT_CONFIG.maxConcurrency);
 
@@ -108,24 +117,10 @@ export default function subagentExtension(pi: ExtensionAPI) {
     }
   }
 
-  // ── Background run registry ────────────────────────────────────
-  // Process-lifetime map of background runs (queued, running, and
-  // finished/failed alike). Foreground delegate runs are NOT registered
-  // here — their lifecycle is the tool call itself (the view-only archive
-  // below holds those). Runs stay registered for the whole session:
-  // subagent_check is idempotent and re-delivers the terminal snapshot on
-  // every call, so branch navigation or compaction can never strand a
-  // result outside the model's reach. Whether a run still needs reminding
-  // is NOT tracked here — it derives from the session tree (see
-  // collectDeliveredIds + the context handler), the single source of truth.
-  const backgroundRuns = new Map<string, RunHandle>();
-  // View-only archive of foreground runs — same append-for-the-whole-session
-  // lifetime as the registry above, so every delegated run stays browsable
-  // in /subagent:view after its blocking call returns. Foreground runs never
-  // enter backgroundRuns: check/wait/cancel/list operate on background runs
-  // only, and the foreground tool call itself owns delivery.
-  const foregroundRuns = new Set<RunHandle>();
-  let runCounter = 0;
+  // Terminal bodies live in history; these registries retain metadata and live controls.
+  const runStore = new RunStore();
+  const backgroundRuns = runStore.background;
+  const foregroundRuns = runStore.foreground;
   let sessionGeneration = 0;
 
   // ── Live-run reaping ─────────────────────────────────────────
@@ -141,7 +136,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
   // Situational availability state file (see availability.ts). Re-read from
   // disk on every reminder build and command so external edits and sibling
   // pi instances are picked up without a reload.
-  const availabilityPath = availabilityFilePath();
+  const availabilityPath = dependencies.availabilityPath ?? availabilityFilePath();
 
   // ── Situational availability commands ────────────────────────────
 
@@ -333,14 +328,14 @@ export default function subagentExtension(pi: ExtensionAPI) {
       "",
       "RUN HISTORY:",
       "",
-      "- Every spawned run is audited to ~/.pi/subagent/history/{sessionId}/{toolCallId}.json (toolCallId = the delegate call's id). The file holds the FULL raw output even when you received a compressed/truncated version, plus the task, activity log, and usage.",
+      "- With history enabled, every run's terminal result is saved to ~/.pi/subagent/history/{sessionId}/{toolCallId}.json (toolCallId = the delegate call's id). The record contains the prepared result and FULL raw output, task, activity log, and usage.",
       "",
       "BACKGROUND DELEGATION:",
       "",
       "- Use it only when you have your own work this turn (including an ongoing discussion with the user) while the run executes; otherwise let the call block and return the result directly.",
       "- While a background run is queued or running, continue independent work. When its result is needed and no independent work remains, use subagent_wait, then subagent_check to collect it; if it has already ended, collect it directly. Do not use repeated subagent_check calls as a substitute for waiting.",
       "- Use subagent_steer for a concrete deviation from the delegated task or new information that changes its requirements. A running status or several checks without a result is not evidence of a wrong direction or a stall. Do not ask the child to wrap up or return early merely to avoid waiting.",
-      "- Cancel a run you no longer need with subagent_cancel(id) — the child stops and its partial output stays in the registry for subagent_check to collect.",
+      "- Cancel a run you no longer need with subagent_cancel(id) — the child stops and its partial output remains available for subagent_check to collect.",
       "- Background delegation works only in the top-level session.",
     ];
   }
@@ -366,6 +361,12 @@ export default function subagentExtension(pi: ExtensionAPI) {
     sessionGeneration += 1;
     config = loadSubagentConfig(ctx.cwd);
     concurrencyGate = new AsyncSemaphore(config.maxConcurrency);
+    const sessionId = ctx.sessionManager?.getSessionId();
+    runStore.restore(
+      config.history.enabled && sessionId ? (dependencies.historyDirectory ?? historyDirectory)(sessionId) : undefined,
+      ctx.sessionManager?.getEntries() ?? [],
+      (message) => ctx.ui.notify(message, "warning"),
+    );
 
     refreshAvailableRoles();
     applyAgentOverrides(availableRoles, config.agentOverrides);
@@ -463,9 +464,12 @@ export default function subagentExtension(pi: ExtensionAPI) {
   // children get SIGTERM → their own handlers kill grandchildren, aborted
   // runs are audited to history, gates release. Without this, background
   // children would burn tokens as unwaitable orphans after /reload or /new.
-  pi.on("session_shutdown", () => {
+  pi.on("session_shutdown", async () => {
     sessionGeneration += 1;
-    for (const run of liveRuns) run.abort("session shutdown");
+    const runs = [...liveRuns];
+    for (const run of runs) run.abort("session shutdown");
+    await Promise.all(runs.map((run) => run.promise));
+    runStore.evict();
   });
 
   // The completion notice card — system-notice styling, not the tool-row
@@ -558,8 +562,8 @@ export default function subagentExtension(pi: ExtensionAPI) {
             )
           : undefined;
 
-        const run = startSubagentRun({
-          id: `sub-${++runCounter}`,
+        const run = (dependencies.startRun ?? startSubagentRun)({
+          id: runStore.nextId(),
           toolCallId: _toolCallId,
           role: params.role,
           roleDef,
@@ -578,12 +582,14 @@ export default function subagentExtension(pi: ExtensionAPI) {
           gate: concurrencyGate,
           getRolesApi: getModelRolesAPI,
           getSessionId: () => ctx.sessionManager?.getSessionId(),
+          background: params.background === true,
+          onHistoryError: (message) => ctx.ui.notify(message, "warning"),
         });
         trackRun(run);
+        runStore.add(run, params.background === true);
 
         // ── Background: return the id immediately; the pipeline keeps running. ──
         if (params.background) {
-          backgroundRuns.set(run.id, run);
           const runGeneration = sessionGeneration;
           void run.promise.then((result) => {
             // Never publish completions from an old session. Within a session
@@ -628,10 +634,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
           };
         }
 
-        // ── Foreground: the same async engine, blocked on here. Archived
-        // for the view at creation — like a background run, it stays
-        // browsable after the call returns. ──
-        foregroundRuns.add(run);
+        // Foreground callers block on the same engine; the store keeps their archive.
         const emit = (results: SubagentResult[], text: string) => {
           onUpdate?.({
             content: [{ type: "text", text }],
@@ -853,7 +856,7 @@ export default function subagentExtension(pi: ExtensionAPI) {
       name: "subagent_check",
       label: "Check a background subagent",
       description:
-        "Get an instant snapshot of ONE background subagent run: queued / running (with current activity, elapsed/budget, and usage so far) / finished (with the full output and usage) / failed or cancelled (with reason, partial output, and usage). Does not wait — use subagent_wait for that. Idempotent: checking a terminal run again re-delivers the same snapshot, so the result stays reachable even after branch navigation or compaction. One id per call because results can be large.",
+        "Get an instant snapshot of ONE background subagent run: queued / running (with current activity, elapsed/budget, and usage so far) / finished (with the full output and usage) / failed or cancelled (with reason, partial output, and usage). Does not wait — use subagent_wait for that. Idempotent: checking a terminal run again re-delivers its result, including after branch navigation or compaction; with history enabled, results also survive reload and reopening the same session. One id per call because results can be large.",
       promptSnippet: "Inspect a background subagent run",
       parameters: Type.Object({
         id: Type.String({ description: "Run id returned by a background delegate call" }),
@@ -868,13 +871,16 @@ export default function subagentExtension(pi: ExtensionAPI) {
           );
         }
 
-        // Freeze live frames so the snapshot's elapsed time stays static.
-        const snap = run.result ? run.snapshot : freezeFrame(run.snapshot);
-
-        return {
-          content: [{ type: "text", text: formatCheckText(run.id, run.role, snap) }],
-          details: { id: run.id, role: run.role, result: snap },
-        };
+        try {
+          const frame = runStore.read(run);
+          const snap = run.result ? frame : freezeFrame(frame);
+          return {
+            content: [{ type: "text", text: formatCheckText(run.id, run.role, snap) }],
+            details: { id: run.id, role: run.role, result: snap },
+          };
+        } finally {
+          runStore.evict(run.id);
+        }
       },
 
       renderCall: renderCheckCall,
@@ -994,19 +1000,25 @@ export default function subagentExtension(pi: ExtensionAPI) {
   // Shared by the /subagent:view command and the native command-palette
   // entry — both open the same overlay.
   //
-  // The view lists every run ever delegated this session — background and
-  // foreground alike — from the two append-only registries. It derives
-  // nothing from delivery state; a run never leaves the archive.
+  // Listing uses metadata; only the focused run loads its full persisted frame.
   async function openSubagentView(ctx: ExtensionContext): Promise<void> {
-    const runsProvider = () => unionViewRuns(backgroundRuns.values(), foregroundRuns);
-    await ctx.ui.custom(
-      (tui, theme, _keybindings, done) =>
-        createViewPanel(runsProvider, tui, theme, () => done(undefined)),
-      {
-        overlay: true,
-        overlayOptions: { anchor: "center", width: "90%", maxHeight: "85%" },
-      },
-    );
+    if (ctx.mode !== "tui") {
+      ctx.ui.notify("The activity view requires TUI mode. Use subagent_check to read a background result.", "info");
+      return;
+    }
+    const runsProvider = () => unionViewRuns(backgroundRuns.values(), foregroundRuns.values());
+    try {
+      await ctx.ui.custom(
+        (tui, theme, _keybindings, done) =>
+          createViewPanel(runsProvider, tui, theme, () => done(undefined), (run) => runStore.view(run)),
+        {
+          overlay: true,
+          overlayOptions: { anchor: "center", width: "90%", maxHeight: "85%" },
+        },
+      );
+    } finally {
+      runStore.evict();
+    }
   }
 
   pi.registerCommand("subagent:view", {

@@ -37,6 +37,7 @@ import {
   emptyUsage,
   isFailedResult,
   isProviderError,
+  truncateOutput,
 } from "./utils.ts";
 import { compressOutput, generateSummary } from "./output.ts";
 import { persistSubagentHistory } from "./history.ts";
@@ -59,6 +60,8 @@ export interface RunHandle {
   readonly result: SubagentResult | undefined;
   /** Set when the pipeline threw (abort, spawn crash). The terminal result still carries the partial frame — callers report it as an ordinary failed result; wait/check only see state "failed". */
   readonly thrown: Error | undefined;
+  /** Successfully persisted terminal record; absent when history is disabled or writing failed. */
+  readonly historyFile?: string;
   /** Resolves with the terminal result once the run finishes (always succeeds). */
   readonly promise: Promise<SubagentResult>;
   /** Abort the run — no-op after settle. Tool-cancellation and session-shutdown reaping both funnel here. */
@@ -96,16 +99,37 @@ export interface StartRunOptions {
   gate: AsyncSemaphore;
   /** May throw when pi-model-roles is not initialized — becomes a failed run. */
   getRolesApi: () => ModelRolesAPI;
-  /** History sessionId lookup (best-effort, wrapped in try/catch). */
+  /** Captured at run creation so session replacement cannot redirect the record. */
   getSessionId?: () => string | undefined;
+  background?: boolean;
+  onHistoryError?: (message: string) => void;
   /** @internal — injectable spawn for tests. */
   spawnImpl?: typeof spawnSubagent;
   /** @internal — injectable history persistence for tests. */
-  persistImpl?: typeof persistSubagentHistory;
+  persistImpl?: (...args: Parameters<typeof persistSubagentHistory>) => string | void;
+}
+
+/** Race setup/post-processing work that may not support cancellation itself. */
+function abortable<T>(work: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(new Error("Subagent was aborted"));
+    if (signal.aborted) { onAbort(); return; }
+    signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve().then(() => {
+      signal.throwIfAborted();
+      return work();
+    }).then(
+      (value) => { signal.removeEventListener("abort", onAbort); resolve(value); },
+      (error) => { signal.removeEventListener("abort", onAbort); reject(error); },
+    );
+  });
 }
 
 export function startSubagentRun(opts: StartRunOptions): RunHandle {
   const spawn = opts.spawnImpl ?? spawnSubagent;
+  let sessionId: string | undefined;
+  try { sessionId = opts.getSessionId?.(); } catch { /* unavailable in ephemeral hosts */ }
+  let historyFile: string | undefined;
   const listeners = new Set<() => void>();
   const inheritanceMetadata = opts.inheritConversation
     ? {
@@ -162,9 +186,20 @@ export function startSubagentRun(opts: StartRunOptions): RunHandle {
     currentState = state;
     notify();
   };
-  const finish = (terminal: SubagentResult, error?: Error) => {
+  const finish = (terminal: SubagentResult, error?: Error, rawOutput?: string) => {
     if (settled) return;
     settled = true;
+    if (opts.config.history.enabled) {
+      try {
+        historyFile = (opts.persistImpl ?? persistSubagentHistory)(
+          sessionId, opts.toolCallId, opts.role, opts.task, terminal, rawOutput,
+          { runId: opts.id, background: opts.background === true },
+        ) || undefined;
+      } catch (error: any) {
+        try { opts.onHistoryError?.(`Could not persist ${opts.id}; its result remains in memory and may be lost on reload: ${error.message}`); }
+        catch { /* reporting errors must not prevent settlement */ }
+      }
+    }
     result = terminal;
     snapshot = terminal;
     thrown = error;
@@ -192,6 +227,9 @@ export function startSubagentRun(opts: StartRunOptions): RunHandle {
     },
     get thrown() {
       return thrown;
+    },
+    get historyFile() {
+      return historyFile;
     },
     subscribe(fn) {
       listeners.add(fn);
@@ -224,22 +262,8 @@ export function startSubagentRun(opts: StartRunOptions): RunHandle {
       return;
     }
 
-    // Audit every spawned run — finished, failed, and aborted alike: an
-    // aborted run already consumed tokens, so its cost must stay in the
-    // audit log. Pre-run failures (queued-cancel, role/model resolution)
-    // never spawned and are not recorded.
-    const persist = opts.persistImpl ?? persistSubagentHistory;
-    const persistHistory = (terminal: SubagentResult, rawOutput?: string): void => {
-      if (!opts.config.history.enabled) return;
-      let sessionId: string | undefined;
-      try {
-        sessionId = opts.getSessionId?.();
-      } catch {
-        /* ignore */
-      }
-      persist(sessionId, opts.toolCallId, opts.role, opts.task, terminal, rawOutput);
-    };
-
+    let completedResult: SubagentResult | undefined;
+    let completedRawOutput: string | undefined;
     try {
       // Resolve the model AFTER acquiring so the queued period stays zero-cost.
       let rolesApi: ModelRolesAPI;
@@ -258,7 +282,7 @@ export function startSubagentRun(opts: StartRunOptions): RunHandle {
       if (opts.modelOverride) {
         modelRef = opts.modelOverride;
       } else {
-        const resolved = await rolesApi.resolveRoleAsync(opts.roleDef.role);
+        const resolved = await abortable(() => rolesApi.resolveRoleAsync(opts.roleDef.role), controller.signal);
         if (!resolved.model) {
           finish({
             ...inputFrame(1, false),
@@ -326,6 +350,7 @@ export function startSubagentRun(opts: StartRunOptions): RunHandle {
           control = c;
         },
       });
+      completedResult = runResult;
 
       // Retry with fallback role on provider errors (quota, auth, timeout, etc.)
       if (
@@ -333,7 +358,7 @@ export function startSubagentRun(opts: StartRunOptions): RunHandle {
         opts.roleDef.fallbackRole &&
         isProviderError(runResult)
       ) {
-        const fallback = await rolesApi.resolveRoleAsync(opts.roleDef.fallbackRole);
+        const fallback = await abortable(() => rolesApi.resolveRoleAsync(opts.roleDef.fallbackRole!), controller.signal);
         if (fallback.model) {
           const fbRef = `${fallback.model.provider}/${fallback.model.id}`;
           // Snapshot the failed first attempt BEFORE the retry — spawn returns
@@ -343,6 +368,7 @@ export function startSubagentRun(opts: StartRunOptions): RunHandle {
           // the trace into running frames while the retry is in flight.
           const fallbackFrom = buildFallbackFrom(runResult, modelRef);
           activeFallbackFrom = fallbackFrom;
+          completedResult = undefined;
           runResult = await spawn(fbRef, opts.task, {
             cwd: opts.cwd,
             thinking: fallback.config.thinking,
@@ -365,6 +391,7 @@ export function startSubagentRun(opts: StartRunOptions): RunHandle {
             },
           });
           runResult.fallbackFrom = fallbackFrom;
+          completedResult = runResult;
         }
       }
 
@@ -380,13 +407,15 @@ export function startSubagentRun(opts: StartRunOptions): RunHandle {
       // Compress/truncate oversized output before it reaches the main model or TUI.
       // Keep the raw original for the history file (audit), feed the prepared text to LLM + expanded view.
       const rawOutput = runResult.output;
+      completedRawOutput = rawOutput;
       if (runResult.output.length > MAX_OUTPUT_CHARS) {
-        const { text, method } = await compressOutput(
+        const { text, method } = await abortable(() => compressOutput(
           rolesApi,
           runResult.output,
           opts.task,
           opts.config.summary,
-        );
+          controller.signal,
+        ), controller.signal);
         runResult.output = text;
         runResult.outputMethod = method;
       } else {
@@ -395,18 +424,18 @@ export function startSubagentRun(opts: StartRunOptions): RunHandle {
 
       // Generate summary for TUI display
       if (opts.config.summary.enabled && runResult.output.trim()) {
-        runResult.summary = await generateSummary(rolesApi, runResult.output, opts.config.summary);
+        runResult.summary = await abortable(
+          () => generateSummary(rolesApi, runResult.output, opts.config.summary, controller.signal),
+          controller.signal,
+        );
       }
 
-      // Best-effort audit record. The raw original output is kept even when
-      // the LLM/TUI saw a compressed/truncated version.
-      persistHistory(runResult, rawOutput);
-
-      finish(runResult);
+      controller.signal.throwIfAborted();
+      finish(runResult, undefined, rawOutput);
     } catch (err: any) {
-      // Keep whatever the last live frame gathered so aborted/crashed runs
-      // still show their partial activity and usage.
-      const partial = snapshot;
+      // A completed child may still be awaiting compression/summary; preserve
+      // its full result when cancellation interrupts that post-processing.
+      const partial = completedResult ?? snapshot;
       // Aborts settle as their own stop reason ("cancelled", same family as
       // timeout/budget: intentional stop with partial output) and the abort
       // reason becomes the error message verbatim — no wrapper needed, every
@@ -415,19 +444,19 @@ export function startSubagentRun(opts: StartRunOptions): RunHandle {
       const wasCancelled = controller.signal.aborted;
       const terminal: SubagentResult = {
         ...inputFrame(1, false),
-        output: partial.output,
+        output: partial.output.length > MAX_OUTPUT_CHARS ? truncateOutput(partial.output) : partial.output,
+        outputMethod: partial.output.length > MAX_OUTPUT_CHARS ? "truncated" : (partial.outputMethod ?? "raw"),
+        stderr: partial.stderr,
+        fallbackFrom: partial.fallbackFrom,
         usage: partial.usage,
         model: partial.model,
         stopReason: wasCancelled ? "cancelled" : undefined,
         activityLog: partial.activityLog,
         budgetMs: partial.budgetMs,
-        elapsedMs: partial.startTime ? Date.now() - partial.startTime : undefined,
+        elapsedMs: partial.elapsedMs ?? (partial.startTime ? Date.now() - partial.startTime : undefined),
         errorMessage: wasCancelled ? abortReason || "cancelled" : err?.message || String(err),
       };
-      // The run spawned before throwing — audit it like any terminal state.
-      // The partial output is raw (compression never ran on it).
-      persistHistory(terminal);
-      finish(terminal, err instanceof Error ? err : new Error(String(err)));
+      finish(terminal, err instanceof Error ? err : new Error(String(err)), completedRawOutput ?? partial.output);
     } finally {
       opts.gate.release();
     }

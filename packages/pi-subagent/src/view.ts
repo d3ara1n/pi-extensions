@@ -208,6 +208,8 @@ export class SubagentViewPanel implements Component, Focusable {
   focused = true;
 
   private runsProvider: () => RunHandle[];
+  private readRun: (run: RunHandle) => RunHandle;
+  private loadError?: string;
   private theme: Theme;
   private tui: TuiLike;
   private close: () => void;
@@ -235,8 +237,10 @@ export class SubagentViewPanel implements Component, Focusable {
     tui: TuiLike,
     theme: Theme,
     onClose: () => void,
+    readRun: (run: RunHandle) => RunHandle = (run) => run,
   ) {
     this.runsProvider = runsProvider;
+    this.readRun = readRun;
     this.tui = tui;
     this.theme = theme;
     this.close = onClose;
@@ -280,7 +284,14 @@ export class SubagentViewPanel implements Component, Focusable {
       this.focusId = run.id;
       this.resetRunView();
     }
-    return run;
+    try {
+      const loaded = this.readRun(run);
+      this.loadError = undefined;
+      return loaded;
+    } catch (error: any) {
+      this.loadError = error.message;
+      return run;
+    }
   }
 
   /** Reset the focused run's view state: page back to activity, activity
@@ -399,11 +410,15 @@ export class SubagentViewPanel implements Component, Focusable {
   }
 
   private closePanel(): void {
+    this.dispose();
+    this.close();
+  }
+
+  dispose(): void {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = undefined;
     }
-    this.close();
   }
 
   /** Content line budget in browse mode (tab row + header + steer hint + key hint). */
@@ -518,6 +533,7 @@ export class SubagentViewPanel implements Component, Focusable {
   /** Push the focused run's current page (activity or brief) as framed rows. */
   private renderPage(run: RunHandle, budget: number, innerW: number, fg: Fg, row: (s: string) => string): string[] {
     const lines: string[] = [];
+    if (this.loadError) return [row(fg("error", truncateToWidth(this.loadError, innerW)))];
     if (this.page === "activity") {
       const entries = run.snapshot.activityLog.map((e) => this.renderEntry(e, innerW, fg));
       const maxTop = Math.max(0, entries.length - budget);
@@ -560,13 +576,13 @@ export class SubagentViewPanel implements Component, Focusable {
       // accent highlight is the indicator, so Tab doesn't shift text.
       const cells = runs.map((r) => {
         const label = `[${runIcon(r.snapshot, fg)} ${r.id} ${r.role}]`;
-        return r === focused ? th.bg("selectedBg", fg("accent", label)) : fg("dim", label);
+        return r.id === focused?.id ? th.bg("selectedBg", fg("accent", label)) : fg("dim", label);
       });
       const header =
         `${fg("accent", th.bold("subagents"))} ` +
         th.fg("dim", `${runningCount} running · ${runs.length} total`) +
         "  ";
-      const focusIdx = Math.max(0, runs.findIndex((r) => r === focused));
+      const focusIdx = Math.max(0, runs.findIndex((r) => r.id === focused?.id));
       const win = windowTabCells(cells, focusIdx, innerW - visibleWidth(header));
       const parts: string[] = [];
       if (win.leftClipped) parts.push(fg("dim", "…"));
@@ -656,6 +672,7 @@ export function createViewPanel(
   tui: TuiLike,
   theme: Theme,
   onClose: () => void,
+  readRun?: (run: RunHandle) => RunHandle,
 ): SubagentViewPanel {
-  return new SubagentViewPanel(runsProvider, tui, theme, onClose);
+  return new SubagentViewPanel(runsProvider, tui, theme, onClose, readRun);
 }

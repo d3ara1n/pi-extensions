@@ -72,29 +72,41 @@ test("promptCacheTtlMs returns undefined without a declared lifetime", () => {
   assert.equal(promptCacheTtlMs({ promptCache: { short: 0 } }, "short"), undefined);
 });
 
-test("lastActivityFromEntries scans newest-first for a parseable timestamp", () => {
+test("lastActivityFromEntries anchors only on conversational entries", () => {
   const now = 1_700_000_000_000;
   const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString();
 
-  // No parseable timestamp → undefined: the timer stays unarmed instead of
-  // counting from zero on a session where nothing has happened.
+  // Nothing conversational — empty or bootstrap-only — leaves the timer
+  // unarmed: a fresh session starts with session/model_change/
+  // thinking_level_change entries, but no prompt has been sent yet.
   assert.equal(lastActivityFromEntries([]), undefined);
   assert.equal(
-    lastActivityFromEntries([{}, { timestamp: undefined }, { timestamp: "not a date" }]),
+    lastActivityFromEntries([
+      { type: "session", timestamp: iso(0) },
+      { type: "model_change", timestamp: iso(0) },
+      { type: "thinking_level_change", timestamp: iso(0) },
+    ]),
     undefined,
   );
-  // Entries without a timestamp fall through to the next candidate.
-  assert.equal(
-    lastActivityFromEntries([{ timestamp: iso(-2 * MIN) }, { timestamp: undefined }, {}]),
-    now - 2 * MIN,
-  );
-  // Unparseable strings are skipped, newest valid timestamp wins.
+  // Bookkeeping entries between messages are skipped; the newest
+  // conversational timestamp wins.
   assert.equal(
     lastActivityFromEntries([
-      { timestamp: iso(-5 * MIN) },
-      { timestamp: "not a date" },
-      { timestamp: iso(-3 * MIN) },
+      { type: "message", timestamp: iso(-5 * MIN) },
+      { type: "model_change", timestamp: iso(-4 * MIN) },
+      { type: "custom_message", timestamp: iso(-3 * MIN) },
+      { type: "usage", timestamp: iso(-1 * MIN) },
     ]),
     now - 3 * MIN,
+  );
+  // Conversational entries with missing or unparseable timestamps fall
+  // through to older candidates.
+  assert.equal(
+    lastActivityFromEntries([
+      { type: "message", timestamp: iso(-5 * MIN) },
+      { type: "custom_message", timestamp: "not a date" },
+      { type: "message", timestamp: undefined },
+    ]),
+    now - 5 * MIN,
   );
 });

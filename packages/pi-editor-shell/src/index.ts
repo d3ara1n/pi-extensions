@@ -405,8 +405,9 @@ export default function (pi: ExtensionAPI) {
   // ── Idle timer ─────────────────────────────────────────────────
   // Wall-clock anchor of the last observable activity (prompt, streaming,
   // tool run). Events touch it; session_start seeds it from the newest
-  // session-entry timestamp so restored sessions open with their true idle
-  // time already on screen. Undefined = not armed: a fresh session has no
+  // conversational entry timestamp (messages only — the bootstrap entries a
+  // fresh session starts with don't count) so restored sessions open with
+  // their true idle time already on screen. Undefined = not armed: a fresh
   // idle interval to measure, so the segment stays hidden (and the tick
   // computes a stable key, repainting nothing) until the first touch.
   let _lastActivityAt: number | undefined;

@@ -71,19 +71,25 @@ export function promptCacheTtlMs(
 }
 
 /**
- * Wall-clock anchor for the idle timer: the newest parseable entry timestamp
- * (scanned from the end). Undefined for empty or timestamp-less sessions —
- * the timer stays unarmed rather than counting from zero on a session where
- * nothing has happened yet; live activity arms it via touchActivity.
+ * Wall-clock anchor for the idle timer: the newest parseable timestamp
+ * among conversational entries (`message`, `custom_message`), scanned from
+ * the end. Bootstrap and bookkeeping entries (session header, model/config
+ * changes, usage, compaction…) do not count — a fresh session already has
+ * them with timestamps before any prompt, and anchoring there would show
+ * `0m` instead of hiding the timer. Undefined when no conversational entry
+ * carries a parseable timestamp — the timer stays unarmed rather than
+ * counting from zero on a session where nothing has happened yet; live
+ * activity arms it via touchActivity.
  *
  * @internal — exported for testing.
  */
 export function lastActivityFromEntries(
-  entries: readonly { timestamp?: unknown }[],
+  entries: readonly { type?: unknown; timestamp?: unknown }[],
 ): number | undefined {
   for (let i = entries.length - 1; i >= 0; i--) {
-    const raw = entries[i]?.timestamp;
-    const ms = typeof raw === "string" ? Date.parse(raw) : Number.NaN;
+    const entry = entries[i];
+    if (entry?.type !== "message" && entry?.type !== "custom_message") continue;
+    const ms = typeof entry.timestamp === "string" ? Date.parse(entry.timestamp) : Number.NaN;
     if (Number.isFinite(ms)) return ms;
   }
   return undefined;

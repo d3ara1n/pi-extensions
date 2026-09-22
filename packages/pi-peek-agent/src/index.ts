@@ -22,6 +22,28 @@ import { registerPeekTool } from "./tool.ts";
 import { INVESTIGATE_TYPE } from "./types.ts";
 import type { InvestigateRequestData, InvestigateResponseData } from "./types.ts";
 
+function formatInvestigationQuestion(question: string): string {
+  if (!question.trim()) throw new Error("peek: question must not be empty.");
+  return [
+    "Question (JSON string):",
+    JSON.stringify(question),
+    "",
+    "Answer the question using this exact format:",
+    "<peek-summary>One brief sentence in the requester's language stating the finding.</peek-summary>",
+    "<peek-report>Your complete, self-contained answer to the question.</peek-report>",
+    "",
+    "Write the summary on one line. Put the entire answer between <peek-report> and </peek-report>, including any Markdown or code.",
+    "Replace the example text; keep both tag pairs exactly as shown, with no preamble or text after the closing tag.",
+    "The summary is only for compact display; do not omit details from the report.",
+  ].join("\n");
+}
+
+function splitInvestigationReport(text: string): { report: string; summary?: string } {
+  const match = /^<peek-summary>([\s\S]*?)<\/peek-summary>\r?\n<peek-report>([\s\S]+?)<\/peek-report>\r?\n?$/.exec(text);
+  if (!match || !match[1]?.trim()) return { report: text };
+  return { summary: match[1], report: match[2]! };
+}
+
 export default function registerPeekAgentExtension(pi: ExtensionAPI): void {
   let registered = false;
 
@@ -35,12 +57,12 @@ export default function registerPeekAgentExtension(pi: ExtensionAPI): void {
     mesh.serve(INVESTIGATE_TYPE, async (data, emit) => {
       const { question, includeThinking } = (data ?? {}) as InvestigateRequestData;
       const peekApi = getPeekAPI();
-      const result = await peekApi.investigate(question ?? "", {
+      const result = await peekApi.investigate(formatInvestigationQuestion(question ?? ""), {
         includeThinking: includeThinking === true,
         onToken: (delta) => emit("token", { delta }),
         onStage: (stage) => emit("stage", { stage }),
       });
-      return { report: result.report, snapshotAt: result.snapshotAt, usage: result.usage, stopReason: result.stopReason } satisfies InvestigateResponseData;
+      return { ...splitInvestigationReport(result.report), snapshotAt: result.snapshotAt, usage: result.usage, stopReason: result.stopReason } satisfies InvestigateResponseData;
     });
   }
 

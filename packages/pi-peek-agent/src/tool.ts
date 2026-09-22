@@ -6,11 +6,9 @@
  * @d3ara1n/pi-mesh (its `mesh_list` tool) — resolvePeer/connect come from there.
  *
  * Rendering follows the built-in tool convention: the call cell already shows
- * the tool name, so renderResult MUST NOT repeat it. Collapsed shows the first
- * line of the report; expanded shows the original question (read from
- * ToolRenderContext.args, which pi shares across call/result renders for one
- * tool call) above the full report, so the whole exchange is visible when
- * expanded.
+ * the tool name, so renderResult MUST NOT repeat it. Collapsed shows the
+ * supplied summary (or the first report line); expanded shows the original
+ * question from ToolRenderContext.args above the complete report.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -71,7 +69,7 @@ export function registerPeekTool(pi: ExtensionAPI): void {
       return new Text(theme.fg("toolTitle", theme.bold("peek")) + theme.fg("accent", target), 0, 0);
     },
 
-    // Result cell: NO tool name. Collapsed = first line of the report; expanded = question + full report.
+    // Result cell: NO tool name. Collapsed = summary or first report line; expanded = question + full report.
     renderResult(result, { expanded }, theme, context) {
       const isError = context.isError;
       const isPartial = context.isPartial;
@@ -106,11 +104,13 @@ export function registerPeekTool(pi: ExtensionAPI): void {
         }
         return c;
       }
-      // Collapsed: width-aware single-line summary — truncated with "…" when it overflows
-      // the viewport, instead of a fixed 100-char hard cut that still wraps on narrow terminals.
+      // Only the display line is normalized; the full summary stays in details.
       const firstLine = text.split("\n").find((l) => l.trim()) ?? "";
+      const summary = !isPartial && !isError
+        ? (result.details as InvestigateResponseData | undefined)?.summary?.replace(/\r\n|\r|\n/g, " ")
+        : undefined;
       const styled =
-        `${icon} ${isError ? theme.fg("error", firstLine) : theme.fg("dim", firstLine)}`;
+        `${icon} ${isError ? theme.fg("error", firstLine) : theme.fg("dim", summary || firstLine)}`;
       return {
         render: (width: number) => [truncateToWidth(styled, width, "…", true)],
         invalidate: () => {},
@@ -170,7 +170,7 @@ export function registerPeekTool(pi: ExtensionAPI): void {
           }
           return {
             ...resultText,
-            details: response ? { snapshotAt: response.snapshotAt, stopReason: response.stopReason, usage: response.usage } : undefined,
+            details: response ? { summary: response.summary, snapshotAt: response.snapshotAt, stopReason: response.stopReason, usage: response.usage } : undefined,
           };
         } finally {
           conn.close();

@@ -33,6 +33,7 @@ export interface InvestigateRequestData {
 
 export interface InvestigateResponseData {
   report: string;
+  summary?: string;
   snapshotAt?: string;
   stopReason?: "stop" | "length";
   usage?: import("@d3ara1n/pi-peek").InvestigateResult["usage"];

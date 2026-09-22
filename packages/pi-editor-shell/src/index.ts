@@ -406,8 +406,10 @@ export default function (pi: ExtensionAPI) {
   // Wall-clock anchor of the last observable activity (prompt, streaming,
   // tool run). Events touch it; session_start seeds it from the newest
   // session-entry timestamp so restored sessions open with their true idle
-  // time already on screen.
-  let _lastActivityAt = Date.now();
+  // time already on screen. Undefined = not armed: a fresh session has no
+  // idle interval to measure, so the segment stays hidden (and the tick
+  // computes a stable key, repainting nothing) until the first touch.
+  let _lastActivityAt: number | undefined;
   // The idle interval does not begin until the full agent loop finishes.
   let _agentActive = false;
   // Displayed timer state at the last paint ("minutes|token"). The tick
@@ -489,6 +491,7 @@ export default function (pi: ExtensionAPI) {
   });
   pi.on("session_shutdown", () => {
     _agentActive = false;
+    _lastActivityAt = undefined;
     _turnStartedAt = undefined;
     _firstVisibleTextAt = undefined;
     _responseEndedAt = undefined;
@@ -564,7 +567,7 @@ export default function (pi: ExtensionAPI) {
     _ticker?.stop();
     _ticker = new TickScheduler();
     _ticker.subscribe(() => {
-      const elapsed = Date.now() - _lastActivityAt;
+      const elapsed = _lastActivityAt == null ? undefined : Date.now() - _lastActivityAt;
       const ttl = promptCacheTtlMs(ctx.model, process.env.PI_CACHE_RETENTION);
       const label = formatIdleTimerLabel(elapsed, _agentActive);
       const token = _agentActive ? "muted" : idleTimerToken(elapsed, ttl);
@@ -645,12 +648,16 @@ export default function (pi: ExtensionAPI) {
         _sessionCost > 0
           ? `${theme.fg("dim", " · ")}${theme.fg("muted", `$${_sessionCost.toFixed(3)}`)}`
           : "";
-      const turnPart = `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.turn} ${_turnCount}`)}`;
+      const turnPart = _turnCount > 0
+        ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.turn} ${_turnCount}`)}`
+        : "";
 
       // The idle interval begins only after the agent loop finishes. While it
-      // is active, hide the entire timer segment, including its separator.
+      // is active the entire timer segment, including its separator, stays
+      // hidden — and before the session has seen any activity there is no
+      // interval to measure either, so a fresh session hides it as well.
       // Once idle, the timer turns amber near the cache TTL and red past it.
-      const idleElapsed = Date.now() - _lastActivityAt;
+      const idleElapsed = _lastActivityAt == null ? undefined : Date.now() - _lastActivityAt;
       const idleTtl = promptCacheTtlMs(ctx.model, process.env.PI_CACHE_RETENTION);
       const idleLabel = formatIdleTimerLabel(idleElapsed, _agentActive);
       const idleToken = _agentActive ? "muted" : idleTimerToken(idleElapsed, idleTtl);
@@ -790,10 +797,13 @@ export default function (pi: ExtensionAPI) {
 
       lines.push("");
       lines.push("[idle timer]");
-      const idleElapsed = Date.now() - _lastActivityAt;
+      const idleElapsed = _lastActivityAt == null ? undefined : Date.now() - _lastActivityAt;
       const idleTtl = promptCacheTtlMs(ctx.model, process.env.PI_CACHE_RETENTION);
-      lines.push(`  state: ${_agentActive ? "agent active" : "idle"}`);
-      lines.push(`  since last activity: ${_agentActive ? "not started" : formatIdleMinutes(idleElapsed)}`);
+      const state = _agentActive ? "agent active" : idleElapsed == null ? "not armed" : "idle";
+      lines.push(`  state: ${state}`);
+      lines.push(
+        `  since last activity: ${_agentActive ? "not started" : idleElapsed == null ? "not armed" : formatIdleMinutes(idleElapsed)}`,
+      );
       lines.push(
         `  prompt-cache TTL: ${idleTtl != null ? `${Math.round(idleTtl / 1000)}s (${process.env.PI_CACHE_RETENTION === "long" ? "long" : "short"} tier)` : "unknown — timer never indicates"}`,
       );

@@ -26,9 +26,12 @@ test("formatIdleMinutes clamps negative and non-finite input to 0m", () => {
   assert.equal(formatIdleMinutes(Number.POSITIVE_INFINITY), "0m");
 });
 
-test("formatIdleTimerLabel hides the timer while active and restores minutes when idle", () => {
+test("formatIdleTimerLabel hides the timer while active and before any activity", () => {
   assert.equal(formatIdleTimerLabel(0, true), "");
   assert.equal(formatIdleTimerLabel(5 * MIN, true), "");
+  // No anchor yet — fresh session, nothing has happened.
+  assert.equal(formatIdleTimerLabel(undefined, false), "");
+  assert.equal(formatIdleTimerLabel(undefined, true), "");
   assert.equal(formatIdleTimerLabel(0, false), "0m");
   assert.equal(formatIdleTimerLabel(5 * MIN, false), "5m");
 });
@@ -41,6 +44,8 @@ test("idleTimerToken stays muted while fresh and when the TTL is unknown", () =>
   assert.equal(idleTimerToken(6 * 60 * MIN, undefined), "muted");
   assert.equal(idleTimerToken(6 * 60 * MIN, 0), "muted");
   assert.equal(idleTimerToken(6 * 60 * MIN, -1), "muted");
+  // Unarmed anchor never indicates.
+  assert.equal(idleTimerToken(undefined, ttl), "muted");
 });
 
 test("idleTimerToken turns amber at 90% of the TTL and red at the TTL", () => {
@@ -71,10 +76,16 @@ test("lastActivityFromEntries scans newest-first for a parseable timestamp", () 
   const now = 1_700_000_000_000;
   const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString();
 
-  assert.equal(lastActivityFromEntries([], now), now);
+  // No parseable timestamp → undefined: the timer stays unarmed instead of
+  // counting from zero on a session where nothing has happened.
+  assert.equal(lastActivityFromEntries([]), undefined);
+  assert.equal(
+    lastActivityFromEntries([{}, { timestamp: undefined }, { timestamp: "not a date" }]),
+    undefined,
+  );
   // Entries without a timestamp fall through to the next candidate.
   assert.equal(
-    lastActivityFromEntries([{ timestamp: iso(-2 * MIN) }, { timestamp: undefined }, {}], now),
+    lastActivityFromEntries([{ timestamp: iso(-2 * MIN) }, { timestamp: undefined }, {}]),
     now - 2 * MIN,
   );
   // Unparseable strings are skipped, newest valid timestamp wins.
@@ -83,7 +94,7 @@ test("lastActivityFromEntries scans newest-first for a parseable timestamp", () 
       { timestamp: iso(-5 * MIN) },
       { timestamp: "not a date" },
       { timestamp: iso(-3 * MIN) },
-    ], now),
+    ]),
     now - 3 * MIN,
   );
 });

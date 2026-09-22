@@ -24,12 +24,14 @@ export function formatIdleMinutes(elapsedMs: number): string {
 
 /**
  * Display label for the idle timer. An empty label hides the entire segment
- * while the agent is active, when there is no idle interval to measure.
+ * while the agent is active (no idle interval to measure) and before the
+ * session has seen any activity to anchor on (fresh session).
  *
  * @internal — exported for testing.
  */
-export function formatIdleTimerLabel(elapsedMs: number, agentActive: boolean): string {
-  return agentActive ? "" : formatIdleMinutes(elapsedMs);
+export function formatIdleTimerLabel(elapsedMs: number | undefined, agentActive: boolean): string {
+  if (agentActive || elapsedMs == null || !Number.isFinite(elapsedMs)) return "";
+  return formatIdleMinutes(elapsedMs);
 }
 
 /**
@@ -42,7 +44,9 @@ export function formatIdleTimerLabel(elapsedMs: number, agentActive: boolean): s
  *
  * @internal — exported for testing.
  */
-export function idleTimerToken(elapsedMs: number, ttlMs: number | undefined): IdleTimerToken {
+export function idleTimerToken(elapsedMs: number | undefined, ttlMs: number | undefined): IdleTimerToken {
+  if (ttlMs == null || ttlMs <= 0) return "muted";
+  if (elapsedMs == null || !Number.isFinite(elapsedMs)) return "muted";
   if (ttlMs == null || ttlMs <= 0) return "muted";
   if (elapsedMs < ttlMs * WARN_AT_TTL) return "muted";
   return elapsedMs < ttlMs ? "warning" : "error";
@@ -67,21 +71,20 @@ export function promptCacheTtlMs(
 }
 
 /**
- * Wall-clock anchor for the idle timer: the newest parseable entry
- * timestamp (scanned from the end), falling back to `now` for empty or odd
- * sessions — so a restored session opens with its true idle time already
- * on screen instead of restarting from zero.
+ * Wall-clock anchor for the idle timer: the newest parseable entry timestamp
+ * (scanned from the end). Undefined for empty or timestamp-less sessions —
+ * the timer stays unarmed rather than counting from zero on a session where
+ * nothing has happened yet; live activity arms it via touchActivity.
  *
  * @internal — exported for testing.
  */
 export function lastActivityFromEntries(
   entries: readonly { timestamp?: unknown }[],
-  now: number = Date.now(),
-): number {
+): number | undefined {
   for (let i = entries.length - 1; i >= 0; i--) {
     const raw = entries[i]?.timestamp;
     const ms = typeof raw === "string" ? Date.parse(raw) : Number.NaN;
     if (Number.isFinite(ms)) return ms;
   }
-  return now;
+  return undefined;
 }

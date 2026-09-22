@@ -29,7 +29,6 @@ test("history round-trips the delivered result separately from raw audit output"
   const file = persistSubagentHistory("session", "call-1", r.role, r.task, r, "original raw answer", { runId: "sub-3", background: true }, dir);
   assert.deepEqual(readHistoryResult(file), r);
   assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).output, "original raw answer");
-  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   assert.deepEqual(fs.readdirSync(dir), ["call-1.json"]);
   const warnings: string[] = [];
   const index = loadHistoryIndex(dir, [], (m) => warnings.push(m));

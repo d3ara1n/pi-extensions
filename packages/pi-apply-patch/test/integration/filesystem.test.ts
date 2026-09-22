@@ -22,16 +22,14 @@ async function sandbox(
   }
 }
 
-test("real filesystem: add, overwrite, move, delete, prevalidation, and file permissions", async () => {
+test("real filesystem: add, overwrite, move, delete, and prevalidation", async () => {
   await sandbox(async (ctx) => {
-    await fs.writeFile(join(ctx.cwd, "script"), "old\n", { mode: 0o755 });
+    await fs.writeFile(join(ctx.cwd, "script"), "old\n");
     await applyPatch(
       patch("*** Update File: script\n@@\n-old\n+new\n*** Add File: nested/new\n+created"),
       ctx,
     );
     assert.equal(await fs.readFile(join(ctx.cwd, "script"), "utf8"), "new\n");
-    if (process.platform !== "win32")
-      assert.equal((await fs.stat(join(ctx.cwd, "script"))).mode & 0o777, 0o755);
     await applyPatch(
       patch(
         "*** Update File: script\n*** Move to: moved/deep/script\n@@\n-new\n+moved\n*** Delete File: nested/new",

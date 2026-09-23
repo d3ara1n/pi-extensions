@@ -4,17 +4,15 @@ import { spawn } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { CardEditor, type FrameProvider, type SpinnerPhase } from "./card-editor.ts";
+import { CardEditor, type FrameProvider } from "./card-editor.ts";
 import { DEFAULT_CONFIG, loadEditorShellConfig, type EditorShellConfig, type EditorShellIcons } from "./config.ts";
-import { TickScheduler } from "./tick.ts";
 import { countUserMessages } from "./turn-count.ts";
 import {
-  formatIdleMinutes,
-  formatIdleTimerLabel,
-  idleTimerToken,
+  ActivityIndicator,
   lastActivityFromEntries,
   promptCacheTtlMs,
-} from "./timer.ts";
+  type SpinnerPhase,
+} from "./activity.ts";
 import { calculateResponsePerformance, type ResponsePerformance } from "./tps.ts";
 
 /**
@@ -402,53 +400,29 @@ export default function (pi: ExtensionAPI) {
     _turnCountLeafId = ctx.sessionManager.getLeafId();
   };
 
-  // ── Idle timer ─────────────────────────────────────────────────
-  // Wall-clock anchor of the last observable activity (prompt, streaming,
-  // tool run). Events touch it; session_start seeds it from the newest
-  // conversational entry timestamp (messages only — the bootstrap entries a
-  // fresh session starts with don't count) so restored sessions open with
-  // their true idle time already on screen. Undefined = not armed: a fresh
-  // idle interval to measure, so the segment stays hidden (and the tick
-  // computes a stable key, repainting nothing) until the first touch.
-  let _lastActivityAt: number | undefined;
-  // The idle interval does not begin until the full agent loop finishes.
-  let _agentActive = false;
-  // Displayed timer state at the last paint ("minutes|token"). The tick
-  // callback re-derives this key and only asks for a repaint when it
-  // changes; the frame provider re-syncs it whenever it draws the segment.
-  let _lastTimerKey = "";
-  // Shared low-frequency tick driving repaints the frame needs on its own
-  // (idle-minute rollovers, TTL color transitions). Stopped at
-  // session_shutdown so the interval never leaks across sessions.
-  let _ticker: TickScheduler | undefined;
-  const touchActivity = (): void => {
-    _lastActivityAt = Date.now();
-  };
+  // Session-owned activity state survives editor replacements. Only TUI
+  // sessions create a clock; events remain harmless in other modes.
+  let activity: ActivityIndicator | undefined;
 
-  // ── Phase-aware spinner + lifecycle ────────────────────────────
-  // Each event asks the editor for a phase; CardEditor.setSpinner is itself
-  // a same-phase no-op, so rapid event streams never reset the animation.
+  // ── Activity phases + lifecycle ────────────────────────────────
+  pi.on("agent_start", () => activity?.setPhase("thinking"));
   pi.on("turn_start", (_event, ctx) => {
-    touchActivity();
-    _agentActive = true;
     _turnStartedAt = performance.now();
     _firstVisibleTextAt = undefined;
     _responseEndedAt = undefined;
     _reasoningExpected = Boolean(ctx.model?.reasoning && pi.getThinkingLevel() !== "off");
     _sawThinking = false;
     _latestPerformance = undefined;
-    editor?.setSpinner("thinking");
+    activity?.setPhase("thinking");
     editor?.requestRender();
   });
   pi.on("message_start", (event) => {
     if (event.message.role !== "assistant") return;
-    touchActivity();
     _firstVisibleTextAt = undefined;
     _responseEndedAt = undefined;
     _sawThinking = false;
   });
   pi.on("message_update", (event) => {
-    touchActivity();
     const update = event.assistantMessageEvent;
     const t = update.type;
     if (t === "text_delta" && update.delta.length > 0) {
@@ -461,14 +435,11 @@ export default function (pi: ExtensionAPI) {
     else if (t.startsWith("text_")) next = "outputting";
     else if (t.startsWith("toolcall_")) next = "toolcall";
     else return;
-    editor?.setSpinner(next);
+    activity?.setPhase(next);
   });
   pi.on("message_end", (event) => {
     if (event.message.role !== "assistant") return;
     _responseEndedAt = performance.now();
-    // Non-streaming providers fire no message_update at all — touch here so
-    // a long response still counts as activity right up to its last byte.
-    touchActivity();
     const message = event.message as MsgSnap;
     const hasVisibleText = message.content?.some(
       (part) => part.type === "text" && typeof part.text === "string" && part.text.length > 0,
@@ -477,22 +448,19 @@ export default function (pi: ExtensionAPI) {
     if (hasVisibleText) _firstVisibleTextAt ??= _responseEndedAt;
   });
   pi.on("tool_execution_start", () => {
-    touchActivity();
-    editor?.setSpinner("exec");
+    activity?.setPhase("exec");
   });
   pi.on("agent_end", (_event, ctx) => {
-    _agentActive = false;
-    touchActivity();
     // cacheRead totals + latest usage are stable once a turn finishes —
     // recompute here instead of on every render frame.
     _cacheTotal = sumCacheRead(ctx);
     _latestUsage = latestAssistantUsage(ctx);
     refreshSessionCost(ctx);
-    editor?.setSpinner(null);
+    editor?.requestRender();
   });
+  // agent_end may be followed by retries, compaction, or queued work.
+  pi.on("agent_settled", () => activity?.settle());
   pi.on("session_shutdown", () => {
-    _agentActive = false;
-    _lastActivityAt = undefined;
     _turnStartedAt = undefined;
     _firstVisibleTextAt = undefined;
     _responseEndedAt = undefined;
@@ -503,10 +471,8 @@ export default function (pi: ExtensionAPI) {
     _costLeafId = null;
     _turnCount = 0;
     _turnCountLeafId = null;
-    editor?.setSpinner(null);
-    _ticker?.stop();
-    _ticker = undefined;
-    _lastTimerKey = "";
+    activity?.stop();
+    activity = undefined;
     editor = undefined;
   });
   pi.on("session_compact", (_event, ctx) => {
@@ -545,13 +511,15 @@ export default function (pi: ExtensionAPI) {
       _reasoningExpected = false;
       _sawThinking = false;
       editor?.requestRender();
-      touchActivity();
     }
     if (_cwd) refreshGitDirty(_cwd, () => editor?.requestRender());
   });
 
   pi.on("session_start", (_event, ctx) => {
-    if (!ctx.hasUI) return;
+    activity?.stop();
+    activity = undefined;
+    editor = undefined;
+    if (ctx.mode !== "tui") return;
 
     _cwd = ctx.cwd;
     _worktreeName = linkedWorktreeName(ctx.cwd);
@@ -559,25 +527,11 @@ export default function (pi: ExtensionAPI) {
     icons = { ...DEFAULT_ICONS, ...config.icons };
     _cacheTotal = sumCacheRead(ctx);
     _latestUsage = latestAssistantUsage(ctx);
-    _lastActivityAt = lastActivityFromEntries(ctx.sessionManager.getEntries());
-    _agentActive = false;
-    _lastTimerKey = "";
-    // One shared tick per session. Stopped above at session_shutdown; the
-    // defensive stop() here covers any session_start that arrives without
-    // a matching shutdown, so repeated starts can never stack intervals.
-    _ticker?.stop();
-    _ticker = new TickScheduler();
-    _ticker.subscribe(() => {
-      const elapsed = _lastActivityAt == null ? undefined : Date.now() - _lastActivityAt;
-      const ttl = promptCacheTtlMs(ctx.model, process.env.PI_CACHE_RETENTION);
-      const label = formatIdleTimerLabel(elapsed, _agentActive);
-      const token = _agentActive ? "muted" : idleTimerToken(elapsed, ttl);
-      const key = `${label}|${token}`;
-      // The frame provider re-syncs _lastTimerKey when it draws the
-      // segment, so a mismatch here simply means the display is stale.
-      if (key !== _lastTimerKey) editor?.requestRender();
-    });
-    _latestUsage = latestAssistantUsage(ctx);
+    activity = new ActivityIndicator(
+      () => editor?.requestRender(),
+      () => promptCacheTtlMs(ctx.model, process.env.PI_CACHE_RETENTION),
+      lastActivityFromEntries(ctx.sessionManager.getEntries()),
+    );
     _turnStartedAt = undefined;
     _firstVisibleTextAt = undefined;
     _responseEndedAt = undefined;
@@ -592,7 +546,7 @@ export default function (pi: ExtensionAPI) {
     // context % updates show up on the next paint without extra wiring.
     // The border color itself is left to pi (editor.borderColor), matching
     // the default editor's behavior.
-    const provider: FrameProvider = () => {
+    const provider: FrameProvider = (border) => {
       const leafId = ctx.sessionManager.getLeafId();
       if (_costLeafId !== leafId) refreshSessionCost(ctx);
       if (_turnCountLeafId !== leafId) refreshTurnCount(ctx);
@@ -653,20 +607,13 @@ export default function (pi: ExtensionAPI) {
         ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.turn} ${_turnCount}`)}`
         : "";
 
-      // The idle interval begins only after the agent loop finishes. While it
-      // is active the entire timer segment, including its separator, stays
-      // hidden — and before the session has seen any activity there is no
-      // interval to measure either, so a fresh session hides it as well.
-      // Once idle, the timer turns amber near the cache TTL and red past it.
-      const idleElapsed = _lastActivityAt == null ? undefined : Date.now() - _lastActivityAt;
-      const idleTtl = promptCacheTtlMs(ctx.model, process.env.PI_CACHE_RETENTION);
-      const idleLabel = formatIdleTimerLabel(idleElapsed, _agentActive);
-      const idleToken = _agentActive ? "muted" : idleTimerToken(idleElapsed, idleTtl);
-      // Sync the tick's change-detection key with what is now on screen.
-      _lastTimerKey = `${idleLabel}|${idleToken}`;
-      const timerPart = idleLabel
-        ? `${theme.fg("dim", " · ")}${theme.fg(idleToken, `${icons.timer} ${idleLabel}`)}`
-        : "";
+      const activityView = activity?.read();
+      const activityText = activityView?.kind === "busy"
+        ? border(activityView.glyph)
+        : activityView?.kind === "idle"
+          ? theme.fg(activityView.token, `${icons.timer} ${activityView.label}`)
+          : "";
+      const activityPart = activityText ? `${activityText}${theme.fg("dim", " · ")}` : "";
 
       // Git branch + worktree badge + dirty state — pi's format:
       // ~/Projects (main). Inside a linked worktree the branch carries an
@@ -683,22 +630,19 @@ export default function (pi: ExtensionAPI) {
       // Model in accent; thinking label in its level token — same hue the
       // border takes on, so switching levels visibly retints both together.
       return {
-        topLeft: ` ${theme.fg("accent", `${icons.model} ${model}`)}${theme.fg("dim", " · ")}${theme.fg(thinkingColor, `${icons.thinking} ${thinking}`)} `,
+        topLeft: ` ${activityPart}${theme.fg("accent", `${icons.model} ${model}`)}${theme.fg("dim", " · ")}${theme.fg(thinkingColor, `${icons.thinking} ${thinking}`)} `,
         topRight: buildPinned(),
         // Context in severity color; cwd stays muted so it never competes.
-        bottomLeft: ` ${theme.fg(contextToken(pct), `${icons.context} ${ctxText}`)}${cachePart}${tpsPart}${costPart}${turnPart}${timerPart} `,
+        bottomLeft: ` ${theme.fg(contextToken(pct), `${icons.context} ${ctxText}`)}${cachePart}${tpsPart}${costPart}${turnPart} `,
         bottomRight: theme.fg("muted", ` ${cwdDisplay} `),
       };
     };
 
-    // CardEditor has its own phase-aware spinner — hide pi's built-in working loader.
+    // The shell's activity indicator takes the place of pi's working loader.
     ctx.ui.setWorkingVisible(false);
 
     ctx.ui.setEditorComponent((tui, theme, keybindings) => {
-      // pi may rebuild the editor mid-session (model switch, reload). Stop the
-      // previous editor's spinner timer so it can't keep firing requestRender()
-      // on a stale tui handle.
-      editor?.setSpinner(null);
+      // The session clock always targets the current editor instance.
       editor = new CardEditor(tui, theme, keybindings, provider);
       return editor;
     });
@@ -796,19 +740,6 @@ export default function (pi: ExtensionAPI) {
       lines.push("[branch counter]");
       lines.push(`  user messages: ${_turnCount}`);
 
-      lines.push("");
-      lines.push("[idle timer]");
-      const idleElapsed = _lastActivityAt == null ? undefined : Date.now() - _lastActivityAt;
-      const idleTtl = promptCacheTtlMs(ctx.model, process.env.PI_CACHE_RETENTION);
-      const state = _agentActive ? "agent active" : idleElapsed == null ? "not armed" : "idle";
-      lines.push(`  state: ${state}`);
-      lines.push(
-        `  since last activity: ${_agentActive ? "not started" : idleElapsed == null ? "not armed" : formatIdleMinutes(idleElapsed)}`,
-      );
-      lines.push(
-        `  prompt-cache TTL: ${idleTtl != null ? `${Math.round(idleTtl / 1000)}s (${process.env.PI_CACHE_RETENTION === "long" ? "long" : "short"} tier)` : "unknown — timer never indicates"}`,
-      );
-      lines.push(`  ticker: ${_ticker?.running ? "running" : "stopped"}`);
       lines.push("");
       lines.push("[response performance]");
       const perf = _latestPerformance;

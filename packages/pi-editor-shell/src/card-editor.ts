@@ -26,23 +26,6 @@ const GLYPH = {
 /** Below this terminal width the frame hurts readability — fall back to default. */
 const MIN_WIDTH = 20;
 
-const SPINNER_INTERVAL_MS = 80;
-
-/** Agent phase — each gets its own spinner animation. */
-export type SpinnerPhase = "thinking" | "outputting" | "toolcall" | "exec";
-
-/** Spinner frames keyed by agent phase, chosen for semantic fit:
- *  thinking  — ●/○ pulse, doubled frames to halve the tempo
- *  outputting — braille sand-pile (dots accumulate bottom-up, then clear)
- *  toolcall  — shade ramp breathing (░▒▓█▓▒, symmetric incl. full block)
- *  exec      — ◜◝◞◟ arc rotation (tool spinning, mechanical) */
-const SPINNERS: Record<SpinnerPhase, readonly string[]> = {
-  thinking: ["●", "●", "○", "○"],
-  outputting: ["⡀", "⣀", "⣄", "⣤", "⣦", "⣶", "⣷", "⣿"],
-  toolcall: ["░", "▒", "▓", "█", "▓", "▒"],
-  exec: ["◜", "◝", "◞", "◟"],
-};
-
 const RESET = "\x1b[0m";
 
 /**
@@ -60,8 +43,9 @@ export interface FrameSegments {
 
 /** Fresh, already-themed segments on each render call. The frame color
  *  itself always follows `this.borderColor` (pi keeps it in sync with the
- *  thinking level / bash mode), so the provider only supplies text. */
-export type FrameProvider = () => FrameSegments;
+ *  thinking level / bash mode). The provider may use that color for its
+ *  activity spinner as well. */
+export type FrameProvider = (border: (text: string) => string) => FrameSegments;
 
 const EMPTY_SEGMENTS: FrameSegments = {
   topLeft: "",
@@ -152,9 +136,6 @@ function fitFrameRow(
  */
 export class CardEditor extends CustomEditor {
   private readonly frameProvider?: FrameProvider;
-  private spinnerPhase: SpinnerPhase | null = null;
-  private spinnerIdx = 0;
-  private spinnerTimer?: ReturnType<typeof setInterval>;
 
   constructor(
     tui: CtorArgs[0],
@@ -164,33 +145,6 @@ export class CardEditor extends CustomEditor {
   ) {
     super(tui, theme, keybindings, { paddingX: 1 });
     this.frameProvider = frameProvider;
-  }
-
-  /** Set the active spinner phase. `null` stops the spinner.
-   *  Same-phase calls are no-ops so rapid event streams don't reset the
-   *  animation index; phase transitions (thinking→outputting, etc.) do reset. */
-  setSpinner(phase: SpinnerPhase | null): void {
-    if (phase === this.spinnerPhase) return;
-    this.spinnerPhase = phase;
-    if (phase) {
-      this.spinnerIdx = 0;
-      // One timer serves all phases: the callback re-reads spinnerPhase each
-      // tick so a thinking→outputting transition swaps frames without
-      // rebuilding the interval. The guard keeps TS happy; in practice phase
-      // is always set while the timer is live (cleared the instant it nulls).
-      if (!this.spinnerTimer) {
-        this.spinnerTimer = setInterval(() => {
-          const phase = this.spinnerPhase;
-          if (!phase) return;
-          this.spinnerIdx = (this.spinnerIdx + 1) % SPINNERS[phase].length;
-          this.tui.requestRender();
-        }, SPINNER_INTERVAL_MS);
-      }
-    } else {
-      if (this.spinnerTimer) clearInterval(this.spinnerTimer);
-      this.spinnerTimer = undefined;
-    }
-    this.tui.requestRender();
   }
 
   /** Request a re-render after external async state changes (e.g. git dirty
@@ -215,14 +169,7 @@ export class CardEditor extends CustomEditor {
     // thinking level / bash mode (same field the default editor reads), so
     // the frame retints in lockstep with no extra wiring.
     const border = this.borderColor;
-    const seg = this.frameProvider?.() ?? EMPTY_SEGMENTS;
-    // While the agent is active, the current phase spinner replaces the
-    // model text in the top-left slot — a moving indicator reads as "busy"
-    // more strongly than a static label. spinnerIdx is kept in range by
-    // setSpinner's timer, so no modulo is needed here.
-    const topLeft = this.spinnerPhase
-      ? `${RESET}${border(` ${SPINNERS[this.spinnerPhase][this.spinnerIdx]} `)}${seg.topLeft.trimStart()}`
-      : seg.topLeft;
+    const seg = this.frameProvider?.(border) ?? EMPTY_SEGMENTS;
 
     // The default Editor appends autocomplete rows *after* the bottom border.
     // So the real bottom border is the last row that still looks like one —
@@ -249,7 +196,7 @@ export class CardEditor extends CustomEditor {
       if (i === 0) {
         // Top border: rebuild with embedded status text (status takes
         // precedence over pi's plain ─ / "↑ N more" scroll indicator).
-        out.push(fitFrameRow(GLYPH.topLeft, GLYPH.topRight, topLeft, seg.topRight, width, border));
+        out.push(fitFrameRow(GLYPH.topLeft, GLYPH.topRight, seg.topLeft, seg.topRight, width, border));
       } else if (i === bottomIdx) {
         // ctx/cwd always sit just under the editor. With a popup below, this
         // border becomes a T-junction divider; without one it's the rounded

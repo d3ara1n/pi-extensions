@@ -6,12 +6,12 @@ Replaces pi's default editor and status bar with a unified rounded-corner shell 
 
 ## What shows up where
 
-- **Top border** — `  model ·  thinking-level ` (left) + pinned extension statuses (right, via `pinnedStatus` config)
-- **Bottom border** — `  ctx NN%/NNk|N.NM · ⚡cacheRead(total)  hitRate% · NN.N e2e t/s · $N.NNN ·  N ·  Nm ` (left) + `  ~/Projects (main +2 ~1 *4) ` (right, shows git branch plus staged, unstaged, and untracked file counts when in a repo; inside a linked worktree the branch carries an `@<name>` tag, e.g. `(feature-x @feature-x +2 ~1)`, so sibling worktrees of one repo are told apart at a glance). Response throughput defaults to client-observed end-to-end visible-text throughput, including local request preparation, network and queue latency, hidden reasoning, and visible generation. It can instead show generation throughput or be hidden; see [Throughput display](#throughput-display). A new turn clears the previous measurement, so unavailable samples never leave stale data in the border. Session cost includes assistant, tool, compaction, and branch-summary usage; the dollar segment is hidden when the provider reports no priced usage. ` N` counts persisted user messages on the current session branch, and the trailing timer counts whole minutes since the session's last activity — see [Idle timer](#idle-timer). Session hit rate and detailed response timing are available via `/editor-shell:status`.
+- **Top border** — ` activity ·  model ·  thinking-level ` (left) + pinned extension statuses (right, via `pinnedStatus` config). The activity indicator shows a phase-aware spinner while working and ` Nm` while idle — see [Activity indicator](#activity-indicator).
+- **Bottom border** — `  ctx NN%/NNk|N.NM · ⚡cacheRead(total)  hitRate% · NN.N e2e t/s · $N.NNN ·  N ` (left) + `  ~/Projects (main +2 ~1 *4) ` (right, shows git branch plus staged, unstaged, and untracked file counts when in a repo; inside a linked worktree the branch carries an `@<name>` tag, e.g. `(feature-x @feature-x +2 ~1)`, so sibling worktrees of one repo are told apart at a glance). Response throughput defaults to client-observed end-to-end visible-text throughput, including local request preparation, network and queue latency, hidden reasoning, and visible generation. It can instead show generation throughput or be hidden; see [Throughput display](#throughput-display). A new turn clears the previous measurement, so unavailable samples never leave stale data in the border. Session cost includes assistant, tool, compaction, and branch-summary usage; the dollar segment is hidden when the provider reports no priced usage. ` N` counts persisted user messages on the current session branch. Session hit rate and detailed response timing are available via `/editor-shell:status`.
 - **Below shell** — Auto-wrapping extension status line (all `setStatus` entries not pinned to the top)
 - **Border color** follows pi's thinking-level / bash-mode indicator automatically.
 
-All segments are re-read from live session state on every paint, so switching thinking level or burning context updates the frame on the next render with no extra wiring. When the agent is active, the current phase spinner (thinking/outputting/toolcall/exec) replaces the model text in the top-left slot.
+All segments are re-read from live session state on every paint, so switching thinking level or burning context updates the frame on the next render with no extra wiring. The activity indicator precedes the model label; its width follows its content.
 
 ## Configuration
 
@@ -47,12 +47,19 @@ In `~/.pi/agent/settings.json` under the `editorShell` key:
 
 The ` N` segment counts persisted user messages on the current session branch. Tool loops do not increase it, while steering and follow-up prompts count when they enter the branch. The value is rebuilt from branch history, so restored sessions, edited history, and branch switches show the correct branch-local count. Like the other optional stats, the segment stays hidden while the count is zero — a fresh session shows no counter.
 
-### Idle timer
+### Activity indicator
 
-The last segment of the bottom border shows how long the session has been idle: while the agent is active the entire timer segment, including its separator, is hidden, and a fresh session — no prompt sent yet — hides it too, since there is no idle interval to measure before anything has happened; it first appears at `0m` when the agent finishes its first turn. Idle time is shown in whole minutes since the last observable activity, floored — `4m` covers everything from 4:00 to 4:59. The anchor is seeded from the newest conversational entry timestamp when a session starts (messages only — the bootstrap entries a fresh session begins with don't count), so a restored session opens with its true idle time already on screen instead of restarting from zero. A shared 1 Hz tick repaints the border on minute rollovers (and only then), so the display stays live even when nothing else is happening.
+The first segment of the top border shows the session's activity:
 
-The timer is information, not an alarm: it renders in the theme's muted tone (the same secondary gray as the cwd display) by default. When the current model declares a prompt-cache lifetime (`promptCache` in pi's model catalog, `PI_CACHE_RETENTION=long` selects the long tier), the text turns amber within the last tenth of that lifetime and red past it — a hint that the next prompt will likely miss the provider's prompt cache. Models without a declared lifetime never indicate; unknown means "assume not expired."
+- **Working** — a spinner follows the current phase: thinking, outputting, tool-call generation, or tool execution. Its color follows the border.
+- **Idle** — ` Nm` counts whole minutes since the full agent run settled, including any automatic retries or queued continuations. It starts at `0m`; `4m` covers 4:00 through 4:59.
+- **Fresh session** — the segment and its separator stay hidden until the first run starts.
 
+A restored session seeds idle time from its newest conversational entry timestamp; bootstrap and bookkeeping entries do not count. One session-owned clock advances the spinner every 100 ms while working and checks idle time every second while idle. It repaints only when the displayed frame, minute, or color changes, and stays stopped before the first activity. Durations use wall-clock timestamps, so delayed ticks do not accumulate timing errors. Rebuilding the editor preserves the activity state and animation.
+
+Idle text uses the theme's muted tone by default. When the current model declares a prompt-cache lifetime (`promptCache` in pi's model catalog, `PI_CACHE_RETENTION=long` selects the long tier), it turns amber within the last tenth of that lifetime and red past it as a cache-age hint. Models without a declared lifetime stay muted.
+
+### Model display
 
 How the model is labeled in the top-left border (`"name"` by default):
 
@@ -124,6 +131,7 @@ Or add to `~/.pi/agent/settings.json`:
 - **Mutually exclusive** with other editor-replacing extensions (`border-status-editor`, `rainbow-editor`, `modal-editor`, …). Disable those when enabling this one — `setEditorComponent` is last-writer-wins.
 - When the content scrolls, pi's native `↑ N more` / `↓ N more` indicators are replaced by the embedded status text (status takes precedence).
 - Falls back to the default editor below `MIN_WIDTH` (20 columns).
+- The custom shell and its activity clock run only in TUI mode; RPC, print, and JSON modes retain their host UI.
 
 ## Dependencies
 

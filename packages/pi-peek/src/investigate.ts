@@ -14,7 +14,18 @@ const INVESTIGATOR_PROMPT = [
   "Keep reports concise unless the requester asks for detail.",
 ].join("\n");
 
-/** @internal Dependencies for a full-context, single-request investigation. */
+/** @internal Display-only token estimate for overflow diagnostics (~3.5 chars/token on tool-heavy records). */
+const CHARS_PER_TOKEN_ESTIMATE = 3.5;
+
+/** @internal Overflow diagnostics: what was sent, to what model, versus what window. */
+function overflowDetail(reference: string, model: Model<Api>, role: string): string {
+  const est = Math.round(reference.length / CHARS_PER_TOKEN_ESTIMATE);
+  return `Context limit reached: the active-context reference is ${reference.length} chars (~${est} tokens est.), ` +
+    `but ${model.provider}/${model.id} has a ${model.contextWindow}-token window. ` +
+    `The active context is bounded by the session's own model; configure a larger-context model for the peek "${role}" role.`;
+}
+
+/** @internal Dependencies for an active-context, single-request investigation. */
 export interface InvestigationDeps {
   snapshot: SessionSnapshot;
   model: Model<Api>;
@@ -69,7 +80,7 @@ export function createInvestigation(deps: InvestigationDeps): PeekInvestigation 
         const response = await abortable(stream.result(), signal);
         signal.throwIfAborted();
         if (isContextOverflow(response, model.contextWindow)) {
-          throw new PeekContextOverflowError(response.errorMessage);
+          throw new PeekContextOverflowError(overflowDetail(reference, model, cfg.role), response.errorMessage);
         }
         if (response.stopReason === "error" || response.stopReason === "aborted") {
           throw new Error(response.errorMessage || `peek: model response ${response.stopReason}.`);
@@ -96,7 +107,7 @@ export function createInvestigation(deps: InvestigationDeps): PeekInvestigation 
         // Some transports throw before producing an AssistantMessage.
         const message = error instanceof Error ? error.message : String(error);
         if (!(error instanceof PeekContextOverflowError) && getOverflowPatterns().some(pattern => pattern.test(message))) {
-          throw new PeekContextOverflowError(error);
+          throw new PeekContextOverflowError(overflowDetail(reference, model, cfg.role), error);
         }
         throw error;
       } finally {

@@ -4,7 +4,7 @@
 
 `/peek` overlay for [pi](https://github.com/earendil-works/pi) — investigate your own session without disturbing the main agent.
 
-Opens a centered overlay backed by a large-context `utility` model. Each question triggers one streaming investigation over the complete session text. The main agent keeps running, completely unaware.
+Opens a centered overlay backed by a large-context `utility` model. Each question triggers one streaming investigation over the session's active context. The main agent keeps running, completely unaware.
 
 ```
 ╭──────────────────────────────────────────────────╮
@@ -29,7 +29,7 @@ Opens a centered overlay backed by a large-context `utility` model. Each questio
 - **Streaming Markdown** — the report appears token-by-token with pi's native Markdown rendering and syntax highlighting
 - **Auto-height** — the message region grows with content up to ~80% of the terminal, then scrolls (↑/↓, auto-follows the tail while streaming)
 - **Message navigation** — prominent turn dividers and PageUp/PageDown jumps across the full local history (Fn+↑/Fn+↓ on MacBook)
-- **Multi-turn** — follow-ups reuse one complete snapshot and the previous questions/reports; no internal retrieval loop
+- **Multi-turn** — follow-ups reuse one fixed active-context snapshot and the previous questions/reports; no internal retrieval loop
 - **Live status** — header shows the main agent's current activity; the status line shows the utility model and cumulative tokens
 - **Limit notices** — upstream output/context limits are shown separately from report text, without automatic truncation, compression, or retries
 - **Read-after-burn** — closing aborts the investigation and discards its local reference and history; the main session is never touched

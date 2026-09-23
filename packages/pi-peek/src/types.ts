@@ -1,4 +1,4 @@
-/** Public contracts for ephemeral, full-context session investigations. */
+/** Public contracts for ephemeral, active-context session investigations. */
 
 export interface PeekConfig {
   /** Total deadline per question, including authentication and streaming. */
@@ -54,8 +54,8 @@ export interface InvestigateResult {
 /** Upstream context overflow; prior successful investigation turns remain intact. */
 export class PeekContextOverflowError extends Error {
   readonly code = "context_overflow";
-  constructor(cause?: unknown) {
-    super("Context limit reached.", { cause });
+  constructor(message = "Context limit reached.", cause?: unknown) {
+    super(message, { cause });
     this.name = "PeekContextOverflowError";
   }
 }
@@ -73,7 +73,7 @@ export interface PeekAPI {
   createInvestigation(options?: PeekReferenceOptions): PeekInvestigation;
   /** One question in a temporary investigation, disposed after completion or failure. */
   investigate(question: string, opts?: InvestigateOptions & PeekReferenceOptions): Promise<InvestigateResult>;
-  /** Complete text reference without token or character-budget truncation. */
+  /** Active-context text reference (compaction-aware view); never locally truncated. */
   serializeMainConversation(options?: PeekReferenceOptions): string;
   getMainAgentStatus(): MainAgentStatus;
 }

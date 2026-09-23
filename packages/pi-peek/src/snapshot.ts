@@ -6,14 +6,14 @@ interface RecordItem {
   thinking: string;
 }
 
-/** @internal Complete text snapshot; never holds references to mutable session entries. */
+/** @internal Snapshot of the session's active context view; never holds references to mutable session entries. */
 export class SessionSnapshot {
   readonly capturedAt: string;
   private records: RecordItem[] = [];
 
-  constructor(branch: readonly SessionEntry[], capturedAt = new Date().toISOString()) {
+  constructor(entries: readonly SessionEntry[], capturedAt = new Date().toISOString()) {
     this.capturedAt = capturedAt;
-    for (const entry of branch) {
+    for (const entry of entries) {
       if (entry.type === "message") {
         this.addMessage(entry.message);
       } else if (entry.type === "custom_message") {
@@ -73,8 +73,8 @@ export class SessionSnapshot {
 
   reference(includeThinking = false): string {
     const header = [
-      "Scope: complete recorded text on the current branch. Capture time is supplied with the question.",
-      "Compaction retained records may overlap original history.",
+      "Scope: the session's active context view — the compaction summary plus everything kept after it; exactly what the session's main assistant currently sees. Capture time is supplied with the question.",
+      "The compaction summary may overlap the retained messages that follow it.",
       includeThinking
         ? "Readable saved thinking is included where available; missing/redacted thinking cannot be reconstructed."
         : "Thinking is not included.",

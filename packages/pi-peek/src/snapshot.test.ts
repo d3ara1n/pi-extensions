@@ -20,6 +20,8 @@ test("reference preserves tool arguments, results and errors without thinking by
   const snapshot = new SessionSnapshot(branch, "2026-01-01T00:00:00Z");
   const reference = snapshot.reference();
   assert.match(reference, /"oldText":"before","newText":"after"/);
+  assert.match(reference, /active context view/);
+  assert.doesNotMatch(reference, /complete recorded/);
   assert.match(reference, /Tool result call1: edit; isError=true/);
   assert.match(reference, /saved patch/);
   assert.doesNotMatch(reference, /private saved rationale|SECRET_BASE64|opaque signature|redacted payload|encrypted secret/);

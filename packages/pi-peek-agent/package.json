@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-peek-agent",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "type": "module",
   "description": "Retrieve and summarize another pi session's records through pi-mesh without contacting its assistant.",
   "homepage": "https://github.com/d3ara1n/pi-extensions/tree/main/packages/pi-peek-agent#readme",

@@ -58,6 +58,24 @@ function rendered(component: { render(width: number): string[] }): string {
     .join("\n");
 }
 
+test("wait shows live activity when a grep call has multiple paths", () => {
+  const run: SubagentResult = {
+    role: "worker", task: "search sources", exitCode: -1, output: "", stderr: "",
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0, contextTokens: 0 },
+    activityLog: [
+      { kind: "toolCall", id: "grep-1", toolName: "grep", status: "running",
+        args: { pattern: "symbol", path: ["src", "packages"] } },
+    ],
+  };
+  const result = { content: [{ type: "text", text: "waiting: 1 running" }],
+    details: { entries: [{ id: "sub-1", role: "worker", result: run }] } };
+  for (const expanded of [false, true]) {
+    const view = rendered(renderWaitResult(result as any, { expanded, isPartial: true }, theme, { state: {} } as any));
+    assert.match(view, /sub-1/);
+    assert.match(view, /grep \/symbol\/ in src, packages/);
+  }
+});
+
 test("delegate call titles mark inherited conversation without changing isolated mode", () => {
   const isolated = rendered(renderDelegateCall({ role: "worker" } as any, theme, {} as any));
   const inherited = rendered(

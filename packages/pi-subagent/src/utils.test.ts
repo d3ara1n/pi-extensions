@@ -14,6 +14,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import * as os from "node:os";
 import {
   sanitizeFilename,
   isProviderError,
@@ -299,6 +300,10 @@ describe("previewArgs", () => {
     const r = previewArgs({ file_path: "/home/user/foo.ts" });
     assert.ok(r.includes("foo.ts"));
   });
+  test("path arrays are displayed without crashing", () => {
+    assert.equal(previewArgs({ path: [`${os.homedir()}/one.ts`, "src/two.ts"] }), "~/one.ts, src/two.ts");
+    assert.equal(previewArgs({ path: { unexpected: true } }), "(invalid path)");
+  });
   test("url is preserved for viewport-aware truncation", () => {
     assert.equal(previewArgs({ url: "https://example.com" }), "https://example.com");
     const longUrl = "https://" + "x".repeat(70);
@@ -546,6 +551,13 @@ describe("completionNoticeLines", () => {
 describe("formatToolCall newline sanitization", () => {
   const id = (_color: string, text: string) => text;
 
+  test("grep renders multiple paths and patterns from an overridden tool", () => {
+    assert.equal(
+      formatToolCall("grep", { pattern: ["first", "second"], path: [`${os.homedir()}/src`, "packages/src"] }, id),
+      "grep /first | second/ in ~/src, packages/src",
+    );
+    assert.equal(formatToolCall("grep", { pattern: "first", path: { unexpected: true } }, id), "grep /first/ in .");
+  });
   test("multi-line bash command renders as one line", () => {
     const out = formatToolCall("bash", { command: "echo a\necho b\n  echo c" }, id);
     assert.ok(!out.includes("\n"));

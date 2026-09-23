@@ -168,6 +168,16 @@ export function shortenPath(p: string): string {
   return p.startsWith(home) ? `~${p.slice(home.length)}` : p;
 }
 
+/** Render paths from tool arguments without assuming a particular tool schema. */
+function displayPaths(value: unknown, fallback: string): string {
+  if (typeof value === "string") return shortenPath(value);
+  if (Array.isArray(value)) {
+    const paths = value.filter((path): path is string => typeof path === "string");
+    return paths.length > 0 ? paths.map(shortenPath).join(", ") : fallback;
+  }
+  return fallback;
+}
+
 /** Flatten embedded newlines (multi-line bash commands, patterns, error
  *  messages) into single spaces so a row never spans multiple terminal lines.
  *  Every caller renders the result as ONE TUI row — inline rows join it with
@@ -204,8 +214,7 @@ function renderToolCall(
       return fg("muted", "$ ") + fg("toolOutput", command);
     }
     case "read": {
-      const rawPath = (args.file_path || args.path || "...") as string;
-      const filePath = shortenPath(rawPath);
+      const filePath = displayPaths(args.file_path || args.path, "...");
       const offset = args.offset as number | undefined;
       const limit = args.limit as number | undefined;
       let text = fg("accent", filePath);
@@ -217,24 +226,24 @@ function renderToolCall(
       return fg("muted", "read ") + text;
     }
     case "write": {
-      const rawPath = (args.file_path || args.path || "...") as string;
+      const filePath = displayPaths(args.file_path || args.path, "...");
       const content = (args.content || "") as string;
       const lines = content.split("\n").length;
-      let text = fg("muted", "write ") + fg("accent", shortenPath(rawPath));
+      let text = fg("muted", "write ") + fg("accent", filePath);
       if (lines > 1) text += fg("dim", ` (${lines} lines)`);
       return text;
     }
     case "edit": {
-      const rawPath = (args.file_path || args.path || "...") as string;
-      return fg("muted", "edit ") + fg("accent", shortenPath(rawPath));
+      const filePath = displayPaths(args.file_path || args.path, "...");
+      return fg("muted", "edit ") + fg("accent", filePath);
     }
     case "grep": {
-      const pattern = (args.pattern || "") as string;
-      const rawPath = (args.path || ".") as string;
+      const pattern = Array.isArray(args.pattern) ? args.pattern.join(" | ") : String(args.pattern ?? "");
+      const filePath = displayPaths(args.path ?? ".", ".");
       return (
         fg("muted", "grep ") +
         fg("accent", `/${pattern}/`) +
-        fg("dim", ` in ${shortenPath(rawPath)}`)
+        fg("dim", ` in ${filePath}`)
       );
     }
     case "find": {
@@ -789,8 +798,8 @@ export function freezeFrame(r: SubagentResult): SubagentResult {
 export function previewArgs(args: Record<string, unknown>): string {
   const command = args.command as string | undefined;
   if (command) return `$ ${command}`;
-  const fp = (args.file_path || args.path) as string | undefined;
-  if (fp) return shortenPath(fp);
+  const fp = args.file_path || args.path;
+  if (fp) return displayPaths(fp, "(invalid path)");
   const url = args.url as string | undefined;
   if (url) return url;
   const query = (args.query || args.pattern || args.regex || args.search) as string | undefined;

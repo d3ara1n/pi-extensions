@@ -38,3 +38,11 @@ export interface InvestigateResponseData {
   stopReason?: "stop" | "length";
   usage?: import("@d3ara1n/pi-peek").InvestigateResult["usage"];
 }
+
+/** Details carried by the peek tool's live partial results while streaming. */
+export interface InvestigateProgressData {
+  /** Peer-side investigation stage, e.g. "investigating" | "done" | "error". */
+  stage: string;
+  /** Characters released for display so far (post-envelope-filter). */
+  chars: number;
+}

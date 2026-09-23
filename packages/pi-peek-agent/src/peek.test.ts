@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { InvestigateOptions, PeekReferenceOptions } from "@d3ara1n/pi-peek";
+import { PROGRESS_THROTTLE_MS } from "./tool.ts";
 import register from "./index.ts";
 import { MESH_GLOBAL_KEY } from "../../pi-mesh/src/types.ts";
 import { PEEK_GLOBAL_KEY } from "../../pi-peek/src/types.ts";
@@ -106,6 +107,11 @@ test("remote client forwards progress, closes connections, and does not send aft
         requestCount++;
         requestData = data;
         options.onEmit("stage", { stage: "investigating" });
+        await new Promise(resolve => setTimeout(resolve, PROGRESS_THROTTLE_MS + 40));
+        options.onEmit("token", { delta: "<peek-summary>sum</peek-summary>\n<peek-report>remote report" });
+        await new Promise(resolve => setTimeout(resolve, PROGRESS_THROTTLE_MS + 40));
+        options.onEmit("token", { delta: "\nmore detail</peek-report>" });
+        options.onEmit("stage", { stage: "done" });
         return { report: "remote report\nmore detail", summary: "Detailed result ".repeat(40), snapshotAt: "fixed", stopReason: "length" };
       },
       close: () => { closed++; },
@@ -119,6 +125,16 @@ test("remote client forwards progress, closes connections, and does not send aft
     const result = await tool.execute("id", { question: "focus", includeThinking: true }, undefined, (update: unknown) => updates.push(update), { cwd: root });
     assert.deepEqual(requestData, { question: "focus", includeThinking: true });
     assert.match(JSON.stringify(updates), /investigating/);
+    assert.deepEqual(updates[0], { content: [], details: { stage: "connecting", chars: 0 } });
+    assert.deepEqual(updates[1], { content: [], details: { stage: "investigating", chars: 0 } });
+    // Each token push lands after the throttle window; accumulation carries across pushes.
+    assert.equal(updates.length, 5);
+    assert.deepEqual(updates[3], { content: [{ type: "text", text: "remote report\nmore detail" }], details: { stage: "investigating", chars: "remote report\nmore detail".length } });
+    assert.equal((updates[2] as any).content[0].text, "remote report");
+    const partial = updates[4] as any;
+    assert.equal(partial.details.stage, "done");
+    assert.equal(partial.details.chars, "remote report\nmore detail".length);
+    assert.equal(partial.content[0].text, "remote report\nmore detail");
     assert.equal(result.content[0].text, "remote report\nmore detail");
     assert.equal(result.details.snapshotAt, "fixed");
     assert.equal(result.details.summary, "Detailed result ".repeat(40));
@@ -130,12 +146,23 @@ test("remote client forwards progress, closes connections, and does not send aft
     assert.ok(collapsed.length < result.details.summary.length);
     const expanded = tool.renderResult(result, { expanded: true }, theme, { args: { question: "focus" }, isError: false }).render(200).join("\n");
     assert.match(expanded, /focus/);
-    assert.match(expanded, /remote report[^\n]*\nmore detail/);
+    assert.match(expanded, /remote report/);
+    assert.match(expanded, /more detail/);
     assert.doesNotMatch(expanded, /Detailed result/);
     const fallback = tool.renderResult({ content: [{ type: "text", text: "First report line\nmore detail" }], details: {} }, { expanded: false }, theme, { isError: false }).render(200)[0];
     assert.match(fallback, /^✓ First report line/);
     const multiline = tool.renderResult({ content: [{ type: "text", text: "Full report" }], details: { summary: "First\nsecond" } }, { expanded: false }, theme, { isError: false }).render(200)[0];
     assert.match(multiline, /^✓ First second/);
+    const partialCollapsed = tool.renderResult(partial, { expanded: false }, theme, { isError: false, isPartial: true }).render(60)[0];
+    assert.match(partialCollapsed, new RegExp(`^⏳ ${partial.details.stage} · ${partial.details.chars} chars`));
+    const partialExpanded = tool.renderResult(partial, { expanded: true }, theme, { args: { question: "focus" }, isPartial: true }).render(200).map((l: string) => l.trimEnd()).join("\n");
+    assert.match(partialExpanded, /focus/);
+    assert.match(partialExpanded, /remote report/);
+    assert.match(partialExpanded, /more detail/);
+    assert.doesNotMatch(partialExpanded, /peek-|investigating|chars/);
+    const connecting = tool.renderResult(updates[0], { expanded: true }, theme, { args: { question: "focus" }, isPartial: true }).render(200).map((l: string) => l.trimEnd()).join("\n");
+    assert.match(connecting, /focus/);
+    assert.match(connecting, /…/);
     assert.equal(closed, 1);
     abortDuringConnect = new AbortController();
     await assert.rejects(tool.execute("cancelled", { question: "never send" }, abortDuringConnect.signal, undefined, { cwd: root }), /cancelled during connect/);

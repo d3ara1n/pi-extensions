@@ -6,20 +6,27 @@
  * @d3ara1n/pi-mesh (its `mesh_list` tool) — resolvePeer/connect come from there.
  *
  * Rendering follows the built-in tool convention: the call cell already shows
- * the tool name, so renderResult MUST NOT repeat it. Collapsed shows the
- * supplied summary (or the first report line); expanded shows the original
- * question from ToolRenderContext.args above the complete report.
+ * the tool name, so renderResult MUST NOT repeat it. Collapsed shows the live
+ * "stage · chars" overview while running and the peer-supplied summary (or
+ * first report line) once done; expanded shows the question as a muted context
+ * line above the report — rendered as Markdown (same as subagent output and
+ * the /peek overlay), streamed live while the investigation runs, with no
+ * overview row.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getMarkdownTheme, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { Container, Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { Container, Markdown, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import type { Component } from "@earendil-works/pi-tui";
 import { getMeshAPI } from "@d3ara1n/pi-mesh";
 import type { PeerInfo } from "@d3ara1n/pi-mesh";
 import { loadPeekConfig } from "./config.ts";
+import { EnvelopeFilter } from "./envelope-filter.ts";
 import { INVESTIGATE_TYPE } from "./types.ts";
-import type { InvestigateResponseData } from "./types.ts";
+import type { InvestigateProgressData, InvestigateResponseData } from "./types.ts";
+
+/** @internal Throttle for live-progress pushes; token deltas arrive per token and are bursty. */
+export const PROGRESS_THROTTLE_MS = 250;
 
 /** Build a tool result (AgentToolResult requires a `details` field). */
 function textResult(text: string) {
@@ -27,6 +34,27 @@ function textResult(text: string) {
     content: [{ type: "text" as const, text }],
     details: undefined as unknown,
   };
+}
+
+/** Compact count for the live status line, e.g. 943 → "943", 12345 → "12.3k". */
+function formatCount(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+/** Collapsed overview while running: "stage · chars" from the partial details. */
+function partialStatus(details: unknown, fallback: string): string {
+  const progress = details as InvestigateProgressData | undefined;
+  if (!progress || typeof progress.stage !== "string" || typeof progress.chars !== "number") return fallback;
+  const chars = progress.chars > 0 ? ` · ${formatCount(progress.chars)} chars` : "";
+  return `${progress.stage}${chars}`;
+}
+
+/** Collapsed summary once done: the peer-supplied summary, or the first report line. */
+function finalSummary(details: unknown, firstLine: string): string {
+  const summary = (details as InvestigateResponseData | undefined)?.summary;
+  return summary?.replace(/\r\n|\r|\n/g, " ") || firstLine;
 }
 
 export function registerPeekTool(pi: ExtensionAPI): void {
@@ -69,7 +97,9 @@ export function registerPeekTool(pi: ExtensionAPI): void {
       return new Text(theme.fg("toolTitle", theme.bold("peek")) + theme.fg("accent", target), 0, 0);
     },
 
-    // Result cell: NO tool name. Collapsed = summary or first report line; expanded = question + full report.
+    // Result cell: NO tool name. Collapsed = live "stage · chars" overview
+    // while running, summary (or first report line) once done; expanded = the
+    // question as a muted context line above the report, streamed while running.
     renderResult(result, { expanded }, theme, context) {
       const isError = context.isError;
       const isPartial = context.isPartial;
@@ -78,39 +108,48 @@ export function registerPeekTool(pi: ExtensionAPI): void {
         : isError
           ? theme.fg("error", "✗")
           : theme.fg("success", "✓");
-      const text = result.content.filter(block => block.type === "text").map(block => block.text).join("\n\n") || "(no output)";
+      const text = result.content.filter(block => block.type === "text").map(block => block.text).join("\n\n")
+        || (isPartial ? "" : "(no output)");
 
       if (expanded) {
         const c = new Container();
-        // The question asked (shared across call/result renders for this tool
-        // call via ToolRenderContext.args). Surfaced above the report so the
-        // full Q&A exchange is visible when expanded.
+        // The question asked (ToolRenderContext.args) as a muted context line —
+        // no Q/A markers; the report below is the content the user expanded for.
         const question =
           typeof context.args?.question === "string" ? context.args.question : "";
         if (question.trim()) {
-          c.addChild(
-            new Text(
-              theme.fg("accent", theme.bold("Q")) +
-                theme.fg("dim", "  ") +
-                theme.fg("muted", question),
-              0,
-              0,
-            ),
-          );
-          c.addChild(new Text("", 0, 0));
+          // The separator "\n" is folded into the question line: Text("")
+          // renders zero lines, so a separate empty child would show nothing.
+          c.addChild(new Text(theme.fg("muted", question) + "\n", 0, 0));
         }
-        for (const ln of text.split("\n")) {
-          c.addChild(new Text(isError ? theme.fg("error", ln) : ln, 0, 0));
+        if (text) {
+          if (isError) {
+            for (const ln of text.split("\n")) {
+              c.addChild(new Text(theme.fg("error", ln), 0, 0));
+            }
+          } else {
+            // Report bodies are Markdown — same presentation as subagent
+            // output and the /peek overlay (headings, code, highlighting),
+            // for both the streamed partial and the final result.
+            c.addChild(new Markdown(text, 0, 0, getMarkdownTheme()));
+          }
+        } else {
+          // Running with no visible text yet — a quiet placeholder beats an
+          // empty hole (a finished empty result keeps "(no output)" above).
+          c.addChild(new Text(theme.fg("dim", "…"), 0, 0));
         }
         return c;
       }
-      // Only the display line is normalized; the full summary stays in details.
+
+      // Collapsed: the overview lives in partial details while running and is
+      // replaced by the summary (or first report line) when the result lands.
       const firstLine = text.split("\n").find((l) => l.trim()) ?? "";
-      const summary = !isPartial && !isError
-        ? (result.details as InvestigateResponseData | undefined)?.summary?.replace(/\r\n|\r|\n/g, " ")
-        : undefined;
-      const styled =
-        `${icon} ${isError ? theme.fg("error", firstLine) : theme.fg("dim", summary || firstLine)}`;
+      const line = isPartial
+        ? partialStatus(result.details, firstLine)
+        : isError
+          ? firstLine
+          : finalSummary(result.details, firstLine);
+      const styled = `${icon} ${isError && !isPartial ? theme.fg("error", line) : theme.fg("dim", line)}`;
       return {
         render: (width: number) => [truncateToWidth(styled, width, "…", true)],
         invalidate: () => {},
@@ -147,6 +186,25 @@ export function registerPeekTool(pi: ExtensionAPI): void {
 
       const peer = resolved as PeerInfo;
       const cfg = loadPeekConfig(ctx?.cwd);
+
+      // Live progress: partial details drive the collapsed "stage · chars"
+      // overview; partial content streams the report through the envelope
+      // filter (summary swallowed, tags stripped, malformed → raw passthrough)
+      // for the expanded view. Token deltas arrive per token and are bursty,
+      // so pushes are throttled; stage changes always push immediately.
+      const filter = new EnvelopeFilter();
+      let stage = "connecting";
+      let lastPushAt = 0;
+      const pushProgress = () => {
+        lastPushAt = Date.now();
+        const visible = filter.displayText;
+        onUpdate?.({
+          content: visible ? [{ type: "text" as const, text: visible }] : [],
+          details: { stage, chars: visible.length },
+        });
+      };
+      pushProgress();
+
       try {
         const conn = await mesh.connect(peer);
         try {
@@ -157,8 +215,14 @@ export function registerPeekTool(pi: ExtensionAPI): void {
             {
               signal, timeoutMs: cfg.investigateTimeoutMs,
               onEmit: (type, data) => {
-                if (type === "stage" && data && typeof data === "object" && "stage" in data && typeof data.stage === "string") {
-                  onUpdate?.(textResult(`Peek ${peer.name}: ${data.stage}`));
+                if (data && typeof data === "object") {
+                  if (type === "stage" && "stage" in data && typeof data.stage === "string") {
+                    stage = data.stage;
+                    pushProgress();
+                  } else if (type === "token" && "delta" in data && typeof data.delta === "string") {
+                    filter.push(data.delta);
+                    if (Date.now() - lastPushAt >= PROGRESS_THROTTLE_MS) pushProgress();
+                  }
                 }
               },
             },

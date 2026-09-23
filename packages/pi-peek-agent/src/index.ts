@@ -38,8 +38,13 @@ function formatInvestigationQuestion(question: string): string {
   ].join("\n");
 }
 
-function splitInvestigationReport(text: string): { report: string; summary?: string } {
-  const match = /^<peek-summary>([\s\S]*?)<\/peek-summary>\r?\n<peek-report>([\s\S]+?)<\/peek-report>\r?\n?$/.exec(text);
+/**
+ * @internal — exported for testing; the streaming EnvelopeFilter is validated
+ * against this completion-time split. Whitespace around and between the tag
+ * pairs is tolerated (models often emit a blank line between them).
+ */
+export function splitInvestigationReport(text: string): { report: string; summary?: string } {
+  const match = /^\s*<peek-summary>([\s\S]*?)<\/peek-summary>\s*<peek-report>([\s\S]+?)<\/peek-report>\s*$/.exec(text);
   if (!match || !match[1]?.trim()) return { report: text };
   return { summary: match[1], report: match[2]! };
 }

@@ -15,39 +15,12 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getPeekAPI } from "@d3ara1n/pi-peek";
+import { getPeekAPI, summarizePeekReport } from "@d3ara1n/pi-peek";
 import { MESH_READY_EVENT, tryGetMeshAPI } from "@d3ara1n/pi-mesh";
 import type { MeshAPI } from "@d3ara1n/pi-mesh";
 import { registerPeekTool } from "./tool.ts";
 import { INVESTIGATE_TYPE } from "./types.ts";
 import type { InvestigateRequestData, InvestigateResponseData } from "./types.ts";
-
-function formatInvestigationQuestion(question: string): string {
-  if (!question.trim()) throw new Error("peek: question must not be empty.");
-  return [
-    "Question (JSON string):",
-    JSON.stringify(question),
-    "",
-    "Answer the question using this exact format:",
-    "<peek-summary>One brief sentence in the requester's language stating the finding.</peek-summary>",
-    "<peek-report>Your complete, self-contained answer to the question.</peek-report>",
-    "",
-    "Write the summary on one line. Put the entire answer between <peek-report> and </peek-report>, including any Markdown or code.",
-    "Replace the example text; keep both tag pairs exactly as shown, with no preamble or text after the closing tag.",
-    "The summary is only for compact display; do not omit details from the report.",
-  ].join("\n");
-}
-
-/**
- * @internal — exported for testing; the streaming EnvelopeFilter is validated
- * against this completion-time split. Whitespace around and between the tag
- * pairs is tolerated (models often emit a blank line between them).
- */
-export function splitInvestigationReport(text: string): { report: string; summary?: string } {
-  const match = /^\s*<peek-summary>([\s\S]*?)<\/peek-summary>\s*<peek-report>([\s\S]+?)<\/peek-report>\s*$/.exec(text);
-  if (!match || !match[1]?.trim()) return { report: text };
-  return { summary: match[1], report: match[2]! };
-}
 
 export default function registerPeekAgentExtension(pi: ExtensionAPI): void {
   let registered = false;
@@ -61,13 +34,25 @@ export default function registerPeekAgentExtension(pi: ExtensionAPI): void {
     registered = true;
     mesh.serve(INVESTIGATE_TYPE, async (data, emit) => {
       const { question, includeThinking } = (data ?? {}) as InvestigateRequestData;
+      if (typeof question !== "string" || !question.trim())
+        throw new Error("peek: question must not be empty.");
       const peekApi = getPeekAPI();
-      const result = await peekApi.investigate(formatInvestigationQuestion(question ?? ""), {
+      const result = await peekApi.investigate(question ?? "", {
         includeThinking: includeThinking === true,
-        onToken: (delta) => emit("token", { delta }),
+        onToken: (delta) => emit("token", { delta, format: "report" }),
+        onReset: () => emit("report_reset", {}),
         onStage: (stage) => emit("stage", { stage }),
+        onProgress: (progress) => emit("progress", progress),
       });
-      return { ...splitInvestigationReport(result.report), snapshotAt: result.snapshotAt, usage: result.usage, stopReason: result.stopReason } satisfies InvestigateResponseData;
+      return {
+        report: result.report,
+        summary: result.summary ?? summarizePeekReport(result.report),
+        reportMode: result.reportMode ?? "fallback",
+        snapshotAt: result.snapshotAt,
+        usage: result.usage,
+        stopReason: result.stopReason,
+        ...(result.metrics ? { metrics: result.metrics } : {}),
+      } satisfies InvestigateResponseData;
     });
   }
 

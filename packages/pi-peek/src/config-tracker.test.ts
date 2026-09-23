@@ -10,13 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { loadPeekConfig } from "./config.ts";
-import {
-  getMainAgentStatus,
-  onToolEnd,
-  onToolStart,
-  onTurnEnd,
-  onTurnStart,
-} from "./tracker.ts";
+import { getMainAgentStatus, onToolEnd, onToolStart, onTurnEnd, onTurnStart } from "./tracker.ts";
 import { DEFAULT_PEEK_CONFIG } from "./types.ts";
 
 let globalDir = "";
@@ -71,12 +65,25 @@ test("loadPeekConfig lets a project block replace global fields wholesale", () =
   });
 });
 
-test("config bounds timer values and ignores legacy content budgets", () => {
+test("config bounds deadlines and rounds while accepting an explicit output budget", () => {
   writeJson(path.join(globalDir, "settings.json"), {
-    peek: { recentTurns: 1, referenceChars: 10, maxOutputTokens: 20, timeoutMs: 3_000_000_000 },
+    peek: {
+      recentTurns: 1,
+      referenceChars: 10,
+      maxOutputTokens: 2048,
+      maxRounds: 100,
+      timeoutMs: 3_000_000_000,
+    },
   });
-  assert.deepEqual(loadPeekConfig(projectDir), { role: "utility", timeoutMs: 2_147_483_647 });
-  writeJson(path.join(globalDir, "settings.json"), { peek: { timeoutMs: 0.5 } });
+  assert.deepEqual(loadPeekConfig(projectDir), {
+    role: "utility",
+    timeoutMs: 2_147_483_647,
+    maxRounds: 20,
+    maxOutputTokens: 2048,
+  });
+  writeJson(path.join(globalDir, "settings.json"), {
+    peek: { timeoutMs: 0.5, maxRounds: -1, maxOutputTokens: "8192" },
+  });
   assert.deepEqual(loadPeekConfig(projectDir), DEFAULT_PEEK_CONFIG);
 });
 

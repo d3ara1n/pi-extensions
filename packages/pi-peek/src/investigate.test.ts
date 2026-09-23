@@ -2,215 +2,616 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   createAssistantMessageEventStream,
-  type Api, type AssistantMessage, type Context, type Model, type SimpleStreamOptions,
+  type AssistantMessage,
+  type Context,
+  type Message,
+  type Model,
+  type Api,
+  type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
-import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import { createInvestigation, type InvestigationDeps } from "./investigate.ts";
+import { createInvestigation } from "./investigate.ts";
 import { SessionSnapshot } from "./snapshot.ts";
+import { estimateRequestTokens } from "./budget.ts";
 
-const model: Model<Api> = {
-  id: "fake", name: "Fake", api: "openai-completions", provider: "offline",
-  baseUrl: "https://invalid.example", reasoning: false, input: ["text"],
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128_000, maxTokens: 8192,
-};
-const makeSnapshot = () => new SessionSnapshot([
-  { type: "message", id: "source", message: { role: "assistant", content: [
-    { type: "text", text: "A recorded answer" }, { type: "thinking", thinking: "saved thinking evidence" },
-  ] } },
-] as unknown as SessionEntry[], "2026-01-01T00:00:00Z");
-function response(content: AssistantMessage["content"], stopReason: AssistantMessage["stopReason"] = "stop"): AssistantMessage {
+const model = {
+  id: "investigator",
+  provider: "offline",
+  api: "openai-completions",
+  contextWindow: 128000,
+  maxTokens: 32000,
+} as Model<Api>;
+function snapshot(text = "saved main conversation", capturedAt = "2026-01-01T00:00:00Z") {
+  return new SessionSnapshot([{ role: "user", content: text, timestamp: 1 }], { capturedAt });
+}
+function response(
+  text = "report",
+  stopReason: AssistantMessage["stopReason"] = "stop",
+): AssistantMessage {
   return {
-    role: "assistant", api: model.api, model: model.id, provider: model.provider,
-    content, stopReason, timestamp: 1,
-    usage: { input: 10, output: 20, cacheRead: 30, cacheWrite: 40, totalTokens: 100,
-      cost: { input: 0.01, output: 0.02, cacheRead: 0.03, cacheWrite: 0.04, total: 0.1 } },
+    role: "assistant",
+    content: text ? [{ type: "text", text }] : [],
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    stopReason,
+    timestamp: 2,
+    usage: {
+      input: 10,
+      output: 5,
+      cacheRead: 2,
+      cacheWrite: 1,
+      totalTokens: 18,
+      cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+    },
   };
 }
-const text = (value: string) => response([{ type: "text", text: value }]);
-type Request = { context: Context; options: SimpleStreamOptions };
-function fakeStream(messages: AssistantMessage[], requests: Request[]): InvestigationDeps["stream"] {
-  return async (context, options) => {
-    requests.push({ context: structuredClone(context), options });
-    const message = messages.shift();
-    assert.ok(message, "unexpected model request");
-    const stream = createAssistantMessageEventStream();
-    stream.push({ type: "start", partial: message });
-    message.content.forEach((b, contentIndex) => {
-      if (b.type === "text") stream.push({ type: "text_delta", contentIndex, delta: b.text, partial: message });
+function call(
+  name: string,
+  args: Extract<AssistantMessage["content"][number], { type: "toolCall" }>["arguments"],
+  id = "call",
+) {
+  const message = response("Let me inspect the evidence.", "toolUse");
+  message.content.push({ type: "toolCall", name, arguments: args, id });
+  return message;
+}
+function streamOf(message: AssistantMessage) {
+  const stream = createAssistantMessageEventStream();
+  stream.push({ type: "start", partial: { ...message, content: [] } });
+  for (const block of message.content)
+    if (block.type === "text")
+      stream.push({ type: "text_delta", contentIndex: 0, delta: block.text, partial: message });
+  if (message.stopReason === "error" || message.stopReason === "aborted")
+    stream.push({ type: "error", reason: message.stopReason, error: message });
+  else
+    stream.push({
+      type: "done",
+      reason: message.stopReason as "stop" | "length" | "toolUse",
+      message,
     });
-    if (message.stopReason === "error" || message.stopReason === "aborted") stream.push({ type: "error", reason: message.stopReason, error: message });
-    else stream.push({ type: "done", reason: message.stopReason as "stop", message });
-    return stream;
-  };
+  return stream;
+}
+function textOf(messages: Message[]) {
+  return JSON.stringify(messages);
 }
 
-test("each question uses one tool-free request with a stable reference and complete prior reports", async () => {
-  const requests: Request[] = [];
-  const investigation = createInvestigation({ snapshot: makeSnapshot(), model, stream: fakeStream([text("first"), text("second")], requests) });
-  let streamed = "";
-  try {
-    const first = await investigation.investigate("Question one", { onToken: delta => { streamed += delta; } });
-    assert.equal(first.report, "first");
-    assert.equal(streamed, first.report);
-    assert.equal((await investigation.investigate("Question two")).report, "second");
-    assert.equal(requests.length, 2);
-    assert.equal(requests[0]!.context.systemPrompt, requests[1]!.context.systemPrompt);
-    assert.equal(requests[0]!.context.tools, undefined);
-    assert.equal(requests[0]!.options.toolChoice, undefined);
-    assert.equal(requests[0]!.options.maxTokens, model.maxTokens);
-    assert.doesNotMatch(requests[0]!.context.systemPrompt!, /saved thinking evidence/);
-    assert.equal(requests[1]!.context.messages.length, 3);
-    assert.equal(requests[0]!.options.cacheRetention, "short");
-    assert.deepEqual(first.usage, { input: 10, output: 20, cacheRead: 30, cacheWrite: 40, total: 100, cost: 0.1 });
-  } finally { investigation.dispose(); }
+test("search/read/report loop retains call pairing, hides intermediate text and accumulates usage", async () => {
+  const records = new SessionSnapshot([
+    { role: "user", content: "What failed?", timestamp: 1 },
+    {
+      ...response(),
+      content: [
+        { type: "toolCall", id: "source", name: "bash", arguments: { command: "node --test" } },
+      ],
+    },
+    {
+      role: "toolResult",
+      toolCallId: "source",
+      toolName: "bash",
+      isError: true,
+      content: [{ type: "text", text: "distinctive-error: expected 2, received 3" }],
+      timestamp: 3,
+    },
+  ]);
+  const requests: Context[] = [];
+  const stages: string[] = [];
+  const visible: string[] = [];
+  const queue = [
+    call("search_session", { query: "distinctive-error" }, "search1"),
+    call("read_session", { ids: ["T1"] }, "read1"),
+    response("The test expected 2 but received 3 (T1)."),
+  ];
+  const investigation = createInvestigation({
+    snapshot: records,
+    model,
+    stream: async (context, options) => {
+      requests.push(structuredClone(context));
+      assert.equal(options.maxTokens, 8192);
+      assert.equal(options.cacheRetention, "short");
+      return streamOf(queue.shift()!);
+    },
+  });
+  const result = await investigation.investigate("Explain the failure.", {
+    onToken: (text) => visible.push(text),
+    onStage: (stage) => stages.push(stage),
+  });
+  assert.equal(requests.length, 3);
+  assert.doesNotMatch(requests[0]!.systemPrompt!, /distinctive-error/);
+  assert.deepEqual(
+    requests[0]!.tools?.map((t) => t.name),
+    ["search_session", "read_session"],
+  );
+  assert.match(textOf(requests[1]!.messages), /distinctive-error/);
+  assert.match(textOf(requests[2]!.messages), /node --test/);
+  for (const context of requests.slice(1)) {
+    const calls = context.messages
+      .filter((m) => m.role === "assistant")
+      .flatMap((m) => m.content.filter((b) => b.type === "toolCall"));
+    const results = context.messages.filter((m) => m.role === "toolResult");
+    assert.deepEqual(
+      results.map((m) => m.toolCallId),
+      calls.map((c) => c.id),
+    );
+  }
+  assert.deepEqual(visible, [result.report]);
+  assert.doesNotMatch(visible.join(""), /Let me inspect/);
+  assert.ok(stages.includes("searching") && stages.includes("reading"));
+  assert.equal(stages.at(-1), "done");
+  assert.deepEqual(result.usage, {
+    input: 30,
+    output: 15,
+    cacheRead: 6,
+    cacheWrite: 3,
+    total: 54,
+    cost: 0.09,
+  });
+  investigation.dispose();
 });
 
-test("thinking inclusion is explicit and fixed for the lifetime of the investigation", async () => {
-  const requests: Request[] = [];
-  const investigation = createInvestigation({ snapshot: makeSnapshot(), model, includeThinking: true, stream: fakeStream([text("first"), text("second")], requests) });
-  try {
-    await investigation.investigate("What does the saved thinking say?");
-    await investigation.investigate("Explain it");
-    assert.match(requests[0]!.context.systemPrompt!, /saved thinking evidence/);
-    assert.equal(requests[0]!.context.systemPrompt, requests[1]!.context.systemPrompt);
-    assert.equal(requests.length, 2);
-  } finally { investigation.dispose(); }
+test("direct answers need one request; follow-ups retain reports but not retrieval scratch history", async () => {
+  const requests: Context[] = [];
+  const queue = [
+    call("read_session", { ids: ["U1"] }),
+    response("first report"),
+    response("follow-up report"),
+  ];
+  const investigation = createInvestigation({
+    snapshot: snapshot(),
+    model,
+    stream: async (context) => {
+      requests.push(structuredClone(context));
+      return streamOf(queue.shift()!);
+    },
+  });
+  await investigation.investigate("first question");
+  await investigation.investigate("second question");
+  assert.equal(requests.length, 3);
+  assert.equal(requests[0]!.systemPrompt, requests[2]!.systemPrompt);
+  assert.equal(requests[2]!.messages.length, 3);
+  assert.match(textOf(requests[2]!.messages), /first question|first report|second question/);
+  assert.doesNotMatch(textOf(requests[2]!.messages), /toolResult|Let me inspect/);
+  investigation.dispose();
 });
 
-test("large references, questions and reports pass through without local context guards or truncation", async () => {
-  const source = `HEAD${"界".repeat(300_000)}TAIL`;
-  const question = "question".repeat(30_000);
-  const report = `  ${"report".repeat(30_000)}\n`;
-  const snapshot = new SessionSnapshot([{ type: "message", id: "a", message: { role: "user", content: source } }] as unknown as SessionEntry[]);
-  const requests: Request[] = [];
-  const investigation = createInvestigation({ snapshot, model, stream: fakeStream([text(report)], requests) });
-  try {
-    const result = await investigation.investigate(question);
-    assert.ok(requests[0]!.context.systemPrompt!.includes(source));
-    assert.ok(JSON.stringify(requests[0]!.context.messages).includes(question));
-    assert.equal(result.report, report);
-    assert.equal(result.stopReason, "stop");
-  } finally { investigation.dispose(); }
+test("tool mistakes are recoverable and the last round is tool-free", async () => {
+  const requests: Context[] = [];
+  const choices: SimpleStreamOptions["toolChoice"][] = [];
+  const stages: string[] = [];
+  const investigation = createInvestigation({
+    snapshot: snapshot(),
+    model,
+    config: { maxRounds: 2 },
+    stream: async (context, options) => {
+      choices.push(options.toolChoice);
+      requests.push(structuredClone(context));
+      return streamOf(
+        requests.length === 1
+          ? call("bash", { command: "touch forbidden" })
+          : response("The requested evidence is unavailable."),
+      );
+    },
+  });
+  await investigation.investigate("question", { onStage: (stage) => stages.push(stage) });
+  assert.deepEqual(choices, [undefined, "none"]);
+  assert.match(
+    textOf(requests[1]!.messages),
+    /Unexpected tool argument|Unknown investigation tool/,
+  );
+  assert.match(textOf(requests[1]!.messages), /tool calls are disabled/);
+  assert.ok(stages.includes("outputting"));
+  investigation.dispose();
 });
 
-test("upstream context errors are classified without retrying or dropping prior successful turns", async () => {
-  const requests: Request[] = [];
-  const failure = response([], "error");
-  failure.errorMessage = "prompt is too long: 200000 tokens > 128000 maximum";
-  const investigation = createInvestigation({ snapshot: makeSnapshot(), model, stream: fakeStream([text("first"), failure, text("after")], requests) });
-  try {
-    await investigation.investigate("first");
-    await assert.rejects(investigation.investigate("failed question"), { code: "context_overflow" });
-    assert.equal(requests.length, 2);
-    await investigation.investigate("follow-up");
-    assert.equal(requests[2]!.context.messages.length, 3);
-    assert.doesNotMatch(JSON.stringify(requests[2]!.context.messages), /failed question/);
-    assert.equal(requests[0]!.context.systemPrompt, requests[2]!.context.systemPrompt);
-  } finally { investigation.dispose(); }
+test("input budgets cover huge source text and retrieved results on a smaller model", async () => {
+  const smallModel = { ...model, contextWindow: 8000, maxTokens: 2000 };
+  const choices: SimpleStreamOptions["toolChoice"][] = [];
+  const requests: Context[] = [];
+  const investigation = createInvestigation({
+    snapshot: snapshot("界".repeat(100000)),
+    model: smallModel,
+    stream: async (context, options) => {
+      choices.push(options.toolChoice);
+      requests.push(structuredClone(context));
+      return streamOf(
+        requests.length === 1
+          ? call("read_session", { ids: ["U1"], limit: 12000 })
+          : response("Only a bounded excerpt was inspected."),
+      );
+    },
+  });
+  await investigation.investigate("What was saved?");
+  const budget = (8000 - 1000) * 0.8;
+  assert.ok(requests.every((context) => estimateRequestTokens(context) <= budget));
+  assert.equal(choices[1], "none");
+  assert.match(textOf(requests[1]!.messages), /tool calls are disabled/);
+  assert.match(textOf(requests[1]!.messages), /abbreviated|omitted/);
+  investigation.dispose();
 });
 
-test("context errors thrown during stream setup are also classified", async () => {
-  let requests = 0;
-  const investigation = createInvestigation({ snapshot: makeSnapshot(), model, stream: async () => {
-    requests++;
-    throw new Error("maximum context length is 128000 tokens");
-  } });
-  try {
-    await assert.rejects(investigation.investigate("Question"), { code: "context_overflow" });
-    assert.equal(requests, 1);
-  } finally { investigation.dispose(); }
+test("provider overflow shrinks requests with bounded retries; a failed question does not enter history", async () => {
+  const requests: Context[] = [];
+  let fail = true;
+  const overflow = response("", "error");
+  overflow.errorMessage = "prompt is too long: 200000 tokens > 128000 maximum";
+  const investigation = createInvestigation({
+    snapshot: new SessionSnapshot(
+      Array.from({ length: 40 }, (_, timestamp) => ({
+        role: "user" as const,
+        content: "x".repeat(3000),
+        timestamp,
+      })),
+    ),
+    model,
+    stream: async (context) => {
+      requests.push(structuredClone(context));
+      return streamOf(fail ? overflow : response("success"));
+    },
+  });
+  await assert.rejects(
+    investigation.investigate("failed question"),
+    (error: any) => error.code === "context_overflow",
+  );
+  assert.equal(requests.length, 3);
+  assert.ok(estimateRequestTokens(requests[1]!) < estimateRequestTokens(requests[0]!));
+  assert.ok(estimateRequestTokens(requests[2]!) < estimateRequestTokens(requests[1]!));
+  fail = false;
+  await investigation.investigate("new question");
+  assert.doesNotMatch(textOf(requests.at(-1)!.messages), /failed question/);
+  assert.equal(requests.at(-1)!.messages.length, 1);
+  investigation.dispose();
 });
 
-test("an upstream length stop preserves the exact partial report with separate metadata and no auto-continuation", async () => {
-  const requests: Request[] = [];
-  const partial = response([{ type: "text", text: "  partial report\n" }], "length");
-  const investigation = createInvestigation({ snapshot: makeSnapshot(), model, stream: fakeStream([partial, text("continued")], requests) });
-  try {
-    const result = await investigation.investigate("first");
-    assert.equal(result.stopReason, "length");
-    assert.equal(result.report, "  partial report\n");
-    assert.equal(requests.length, 1);
-    await investigation.investigate("continue");
-    assert.equal(requests.length, 2);
-    assert.deepEqual(requests[1]!.context.messages[1], partial);
-  } finally { investigation.dispose(); }
+test("overflow retry can recover without rerunning retrieval or leaking failed text", async () => {
+  const smallModel = { ...model, contextWindow: 12000 };
+  const requests: Context[] = [];
+  const overflow = response("rejected text", "error");
+  overflow.errorMessage = "maximum context length exceeded";
+  const queue = [call("read_session", { ids: ["U1"] }), overflow, response("recovered")];
+  const visible: string[] = [];
+  const investigation = createInvestigation({
+    snapshot: snapshot("a".repeat(10000)),
+    model: smallModel,
+    stream: async (context) => {
+      requests.push(structuredClone(context));
+      return streamOf(queue.shift()!);
+    },
+  });
+  const result = await investigation.investigate("question", {
+    onToken: (delta) => visible.push(delta),
+  });
+  assert.equal(result.report, "recovered");
+  assert.deepEqual(visible, ["recovered"]);
+  assert.ok(estimateRequestTokens(requests[2]!) < estimateRequestTokens(requests[1]!));
+  assert.equal(result.usage.total, 54);
+  investigation.dispose();
 });
 
-test("unexpected tools and terminal states fail without executing or looping", async () => {
-  const toolResponse = response([{ type: "toolCall", id: "call", name: "read_record", arguments: { id: "M1" } }], "toolUse");
-  for (const message of [toolResponse, ...(["error", "aborted", "deferred", "toolUse"] as const).map(reason => response([], reason))]) {
-    const requests: Request[] = [];
-    const investigation = createInvestigation({ snapshot: makeSnapshot(), model, stream: fakeStream([message], requests) });
-    try {
-      await assert.rejects(investigation.investigate("Question"), /response|stop reason/);
-      assert.equal(requests.length, 1);
-    } finally { investigation.dispose(); }
+test("output-limited final reports remain verbatim and empty reports are rejected", async () => {
+  const queue = [response("partial report", "length"), response("", "stop")];
+  const investigation = createInvestigation({
+    snapshot: snapshot(),
+    model,
+    config: { maxRounds: 1 },
+    stream: async () => streamOf(queue.shift()!),
+  });
+  const result = await investigation.investigate("question");
+  assert.equal(result.report, "partial report");
+  assert.equal(result.stopReason, "length");
+  await assert.rejects(investigation.investigate("empty"), /empty report/);
+  investigation.dispose();
+});
+
+test("disposal, timeout and external cancellation interrupt pending transport setup", async () => {
+  for (const action of ["dispose", "timeout", "cancel"] as const) {
+    let signal: AbortSignal | undefined;
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const external = new AbortController();
+    const investigation = createInvestigation({
+      snapshot: snapshot(),
+      model,
+      config: { timeoutMs: action === "timeout" ? 20 : 1000 },
+      stream: async (_context, options) => {
+        signal = options.signal;
+        started();
+        return new Promise(() => {});
+      },
+    });
+    const pending = investigation.investigate("question", { signal: external.signal });
+    await ready;
+    await assert.rejects(investigation.investigate("concurrent"), /already running/);
+    if (action === "dispose") investigation.dispose();
+    if (action === "cancel") external.abort(new Error("external cancellation"));
+    await assert.rejects(pending, /closed|timed out|external cancellation/);
+    assert.equal(signal?.aborted, true);
+    investigation.dispose();
+    investigation.dispose();
+    await assert.rejects(investigation.investigate("closed"), /closed/);
   }
 });
 
-test("dispose cancels in-flight work and rejects further questions", async () => {
-  let started!: () => void;
-  const ready = new Promise<void>(resolve => { started = resolve; });
+test("callback failures abort transport and leave successful history unchanged", async () => {
+  const requests: Context[] = [];
   let signal: AbortSignal | undefined;
-  const investigation = createInvestigation({ snapshot: makeSnapshot(), model, stream: async (_context, options) => {
-    signal = options.signal;
-    started();
-    return createAssistantMessageEventStream();
-  } });
-  const pending = investigation.investigate("Question");
-  await ready;
-  await assert.rejects(investigation.investigate("Concurrent"), /already running/);
-  investigation.dispose();
-  investigation.dispose();
-  await assert.rejects(pending, /investigation closed/);
+  const investigation = createInvestigation({
+    snapshot: snapshot(),
+    model,
+    stream: async (context, options: SimpleStreamOptions) => {
+      requests.push(structuredClone(context));
+      signal = options.signal;
+      return streamOf(response("final report"));
+    },
+  });
+  await assert.rejects(
+    investigation.investigate("failed", {
+      onToken: () => {
+        throw new Error("consumer failed");
+      },
+    }),
+    /consumer failed/,
+  );
   assert.equal(signal?.aborted, true);
-  await assert.rejects(investigation.investigate("Later"), /closed/);
+  await investigation.investigate("next");
+  assert.equal(requests[1]!.messages.length, 1);
+  investigation.dispose();
 });
 
-test("callback failures abort the transport and leave history uncommitted", async () => {
-  let signal: AbortSignal | undefined;
-  const requests: Request[] = [];
-  const stream = fakeStream([text("partial"), text("retry")], requests);
-  const investigation = createInvestigation({ snapshot: makeSnapshot(), model, stream: async (context, options) => {
-    signal = options.signal;
-    return stream(context, options);
-  } });
+test("snapshot timestamps stay outside the reusable system prefix", async () => {
+  const contexts: Context[] = [];
+  for (const capturedAt of ["2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"]) {
+    const investigation = createInvestigation({
+      snapshot: snapshot("same saved text", capturedAt),
+      model,
+      stream: async (context) => {
+        contexts.push(context);
+        return streamOf(response());
+      },
+    });
+    await investigation.investigate("question");
+    investigation.dispose();
+  }
+  assert.equal(contexts[0]!.systemPrompt, contexts[1]!.systemPrompt);
+  assert.notEqual(textOf(contexts[0]!.messages), textOf(contexts[1]!.messages));
+});
+
+test("token rate limits are not retried or mislabeled as context overflow", async () => {
+  for (const thrown of [false, true]) {
+    let requests = 0;
+    const investigation = createInvestigation({
+      snapshot: snapshot(),
+      model,
+      stream: async () => {
+        requests++;
+        const error = "rate limit: too many tokens";
+        if (thrown) throw new Error(error);
+        const failure = response("", "error");
+        failure.errorMessage = error;
+        return streamOf(failure);
+      },
+    });
+    await assert.rejects(investigation.investigate("question"), (error: any) => {
+      assert.equal(error.message, "rate limit: too many tokens");
+      assert.notEqual(error.code, "context_overflow");
+      return true;
+    });
+    assert.equal(requests, 1);
+    investigation.dispose();
+  }
+});
+
+test("an irreducibly large question fails locally without calling the provider", async () => {
+  let requests = 0;
+  const investigation = createInvestigation({
+    snapshot: snapshot(),
+    model: { ...model, contextWindow: 8000 },
+    stream: async () => {
+      requests++;
+      return streamOf(response());
+    },
+  });
+  await assert.rejects(
+    investigation.investigate("question ".repeat(10000)),
+    (error: any) => error.code === "context_overflow",
+  );
+  assert.equal(requests, 0);
+  investigation.dispose();
+});
+
+test("tagged report text streams in the same model request while preamble and summary stay hidden", async () => {
+  const requests: Context[] = [];
+  const chunks: string[] = [];
+  const progress: import("./types.ts").InvestigateProgress[] = [];
+  const output = createAssistantMessageEventStream();
+  const investigation = createInvestigation({
+    snapshot: snapshot(),
+    model,
+    stream: async (context, options) => {
+      requests.push(structuredClone(context));
+      assert.equal(options.toolChoice, undefined);
+      return output;
+    },
+  });
+  const pending = investigation.investigate("question", {
+    onToken: (text) => chunks.push(text),
+    onProgress: (value) => progress.push(value),
+  });
   try {
-    await assert.rejects(investigation.investigate("failed", { onToken: () => { throw new Error("consumer failed"); } }), /consumer failed/);
-    assert.equal(signal?.aborted, true);
-    await investigation.investigate("retry");
-    assert.equal(requests[1]!.context.messages.length, 1);
-  } finally { investigation.dispose(); }
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(requests.length, 1);
+    assert.deepEqual(
+      requests[0]!.tools?.map((tool) => tool.name),
+      ["search_session", "read_session"],
+    );
+    const prefix =
+      "I now have sufficient evidence. <peek-summary>Short finding</peek-summary> between <peek-report>";
+    const raw = prefix + "# Report\nEvidence.</peek-report> tail";
+    const message = response(raw);
+    message.content.unshift({ type: "thinking", thinking: "PRIVATE_REASONING" });
+    output.push({ type: "start", partial: message });
+    output.push({ type: "thinking_start", contentIndex: 0, partial: message });
+    output.push({
+      type: "thinking_delta",
+      contentIndex: 0,
+      delta: "PRIVATE_REASONING",
+      partial: message,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(progress.at(-1)?.stage, "thinking");
+    assert.deepEqual(chunks, []);
+    output.push({ type: "text_start", contentIndex: 1, partial: message });
+    output.push({ type: "text_delta", contentIndex: 1, delta: prefix, partial: message });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(progress.at(-1)?.stage, "outputting");
+    assert.equal(progress.at(-1)?.chars, 0);
+    assert.deepEqual(chunks, []);
+    output.push({ type: "text_delta", contentIndex: 1, delta: "# Report\n", partial: message });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(chunks.join(""), "# Report\n");
+    assert.equal(progress.at(-1)?.phase, "report");
+    output.push({
+      type: "text_delta",
+      contentIndex: 1,
+      delta: "Evidence.</peek-report> tail",
+      partial: message,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(chunks.join(""), "# Report\nEvidence.");
+    output.push({ type: "done", reason: "stop", message });
+    const result = await pending;
+    assert.equal(result.report, chunks.join(""));
+    assert.equal(result.summary, "Short finding");
+    assert.equal(result.reportMode, "tagged");
+    assert.equal(result.metrics?.requests, 1);
+    assert.equal(result.metrics?.toolCalls, 0);
+    assert.equal(progress.at(-1)?.chars, result.report.length);
+    assert.doesNotMatch(
+      JSON.stringify(progress) + chunks.join(""),
+      /PRIVATE_REASONING|sufficient evidence|peek-summary|peek-report|between|tail/,
+    );
+  } finally {
+    investigation.dispose();
+    await pending.catch(() => {});
+  }
 });
 
-test("iterator failures abort the transport", async () => {
-  let signal: AbortSignal | undefined;
-  const investigation = createInvestigation({ snapshot: makeSnapshot(), model, stream: async (_context, options) => {
-    signal = options.signal;
-    const stream = createAssistantMessageEventStream();
-    stream[Symbol.asyncIterator] = () => ({ next: async () => { throw new Error("iterator failed"); } });
-    return stream;
-  } });
+test("untagged terminal text uses only the last text block without an additional model request", async () => {
+  const output = createAssistantMessageEventStream();
+  let requests = 0;
+  const chunks: string[] = [];
+  const investigation = createInvestigation({
+    snapshot: snapshot(),
+    model,
+    stream: async () => {
+      requests++;
+      return output;
+    },
+  });
+  const pending = investigation.investigate("question", { onToken: (text) => chunks.push(text) });
   try {
-    await assert.rejects(investigation.investigate("Question"), /iterator failed/);
-    assert.equal(signal?.aborted, true);
-  } finally { investigation.dispose(); }
+    const message = response("private explanation");
+    message.content.push({ type: "text", text: "fallback report" });
+    output.push({ type: "start", partial: message });
+    output.push({
+      type: "text_delta",
+      contentIndex: 0,
+      delta: "private explanation",
+      partial: message,
+    });
+    output.push({
+      type: "text_delta",
+      contentIndex: 1,
+      delta: "fallback report",
+      partial: message,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(chunks, []);
+    output.push({ type: "done", reason: "stop", message });
+    const result = await pending;
+    assert.equal(requests, 1);
+    assert.deepEqual(chunks, ["fallback report"]);
+    assert.equal(result.reportMode, "fallback");
+    assert.equal(result.summary, "fallback report");
+  } finally {
+    investigation.dispose();
+    await pending.catch(() => {});
+  }
 });
 
-test("independent investigations preserve the system prefix across different capture times", async () => {
-  const requests: Request[] = [];
-  const investigations = ["2026-01-01T00:00:00Z", "2026-01-01T01:00:00Z"].map(capturedAt => createInvestigation({
-    snapshot: new SessionSnapshot([], capturedAt), model, stream: fakeStream([text("report")], requests),
-  }));
+test("a failure after a visible tagged prefix never triggers a replay", async () => {
+  const output = createAssistantMessageEventStream();
+  let requests = 0;
+  const chunks: string[] = [];
+  const stages: string[] = [];
+  const investigation = createInvestigation({
+    snapshot: snapshot(),
+    model,
+    stream: async () => {
+      requests++;
+      return output;
+    },
+  });
+  const pending = investigation.investigate("question", {
+    onToken: (text) => chunks.push(text),
+    onStage: (stage) => stages.push(stage),
+  });
+  const rejected = assert.rejects(pending, (error: any) => error.code === "context_overflow");
   try {
-    for (const investigation of investigations) await investigation.investigate("Question");
-    assert.equal(requests[0]!.context.systemPrompt, requests[1]!.context.systemPrompt);
-    assert.notDeepEqual(requests[0]!.context.messages, requests[1]!.context.messages);
-  } finally { investigations.forEach(c => c.dispose()); }
+    const failed = response("<peek-report>partial report", "error");
+    failed.errorMessage = "maximum context length exceeded";
+    output.push({ type: "start", partial: failed });
+    output.push({
+      type: "text_delta",
+      contentIndex: 0,
+      delta: "<peek-report>partial report",
+      partial: failed,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(chunks, ["partial report"]);
+    output.push({ type: "error", reason: "error", error: failed });
+    await rejected;
+    assert.equal(requests, 1);
+    assert.equal(stages.at(-1), "error");
+    assert.ok(!stages.includes("retrying"));
+  } finally {
+    investigation.dispose();
+    await pending.catch(() => {});
+  }
 });
 
-test("the deadline also bounds stalled stream setup", async () => {
-  const investigation = createInvestigation({ snapshot: makeSnapshot(), model, config: { timeoutMs: 15 }, stream: () => new Promise(() => {}) });
-  try { await assert.rejects(investigation.investigate("Question"), /timed out/); }
-  finally { investigation.dispose(); }
+test("tagged text followed by tool calls is reset before the later terminal report", async () => {
+  const first = call("read_session", { ids: ["U1"] });
+  first.content[0] = { type: "text", text: "<peek-report>provisional</peek-report>" };
+  const queue = [
+    first,
+    response(
+      "preamble<peek-summary>Final</peek-summary><peek-report>verified answer</peek-report>tail",
+    ),
+  ];
+  let visible = "";
+  const events: string[] = [];
+  const investigation = createInvestigation({
+    snapshot: snapshot(),
+    model,
+    stream: async () => streamOf(queue.shift()!),
+  });
+  try {
+    const result = await investigation.investigate("question", {
+      onToken: (delta) => {
+        visible += delta;
+        events.push(delta);
+      },
+      onReset: () => {
+        visible = "";
+        events.push("RESET");
+      },
+    });
+    assert.deepEqual(events, ["provisional", "RESET", "verified answer"]);
+    assert.equal(visible, result.report);
+    assert.equal(result.reportMode, "tagged");
+    assert.equal(result.metrics?.requests, 2);
+    assert.equal(result.metrics?.toolCalls, 1);
+  } finally {
+    investigation.dispose();
+  }
 });

@@ -6,6 +6,8 @@
  * What remains is the "investigate" wire protocol and the investigate-timeout config.
  */
 
+import type { InvestigateProgress } from "@d3ara1n/pi-peek";
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -34,15 +36,18 @@ export interface InvestigateRequestData {
 export interface InvestigateResponseData {
   report: string;
   summary?: string;
+  reportMode?: "tagged" | "fallback";
   snapshotAt?: string;
   stopReason?: "stop" | "length";
   usage?: import("@d3ara1n/pi-peek").InvestigateResult["usage"];
+  metrics?: import("@d3ara1n/pi-peek").InvestigateMetrics;
 }
 
 /** Details carried by the peek tool's live partial results while streaming. */
-export interface InvestigateProgressData {
-  /** Peer-side investigation stage, e.g. "investigating" | "done" | "error". */
+export interface InvestigateProgressData
+  extends Partial<Omit<InvestigateProgress, "stage" | "chars">> {
+  /** Serving-side activity, or local "connecting"; thinking text is never transported. */
   stage: string;
-  /** Characters released for display so far (post-envelope-filter). */
+  /** Report-body characters released for display so far. */
   chars: number;
 }

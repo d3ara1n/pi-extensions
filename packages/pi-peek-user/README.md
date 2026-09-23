@@ -4,7 +4,7 @@
 
 `/peek` overlay for [pi](https://github.com/earendil-works/pi) — investigate your own session without disturbing the main agent.
 
-Opens a centered overlay backed by a large-context `utility` model. Each question triggers one streaming investigation over the session's active context. The main agent keeps running, completely unaware.
+Opens a centered overlay that retrieves and summarizes session records using the configured helper model (`utility` by default). The main agent keeps running without receiving these requests.
 
 ```
 ╭──────────────────────────────────────────────────╮
@@ -26,12 +26,12 @@ Opens a centered overlay backed by a large-context `utility` model. Each questio
 
 ## Features
 
-- **Streaming Markdown** — the report appears token-by-token with pi's native Markdown rendering and syntax highlighting
+- **Streaming Markdown** — tagged report bodies stream through pi's native Markdown renderer; preambles, summary text and unrelated prose stay hidden
 - **Auto-height** — the message region grows with content up to ~80% of the terminal, then scrolls (↑/↓, auto-follows the tail while streaming)
 - **Message navigation** — prominent turn dividers and PageUp/PageDown jumps across the full local history (Fn+↑/Fn+↓ on MacBook)
-- **Multi-turn** — follow-ups reuse one fixed active-context snapshot and the previous questions/reports; no internal retrieval loop
-- **Live status** — header shows the main agent's current activity; the status line shows the utility model and cumulative tokens
-- **Limit notices** — upstream output/context limits are shown separately from report text, without automatic truncation, compression, or retries
+- **Multi-turn** — follow-ups reuse one fixed snapshot and previous questions/reports, with bounded retrieval for additional evidence
+- **Live status** — header shows the main agent's activity; the status line shows the helper model and cumulative tokens
+- **Limit notices** — output/context limits are separate from report text; interrupted streamed text is retained with an incomplete-report notice
 - **Read-after-burn** — closing aborts the investigation and discards its local reference and history; the main session is never touched
 - **Command palette entry** — "Peek: Inspect This Session" runs directly from the palette, mid-draft
 
@@ -68,13 +68,15 @@ Or add to `~/.pi/agent/settings.json`:
 
 Or pick **Peek: Inspect This Session** in the command palette (Ctrl+Shift+P, via [`pi-command-palette`](../pi-command-palette)) — it opens the same overlay directly, without needing an empty editor.
 
-Type what you want to find out, press Enter. The report streams in. Ask follow-ups, use PageUp/PageDown to jump between your questions (Fn+↑/Fn+↓ on MacBook), or press Esc to close.
+Type what you want to find out, press Enter. The status shows `thinking…`, `searching…`, `reading…`, or `outputting…` while the report area remains a placeholder. The report appears progressively when the helper emits `<peek-report>` content; only that body contributes to `outputting… · N chars`. Summary tags and surrounding prose are handled by the shared core parser and never displayed. If the terminal answer omits the report format, its last text block appears at completion instead. A provisional report followed by further tool calls is cleared before investigation continues. Ask follow-ups, use PageUp/PageDown to jump between your questions (Fn+↑/Fn+↓ on MacBook), or press Esc to close.
 
 The snapshot is captured on the first question and stays fixed during follow-ups, even while the main agent continues working. **Close and reopen for a fresh snapshot.**
 
-Use `/peek:thinking` instead of `/peek` to explicitly include readable thinking saved in the source session. Normal `/peek` and the command-palette entry exclude it. Missing/redacted thinking cannot be recovered.
+Use `/peek:thinking` instead of `/peek` to admit readable saved thinking as retrievable references. Normal `/peek` and the command-palette entry exclude thinking from both the outline and retrieval. Missing/redacted thinking cannot be recovered.
 
-See [pi-peek](../pi-peek) for evidence coverage, large-context model requirements, upstream limits, and configuration. Local read-after-burn does not imply zero retention by the model provider.
+The helper model can also have its own reasoning mode, configured through pi-model-roles. Its `thinking…` activity is shown when the provider emits thinking events, even when source-session thinking is excluded. The activity indicator never displays the helper's thinking text.
+
+See [pi-peek](../pi-peek) for snapshot coverage, tool-capable model requirements, investigation budgets and configuration. Local read-after-burn does not imply zero retention by the model provider.
 
 The overlay requires TUI mode; non-TUI hosts receive a warning when notification UI is available.
 

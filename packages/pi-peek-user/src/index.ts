@@ -19,25 +19,31 @@ import { paletteCommandRegistry } from "@d3ara1n/pi-command-palette-core";
 import { PeekOverlay } from "./overlay.ts";
 import type { PeekReferenceOptions } from "@d3ara1n/pi-peek";
 
-async function openPeekOverlay(ctx: ExtensionContext, options: PeekReferenceOptions = {}): Promise<void> {
+async function openPeekOverlay(
+  ctx: ExtensionContext,
+  options: PeekReferenceOptions = {},
+): Promise<void> {
   if (ctx.mode !== "tui") {
     if (ctx.hasUI) ctx.ui.notify("peek overlay requires TUI mode", "warning");
     return;
   }
-  await ctx.ui.custom<void>((tui, theme, _kb, done) => new PeekOverlay(tui, theme, done, ctx, undefined, options), {
-    overlay: true,
-    overlayOptions: {
-      anchor: "center",
-      width: "60%",
-      maxHeight: "80%",
-      margin: { bottom: 2 },
+  await ctx.ui.custom<void>(
+    (tui, theme, _kb, done) => new PeekOverlay(tui, theme, done, ctx, undefined, options),
+    {
+      overlay: true,
+      overlayOptions: {
+        anchor: "center",
+        width: "60%",
+        maxHeight: "80%",
+        margin: { bottom: 2 },
+      },
     },
-  });
+  );
 }
 
 export default function registerPeekUserExtension(pi: ExtensionAPI): void {
   pi.registerCommand("peek", {
-    description: "Aside investigation: inspect this session without disturbing the main agent",
+    description: "Inspect this session's saved records without disturbing the main agent",
     handler: async (_args, ctx: ExtensionContext) => {
       await openPeekOverlay(ctx);
     },

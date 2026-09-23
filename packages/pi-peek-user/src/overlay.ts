@@ -2,7 +2,7 @@
  * PeekOverlay — the /peek TUI overlay (LOCAL investigation / "aside").
  *
  * Investigates THIS instance: serialize the main conversation + investigate via
- * the utility model, read-after-burn. The user inspects their own session
+ * the investigation model, read-after-burn. The user inspects their own session
  * without disturbing the main agent.
  *
  * Layout (regions separated by `├───┤` dividers, closed at the bottom with
@@ -35,7 +35,15 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { getPeekAPI, type InvestigateResult, type MainAgentStatus, type PeekAPI, type PeekInvestigation, type PeekReferenceOptions } from "@d3ara1n/pi-peek";
+import {
+  formatInvestigationStatus,
+  getPeekAPI,
+  type InvestigateResult,
+  type MainAgentStatus,
+  type PeekAPI,
+  type PeekInvestigation,
+  type PeekReferenceOptions,
+} from "@d3ara1n/pi-peek";
 import {
   getMarkdownTheme,
   type ExtensionContext,
@@ -113,10 +121,17 @@ export class PeekOverlay {
   // composer: how many rows the composer occupies (≥1); set during render
   private composerRows = 1;
 
-  // last utility model used (status line before the first report)
-  private lastUtilityModel: string | null = null;
+  // last investigation model used (status line before the first report)
+  private lastModel: string | null = null;
 
-  constructor(tui: PeekTui, theme: PeekTheme, done: () => void, ctx: ExtensionContext, api: PeekAPI = getPeekAPI(), referenceOptions: PeekReferenceOptions = {}) {
+  constructor(
+    tui: PeekTui,
+    theme: PeekTheme,
+    done: () => void,
+    ctx: ExtensionContext,
+    api: PeekAPI = getPeekAPI(),
+    referenceOptions: PeekReferenceOptions = {},
+  ) {
     this.api = api;
     this.referenceOptions = referenceOptions;
     this.tui = tui;
@@ -262,24 +277,39 @@ export class PeekOverlay {
     const generation = ++this.requestGeneration;
     const requestAbort = new AbortController();
     this.requestAbort = requestAbort;
-    Promise.resolve().then(() => {
-      if (this.closed) throw new Error("peek: overlay closed.");
-      this.investigation ??= this.api.createInvestigation(this.referenceOptions);
-      return this.investigation.investigate(q, {
-        signal: requestAbort.signal,
-        onStage: (s) => {
-          if (this.closed || generation !== this.requestGeneration) return;
-          this.stage = s;
-          this.tui.requestRender();
-        },
-        onToken: (d) => {
-          if (this.closed || generation !== this.requestGeneration) return;
-          this.streamText += d;
-          this.streamMarkdown.setText(this.streamText);
-          this.tui.requestRender();
-        },
-      });
-    })
+    Promise.resolve()
+      .then(() => {
+        if (this.closed) throw new Error("peek: overlay closed.");
+        this.investigation ??= this.api.createInvestigation(this.referenceOptions);
+        return this.investigation.investigate(q, {
+          signal: requestAbort.signal,
+          onStage: (s) => {
+            if (this.closed || generation !== this.requestGeneration) return;
+            this.stage = s;
+            this.tui.requestRender();
+          },
+          onProgress: (progress) => {
+            if (this.closed || generation !== this.requestGeneration) return;
+            this.stage = progress.stage;
+            this.lastModel = progress.model;
+            this.tui.requestRender();
+          },
+          onReset: () => {
+            if (this.closed || generation !== this.requestGeneration) return;
+            this.streamText = "";
+            this.streamMarkdown.setText("");
+            this.stage = "investigating";
+            this.tui.requestRender();
+          },
+          onToken: (d) => {
+            if (this.closed || generation !== this.requestGeneration) return;
+            this.streamText += d;
+            this.stage = "outputting";
+            this.streamMarkdown.setText(this.streamText);
+            this.tui.requestRender();
+          },
+        });
+      })
       .then((result) => {
         if (this.requestAbort === requestAbort) this.requestAbort = null;
         if (this.closed || generation !== this.requestGeneration) return;
@@ -291,7 +321,7 @@ export class PeekOverlay {
           model: result.model,
           markdown: new Markdown(result.report, 0, 0, this.markdownTheme),
         });
-        if (result.model) this.lastUtilityModel = result.model;
+        if (result.model) this.lastModel = result.model;
         this.mode = "input";
         this.streamText = "";
         this.activeUserAnchorIndex = null;
@@ -303,11 +333,16 @@ export class PeekOverlay {
         if (this.closed || generation !== this.requestGeneration) return;
         const overflow = err?.code === "context_overflow";
         const msg = err instanceof Error ? err.message : String(err);
-        const text = overflow ? "" : `Error: ${msg}`;
+        const partial = this.streamText;
+        const text = partial || (overflow ? "" : `Error: ${msg}`);
         this.history.push({
           role: "assistant",
           text,
-          notice: overflow ? "Context limit reached" : undefined,
+          notice: partial
+            ? `Report interrupted: ${overflow ? "Context limit reached" : msg}`
+            : overflow
+              ? "Context limit reached"
+              : undefined,
           markdown: new Markdown(text, 0, 0, this.markdownTheme),
         });
         this.mode = "input";
@@ -416,13 +451,16 @@ export class PeekOverlay {
 
     if (this.mode === "investigating") {
       const elapsed = ((Date.now() - this.investigateStart) / 1000).toFixed(1);
-      const stateText = this.stage || "investigating";
+      const stateText = formatInvestigationStatus(
+        this.stage || "investigating",
+        this.streamText.length,
+      );
       const stateLabel =
         this.stage === "done"
           ? th.fg("success", stateText)
           : this.stage === "error"
             ? th.fg("error", stateText)
-            : th.fg("accent", stateText);
+            : th.fg("muted", stateText);
       const prefixText = ` peek · ${stateText} ${elapsed}s `;
       const rule = "─".repeat(Math.max(0, wrapW - visibleWidth(prefixText)));
       this.bodyLines.push(
@@ -447,7 +485,9 @@ export class PeekOverlay {
     // innerW-1 with a leading indent space, matching the body rows.
     const composerLines: string[] = [];
     if (this.mode === "investigating") {
-      composerLines.push(th.fg("dim", " investigating…"));
+      composerLines.push(
+        th.fg("muted", ` ${formatInvestigationStatus(this.stage || "investigating")}`),
+      );
     } else {
       const editorLines = this.editor.render(innerW - 1).slice(1, -1);
       for (let i = 0; i < editorLines.length && composerLines.length < MAX_COMPOSER_LINES; i++) {
@@ -502,9 +542,9 @@ export class PeekOverlay {
       out.push(row(ln));
     }
 
-    // ── divider + status line (utility model + cumulative tokens) ──
+    // ── divider + status line (investigation model + cumulative tokens) ──
     out.push(divider());
-    const modelId = this.lastUtilityModel ?? "—";
+    const modelId = this.lastModel ?? "—";
     const totalTokens = this.history.reduce((sum, h) => sum + (h.usage?.total ?? 0), 0);
     const tokensStr = totalTokens > 0 ? formatTokens(totalTokens) : "—";
     const leftInfo = `${th.fg("muted", "model")} ${th.fg("dim", modelId)}`;

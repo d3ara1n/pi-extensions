@@ -1,16 +1,4 @@
-/**
- * pi-peek — Extension entry point.
- *
- * Dependency library: exposes PeekAPI singleton (serialize + investigate +
- * tracker). Registers hooks to track the main agent, but registers NO
- * tools/commands and NO cross-instance machinery — installing pi-peek alone
- * does nothing observable. It only provides capability for consumers:
- *
- *   - pi-peek-user  → /peek overlay investigates THIS instance (local)
- *   - pi-peek-agent → cross-instance peek tool + UDS mesh + discovery
- *
- * Cross-instance transport (UDS) and peer discovery are pi-peek-agent's job.
- */
+/** Initializes the shared PeekAPI and main-agent tracking hooks for consumer extensions. */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { initPeekAPI, shutdownPeekAPI } from "./api.ts";
@@ -19,12 +7,16 @@ import { loadPeekConfig } from "./config.ts";
 
 export { getPeekAPI } from "./api.ts";
 export { PeekContextOverflowError } from "./types.ts";
+export { formatInvestigationStatus } from "./progress.ts";
+export { PeekReportParser, summarizePeekReport, type ParsedPeekReport } from "./report-parser.ts";
 export type {
   InvestigateOptions,
   PeekReferenceOptions,
   PeekAPI,
   PeekInvestigation,
   InvestigateStage,
+  InvestigateProgress,
+  InvestigateMetrics,
   MainAgentStatus,
   InvestigateResult,
   PeekConfig,

@@ -2,7 +2,7 @@
   "name": "@d3ara1n/pi-peek-user",
   "version": "1.0.0",
   "type": "module",
-  "description": "Local /peek overlay for pi — investigate your own session without disturbing the main agent (read-after-burn)",
+  "description": "A local /peek overlay for inspecting session records while the main agent keeps working.",
   "homepage": "https://github.com/d3ara1n/pi-extensions/tree/main/packages/pi-peek-user#readme",
   "bugs": {
     "url": "https://github.com/d3ara1n/pi-extensions/issues"

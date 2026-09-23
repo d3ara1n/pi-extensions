@@ -1,76 +1,255 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { buildSessionProjection, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import { SessionSnapshot } from "./snapshot.ts";
+import { executeSnapshotTool } from "./retrieval.ts";
+import { estimateTextTokens } from "./budget.ts";
 
-const entry = (id: string, message: unknown) => ({ type: "message", id, message }) as SessionEntry;
+type Messages = ConstructorParameters<typeof SessionSnapshot>[0];
+const messages = (value: unknown[]) => value as Messages;
+const read = (snapshot: SessionSnapshot, id: string, offset = 0, limit = 12000) =>
+  snapshot.read([id], offset, limit) as {
+    records: { text?: string; error?: string; nextOffset?: number | null }[];
+  };
 
-test("reference preserves tool arguments, results and errors without thinking by default", () => {
-  const branch = [
-    entry("a", { role: "assistant", content: [
-      { type: "thinking", thinking: "private saved rationale", thinkingSignature: "opaque signature" },
-      { type: "thinking", thinking: "redacted payload", redacted: true, thinkingSignature: "encrypted secret" },
-      { type: "text", text: "Edited the file." },
-      { type: "toolCall", id: "call1", name: "edit", arguments: { path: "a.ts", edits: [{ oldText: "before", newText: "after" }] } },
-    ] }),
-    entry("b", { role: "toolResult", toolCallId: "call1", toolName: "edit", isError: true, content: [
-      { type: "text", text: "The operation failed." }, { type: "image", data: "SECRET_BASE64" },
-    ], details: { patch: "saved patch" } }),
-  ];
-  const snapshot = new SessionSnapshot(branch, "2026-01-01T00:00:00Z");
-  const reference = snapshot.reference();
-  assert.match(reference, /"oldText":"before","newText":"after"/);
-  assert.match(reference, /active context view/);
-  assert.doesNotMatch(reference, /complete recorded/);
-  assert.match(reference, /Tool result call1: edit; isError=true/);
-  assert.match(reference, /saved patch/);
-  assert.doesNotMatch(reference, /private saved rationale|SECRET_BASE64|opaque signature|redacted payload|encrypted secret/);
-  const withThinking = snapshot.reference(true);
-  assert.match(withThinking, /Saved thinking:\nprivate saved rationale/);
-  assert.doesNotMatch(withThinking, /opaque signature|redacted payload|encrypted secret/);
-  assert.doesNotMatch(snapshot.reference(), /private saved rationale/);
-  (branch[0] as any).message.content[2].text = "changed later";
-  assert.doesNotMatch(snapshot.reference(), /changed later/);
-});
-
-test("compaction, retained tail, branch summaries and extension messages remain available", () => {
-  const snapshot = new SessionSnapshot([
-    { type: "compaction", id: "c", summary: "Earlier work summary", retainedTail: [{ role: "user", content: "retained question" }] },
-    { type: "branch_summary", id: "b", summary: "abandoned path summary" },
-    { type: "custom_message", id: "e", customType: "context", content: "injected context", display: false },
-    { type: "custom", id: "ignored", data: "extension private state" },
-  ] as unknown as SessionEntry[]);
-  const ref = snapshot.reference();
-  for (const text of ["Earlier work summary", "retained question", "abandoned path summary", "injected context"]) assert.ok(ref.includes(text));
-  assert.doesNotMatch(ref, /extension private state/);
-});
-
-test("large histories and long tool output are transmitted completely without previews or pagination", () => {
-  const bodies = Array.from({ length: 40 }, (_, i) => `record-${i}: ${"界".repeat(3000)} needle-${i} ${"x".repeat(3000)}`);
-  const snapshot = new SessionSnapshot(bodies.map((content, i) => entry(String(i), {
-    role: "toolResult", toolName: "read", toolCallId: `call${i}`, content,
-  })));
-  const ref = snapshot.reference();
-  assert.ok(ref.length > 240_000);
-  for (const body of bodies) assert.ok(ref.includes(body));
-  assert.doesNotMatch(ref, /Reference abbreviated|nextOffset|read_record|search_record/);
-});
-
-test("nested per-file diffs preserve deleted content without exposing unrelated metadata", () => {
-  const snapshot = new SessionSnapshot([
-    entry("patch", { role: "assistant", content: [{ type: "toolCall", id: "delete", name: "apply_patch", arguments: { patch: "*** Delete File: old.ts" } }] }),
-    entry("result", { role: "toolResult", toolCallId: "delete", toolName: "apply_patch", content: [{ type: "text", text: "Deleted old.ts" }], details: {
-      files: [{ kind: "delete", path: "old.ts", removed: 1, diff: "-const original = 731;", unrelated: "private metadata" }],
-    } }),
+const source = () =>
+  messages([
+    { role: "user", content: "Why did the edit fail?", timestamp: 1 },
+    {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "private rationale", thinkingSignature: "opaque signature" },
+        { type: "thinking", thinking: "redacted rationale", redacted: true },
+        { type: "text", text: "Checking the file." },
+        {
+          type: "toolCall",
+          id: "call1",
+          name: "edit",
+          arguments: { path: "a.ts", oldText: "old-value" },
+        },
+      ],
+    },
+    {
+      role: "toolResult",
+      toolCallId: "call1",
+      toolName: "edit",
+      isError: true,
+      content: [
+        { type: "text", text: "The operation failed: distinctive-error $& $1." },
+        { type: "image", data: "SECRET_BASE64" },
+      ],
+      details: {
+        patch: "saved patch",
+        files: [{ path: "a.ts", diff: "-removed", unrelated: "private metadata" }],
+      },
+    },
   ]);
-  assert.match(snapshot.reference(), /original = 731/);
-  assert.doesNotMatch(snapshot.reference(), /private metadata/);
+
+test("outlines retain dialogue and references while retrieval pairs exact arguments with results", () => {
+  const input = source();
+  const snapshot = new SessionSnapshot(input);
+  const outline = snapshot.outline(4000);
+  assert.match(outline, /Why did the edit fail\?|Checking the file/);
+  assert.match(outline, /\[toolcall id=T1 name="edit" status=error/);
+  assert.doesNotMatch(outline, /old-value|distinctive-error|saved patch|private rationale/);
+  const page = read(snapshot, "T1").records[0]!;
+  assert.match(page.text!, /old-value/);
+  assert.match(page.text!, /distinctive-error \$& \$1/);
+  assert.match(page.text!, /saved patch|removed/);
+  assert.doesNotMatch(page.text!, /SECRET_BASE64|private metadata/);
+  (input[2] as any).content[0].text = "mutated later";
+  assert.doesNotMatch(read(snapshot, "T1").records[0]!.text!, /mutated later/);
+  assert.match(JSON.stringify(snapshot.search("distinctive-error")), /T1/);
 });
 
-test("missing thinking is not fabricated and disposal releases the records", () => {
-  const snapshot = new SessionSnapshot([entry("a", { role: "user", content: "hi" })]);
-  assert.match(snapshot.reference(true), /missing\/redacted thinking cannot be reconstructed/);
-  assert.doesNotMatch(snapshot.reference(true), /Saved thinking:/);
+test("thinking opt-out removes the records from every retrieval path", () => {
+  const excluded = new SessionSnapshot(source());
+  assert.doesNotMatch(
+    excluded.reference(),
+    /private rationale|redacted rationale|opaque signature/,
+  );
+  assert.deepEqual((excluded.search("private rationale") as any).matches, []);
+  assert.ok(read(excluded, "H1").records[0]!.error);
+  const included = new SessionSnapshot(source(), { includeThinking: true });
+  assert.match(included.outline(4000), /\[thinking id=H1/);
+  assert.doesNotMatch(included.outline(4000), /private rationale/);
+  assert.match(read(included, "H1").records[0]!.text!, /private rationale/);
+  assert.doesNotMatch(included.reference(), /redacted rationale|opaque signature/);
+});
+
+test("bounded outlines preserve references and allow paged recovery of omitted content", () => {
+  const body = "HEAD" + "界".repeat(20000) + "TAIL-needle";
+  const snapshot = new SessionSnapshot(
+    messages([
+      { role: "user", content: body },
+      ...Array.from({ length: 120 }, (_, i) => ({
+        role: "assistant",
+        content: [{ type: "text", text: `record-${i}: ${"x".repeat(600)}` }],
+      })),
+    ]),
+  );
+  const outline = snapshot.outline(1000);
+  assert.ok(estimateTextTokens(outline) <= 1000);
+  assert.match(outline, /omitted|abbreviated/);
+  assert.doesNotMatch(outline, /TAIL-needle/);
+  assert.match(JSON.stringify(snapshot.search("tail-NEEDLE")), /U1/);
+  let recovered = "";
+  let offset: number | null = 0;
+  while (offset !== null) {
+    const page: ReturnType<typeof read>["records"][number] = read(snapshot, "U1", offset, 1000)
+      .records[0]!;
+    recovered += page.text;
+    offset = page.nextOffset!;
+  }
+  assert.equal(recovered, body);
+  const first = snapshot.search("record-", 0, 2) as any;
+  const second = snapshot.search("record-", first.nextCursor, 2) as any;
+  assert.equal(first.matches.length, 2);
+  assert.notEqual(first.matches[0].id, second.matches[0].id);
+});
+
+test("canonical projection governs edits, summaries and excluded shells", () => {
+  const entries = [
+    {
+      type: "message",
+      id: "a",
+      parentId: null,
+      message: { role: "user", content: "removed original" },
+    },
+    {
+      type: "context_edit",
+      id: "b",
+      parentId: "a",
+      targetId: "a",
+      replacement: { content: "replacement" },
+    },
+    {
+      type: "message",
+      id: "c",
+      parentId: "b",
+      message: {
+        role: "bashExecution",
+        command: "excluded command",
+        output: "hidden output",
+        excludeFromContext: true,
+      },
+    },
+    {
+      type: "message",
+      id: "d",
+      parentId: "c",
+      message: { role: "assistant", content: [{ type: "text", text: "omitted attempt" }] },
+    },
+    { type: "context_edit", id: "e", parentId: "d", targetId: "d", replacement: null },
+    {
+      type: "custom_message",
+      id: "f",
+      parentId: "e",
+      customType: "context",
+      content: "injected context",
+      display: false,
+    },
+  ] as unknown as SessionEntry[];
+  const snapshot = new SessionSnapshot(buildSessionProjection(entries).messages);
+  assert.match(snapshot.reference(), /replacement|injected context/);
+  assert.doesNotMatch(
+    snapshot.reference(),
+    /removed original|hidden output|excluded command|omitted attempt/,
+  );
+  const summary = new SessionSnapshot(
+    messages([
+      { role: "system", content: "secret prompt" },
+      { role: "compactionSummary", summary: "Earlier work summary" },
+      { role: "branchSummary", summary: "Branch summary" },
+    ]),
+  );
+  assert.match(summary.outline(2000), /Earlier work summary/);
+  assert.match(summary.reference(), /Branch summary/);
+  assert.doesNotMatch(summary.reference(), /secret prompt/);
+});
+
+test("pending calls, orphaned results and invalid retrieval requests remain explicit", () => {
+  const snapshot = new SessionSnapshot(
+    messages([
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "pending", name: "bash", arguments: { command: "pwd" } }],
+      },
+      { role: "toolResult", toolCallId: "orphan", toolName: "read", content: "standalone result" },
+    ]),
+  );
+  assert.match(snapshot.outline(2000), /status=pending/);
+  assert.match(read(snapshot, "T2").records[0]!.text!, /standalone result/);
+  const invalidArgs: Parameters<typeof executeSnapshotTool>[1]["arguments"][] = [
+    { ids: ["T1"], offset: -1 },
+    { ids: ["../../secret"] },
+    { ids: ["T1"], extra: true },
+  ];
+  for (const args of invalidArgs) {
+    const result = executeSnapshotTool(snapshot, {
+      type: "toolCall",
+      id: "x",
+      name: "read_session",
+      arguments: args,
+    });
+    assert.equal(result.isError, true);
+    assert.equal(result.toolCallId, "x");
+  }
   snapshot.dispose();
-  assert.match(snapshot.reference(), /empty conversation/);
+  assert.ok(read(snapshot, "T1").records[0]!.error);
+  assert.deepEqual((snapshot.search("pwd") as any).matches, []);
+});
+
+test("reused source call IDs pair pending calls with results in arrival order", () => {
+  const snapshot = new SessionSnapshot(
+    messages([
+      {
+        role: "assistant",
+        content: [
+          { type: "toolCall", id: "reused", name: "read", arguments: { path: "first.ts" } },
+          { type: "toolCall", id: "reused", name: "read", arguments: { path: "second.ts" } },
+        ],
+      },
+      { role: "toolResult", toolCallId: "reused", toolName: "read", content: "FIRST_RESULT" },
+      { role: "toolResult", toolCallId: "reused", toolName: "read", content: "SECOND_RESULT" },
+    ]),
+  );
+  assert.match(read(snapshot, "T1").records[0]!.text!, /first.ts[\s\S]*FIRST_RESULT/);
+  assert.doesNotMatch(read(snapshot, "T1").records[0]!.text!, /SECOND_RESULT/);
+  assert.match(read(snapshot, "T2").records[0]!.text!, /second.ts[\s\S]*SECOND_RESULT/);
+  assert.doesNotMatch(snapshot.outline(2000), /status=pending/);
+});
+
+test("a small outline retains the task anchor and a tool reference despite long later prose", () => {
+  const snapshot = new SessionSnapshot(
+    messages([
+      { role: "user", content: "Find the deployment failure." },
+      { role: "assistant", content: [{ type: "toolCall", id: "c", name: "bash", arguments: {} }] },
+      ...Array.from({ length: 20 }, () => ({
+        role: "assistant",
+        content: [{ type: "text", text: "later discussion ".repeat(100) }],
+      })),
+    ]),
+  );
+  const outline = snapshot.outline(650);
+  assert.ok(estimateTextTokens(outline) <= 650);
+  assert.match(outline, /Find the deployment failure/);
+  assert.match(outline, /\[toolcall id=T1/);
+});
+
+test("batched reads divide the shared budget without starving later records", () => {
+  const snapshot = new SessionSnapshot(
+    messages([
+      { role: "user", content: "a".repeat(1000) },
+      { role: "user", content: "b".repeat(1000) },
+    ]),
+  );
+  const result = snapshot.read(["U1", "U2"], 0, 100) as {
+    records: { text: string; nextOffset: number }[];
+  };
+  assert.equal(
+    result.records.reduce((sum, page) => sum + page.text.length, 0),
+    100,
+  );
+  assert.ok(result.records.every((page) => page.nextOffset > 0));
 });

@@ -1,27 +1,13 @@
-/**
- * pi-peek-agent tool — exposes cross-instance peek to the main agent (LLM).
- *
- * One tool: peek({ question, at?, sessionId? }) investigates a peer's session record.
- * `question` is required (enforced by schema). Peer discovery moved to
- * @d3ara1n/pi-mesh (its `mesh_list` tool) — resolvePeer/connect come from there.
- *
- * Rendering follows the built-in tool convention: the call cell already shows
- * the tool name, so renderResult MUST NOT repeat it. Collapsed shows the live
- * "stage · chars" overview while running and the peer-supplied summary (or
- * first report line) once done; expanded shows the question as a muted context
- * line above the report — rendered as Markdown (same as subagent output and
- * the /peek overlay), streamed live while the investigation runs, with no
- * overview row.
- */
+/** Cross-instance record retrieval over pi-mesh, with progress and Markdown rendering. */
 
 import { getMarkdownTheme, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { Container, Markdown, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import type { Component } from "@earendil-works/pi-tui";
+import { formatInvestigationStatus, PeekReportParser, summarizePeekReport } from "@d3ara1n/pi-peek";
 import { getMeshAPI } from "@d3ara1n/pi-mesh";
 import type { PeerInfo } from "@d3ara1n/pi-mesh";
 import { loadPeekConfig } from "./config.ts";
-import { EnvelopeFilter } from "./envelope-filter.ts";
 import { INVESTIGATE_TYPE } from "./types.ts";
 import type { InvestigateProgressData, InvestigateResponseData } from "./types.ts";
 
@@ -36,19 +22,12 @@ function textResult(text: string) {
   };
 }
 
-/** Compact count for the live status line, e.g. 943 → "943", 12345 → "12.3k". */
-function formatCount(n: number): string {
-  if (n < 1000) return String(n);
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
-  return `${(n / 1_000_000).toFixed(1)}M`;
-}
-
 /** Collapsed overview while running: "stage · chars" from the partial details. */
 function partialStatus(details: unknown, fallback: string): string {
   const progress = details as InvestigateProgressData | undefined;
-  if (!progress || typeof progress.stage !== "string" || typeof progress.chars !== "number") return fallback;
-  const chars = progress.chars > 0 ? ` · ${formatCount(progress.chars)} chars` : "";
-  return `${progress.stage}${chars}`;
+  if (!progress || typeof progress.stage !== "string" || typeof progress.chars !== "number")
+    return fallback;
+  return formatInvestigationStatus(progress.stage, progress.chars);
 }
 
 /** Collapsed summary once done: the peer-supplied summary, or the first report line. */
@@ -62,22 +41,24 @@ export function registerPeekTool(pi: ExtensionAPI): void {
     name: "peek",
     label: "Peek at another instance",
     description:
-      "Peek at another pi instance — observe its session without disturbing it. " +
-      "Read-only: a helper model investigates the peer's existing session record and reports findings; the peer's agent never sees the question and cannot act on it — not a communication channel. " +
-      "Use mesh_list first to discover names. " +
-      "Best for focused summaries, explanations, or details in the peer's saved tool results that its replies did not mention. " +
-      "Strictly observation, not consultation: it reports only what the record contains — do not use it for design input, decisions, or advice. " +
-      "Each call uses a fresh snapshot; include enough context for follow-up questions.",
-    promptSnippet: "Observe another pi instance's session without disturbing it",
+      "Retrieve and summarize records from another pi session. A helper reads a fresh snapshot; the target assistant is not contacted.",
+    promptSnippet: "Retrieve records from another pi session",
+    promptGuidelines: [
+      "Use mesh_list to discover target names when needed.",
+      "Use peek to gather recorded information; handle evaluation, recommendations and decisions yourself.",
+    ],
 
     parameters: Type.Object({
       question: Type.String({
         description:
-          "What you want to find out from the peer's existing session record (e.g. 'What is it working on right now?'). The peer's agent never sees this question.",
+          "Information to find in the session. Include the context needed for follow-up requests.",
       }),
-      includeThinking: Type.Optional(Type.Boolean({
-        description: "Include readable thinking saved in the session. Default false; unavailable or redacted thinking cannot be recovered.",
-      })),
+      includeThinking: Type.Optional(
+        Type.Boolean({
+          description:
+            "Include readable thinking saved in the session. Default false; unavailable or redacted thinking cannot be recovered.",
+        }),
+      ),
       at: Type.Optional(
         Type.String({
           description:
@@ -108,15 +89,21 @@ export function registerPeekTool(pi: ExtensionAPI): void {
         : isError
           ? theme.fg("error", "✗")
           : theme.fg("success", "✓");
-      const text = result.content.filter(block => block.type === "text").map(block => block.text).join("\n\n")
-        || (isPartial ? "" : "(no output)");
+      const progress = result.details as InvestigateProgressData | undefined;
+      const awaitingReport =
+        isPartial && progress?.stage && !["outputting", "done", "error"].includes(progress.stage);
+      const text = awaitingReport
+        ? ""
+        : result.content
+            .filter((block) => block.type === "text")
+            .map((block) => block.text)
+            .join("\n\n") || (isPartial ? "" : "(no output)");
 
       if (expanded) {
         const c = new Container();
         // The question asked (ToolRenderContext.args) as a muted context line —
         // no Q/A markers; the report below is the content the user expanded for.
-        const question =
-          typeof context.args?.question === "string" ? context.args.question : "";
+        const question = typeof context.args?.question === "string" ? context.args.question : "";
         if (question.trim()) {
           // The separator "\n" is folded into the question line: Text("")
           // renders zero lines, so a separate empty child would show nothing.
@@ -149,7 +136,7 @@ export function registerPeekTool(pi: ExtensionAPI): void {
         : isError
           ? firstLine
           : finalSummary(result.details, firstLine);
-      const styled = `${icon} ${isError && !isPartial ? theme.fg("error", line) : theme.fg("dim", line)}`;
+      const styled = `${icon} ${isError && !isPartial ? theme.fg("error", line) : theme.fg("muted", line)}`;
       return {
         render: (width: number) => [truncateToWidth(styled, width, "…", true)],
         invalidate: () => {},
@@ -166,9 +153,11 @@ export function registerPeekTool(pi: ExtensionAPI): void {
 
       signal?.throwIfAborted();
       if (!resolved) {
-        throw new Error(params.at
-          ? `No online peer named '${params.at}'. Call mesh_list to see who's online.`
-          : "No other pi instance available to peek.");
+        throw new Error(
+          params.at
+            ? `No online peer named '${params.at}'. Call mesh_list to see who's online.`
+            : "No other pi instance available to peek.",
+        );
       }
 
       // Name collision → return candidates so the LLM disambiguates with sessionId.
@@ -187,60 +176,174 @@ export function registerPeekTool(pi: ExtensionAPI): void {
       const peer = resolved as PeerInfo;
       const cfg = loadPeekConfig(ctx?.cwd);
 
-      // Live progress: partial details drive the collapsed "stage · chars"
-      // overview; partial content streams the report through the envelope
-      // filter (summary swallowed, tags stripped, malformed → raw passthrough)
-      // for the expanded view. Token deltas arrive per token and are bursty,
-      // so pushes are throttled; stage changes always push immediately.
-      const filter = new EnvelopeFilter();
-      let stage = "connecting";
+      // Current peers send parsed report bodies. The same parser supports legacy raw-token peers.
+      let reportText = "";
+      let nativeReportTokens = false;
+      const appendReport = (delta: string) => {
+        reportText += delta;
+      };
+      let legacyParser = new PeekReportParser(appendReport);
+      const progress: InvestigateProgressData = { stage: "connecting", chars: 0 };
+      const progressAbort = new AbortController();
+      const requestSignal = signal
+        ? AbortSignal.any([signal, progressAbort.signal])
+        : progressAbort.signal;
       let lastPushAt = 0;
+      let pendingPush: ReturnType<typeof setTimeout> | undefined;
+      let finished = false;
+      const clearPush = () => {
+        if (pendingPush) clearTimeout(pendingPush);
+        pendingPush = undefined;
+      };
       const pushProgress = () => {
+        clearPush();
+        if (finished || requestSignal.aborted) return;
         lastPushAt = Date.now();
-        const visible = filter.displayText;
-        onUpdate?.({
-          content: visible ? [{ type: "text" as const, text: visible }] : [],
-          details: { stage, chars: visible.length },
-        });
+        const visible = reportText;
+        try {
+          onUpdate?.({
+            content: visible ? [{ type: "text" as const, text: visible }] : [],
+            details: { ...progress, chars: visible.length },
+          });
+        } catch (error) {
+          // Timer-driven updates must reject the request, not throw an uncaught asynchronous error.
+          progressAbort.abort(error);
+        }
+      };
+      const schedulePush = () => {
+        const wait = PROGRESS_THROTTLE_MS - (Date.now() - lastPushAt);
+        if (wait <= 0) pushProgress();
+        else if (!pendingPush) pendingPush = setTimeout(pushProgress, wait);
       };
       pushProgress();
 
       try {
+        requestSignal.throwIfAborted();
         const conn = await mesh.connect(peer);
         try {
-          signal?.throwIfAborted();
+          requestSignal.throwIfAborted();
           const result = await conn.request(
             INVESTIGATE_TYPE,
-            { question: params.question, ...(params.includeThinking === true ? { includeThinking: true } : {}) },
             {
-              signal, timeoutMs: cfg.investigateTimeoutMs,
+              question: params.question,
+              ...(params.includeThinking === true ? { includeThinking: true } : {}),
+            },
+            {
+              signal: requestSignal,
+              timeoutMs: cfg.investigateTimeoutMs,
               onEmit: (type, data) => {
-                if (data && typeof data === "object") {
-                  if (type === "stage" && "stage" in data && typeof data.stage === "string") {
-                    stage = data.stage;
-                    pushProgress();
-                  } else if (type === "token" && "delta" in data && typeof data.delta === "string") {
-                    filter.push(data.delta);
-                    if (Date.now() - lastPushAt >= PROGRESS_THROTTLE_MS) pushProgress();
+                if (finished || requestSignal.aborted || !data || typeof data !== "object") return;
+                if (type === "report_reset") {
+                  reportText = "";
+                  legacyParser = new PeekReportParser(appendReport);
+                  progress.stage = "investigating";
+                  progress.phase = "investigation";
+                  pushProgress();
+                  return;
+                }
+                if (
+                  (type === "stage" || type === "progress") &&
+                  "stage" in data &&
+                  typeof data.stage === "string"
+                ) {
+                  const previous = progress.stage;
+                  // A report never switches back to investigation while its text is visible.
+                  if (
+                    reportText.length === 0 ||
+                    previous !== "outputting" ||
+                    ["outputting", "done", "error"].includes(data.stage)
+                  )
+                    progress.stage = data.stage;
+                  const incoming = data as Partial<InvestigateProgressData>;
+                  if (incoming.phase === "investigation" || incoming.phase === "report")
+                    progress.phase = incoming.phase;
+                  if (typeof incoming.model === "string") progress.model = incoming.model;
+                  for (const key of [
+                    "round",
+                    "maxRounds",
+                    "request",
+                    "toolCalls",
+                    "elapsedMs",
+                  ] as const) {
+                    const value = incoming[key];
+                    if (typeof value === "number" && Number.isFinite(value) && value >= 0)
+                      progress[key] = value;
                   }
+                  if (previous !== progress.stage) pushProgress();
+                  else schedulePush();
+                } else if (
+                  type === "token" &&
+                  "delta" in data &&
+                  typeof data.delta === "string" &&
+                  data.delta
+                ) {
+                  if ("format" in data && data.format === "report") {
+                    nativeReportTokens = true;
+                    appendReport(data.delta);
+                  } else legacyParser.push(data.delta);
+                  const changed = progress.stage !== "outputting";
+                  progress.stage = "outputting";
+                  progress.phase = reportText.length > 0 ? "report" : "investigation";
+                  if (changed) pushProgress();
+                  else schedulePush();
                 }
               },
             },
           );
+          requestSignal.throwIfAborted();
           const response = result as InvestigateResponseData | undefined;
-          const resultText = textResult(response?.report ?? "");
+          if (!response?.report) throw new Error("Empty investigation response.");
+          let summary = response.summary;
+          let reportMode = response.reportMode;
+          if (reportMode || nativeReportTokens) {
+            reportText = response.report;
+          } else {
+            // Older peers may return a raw envelope with preamble; decode it with the shared rules.
+            const parser = new PeekReportParser();
+            parser.push(response.report);
+            const parsed = parser.finish(response.report);
+            reportText = parsed.report;
+            summary ||= parsed.summary;
+            reportMode = parsed.reportMode;
+          }
+          summary ||= summarizePeekReport(reportText);
+          progress.phase = "report";
+          progress.stage = "done";
+          pushProgress();
+          requestSignal.throwIfAborted();
+          const resultText = textResult(reportText);
           if (response?.stopReason === "length") {
-            resultText.content.push({ type: "text", text: "Output limit reached; the report is incomplete." });
+            resultText.content.push({
+              type: "text",
+              text: "Output limit reached; the report is incomplete.",
+            });
           }
           return {
             ...resultText,
-            details: response ? { summary: response.summary, snapshotAt: response.snapshotAt, stopReason: response.stopReason, usage: response.usage } : undefined,
+            details: response
+              ? {
+                  summary,
+                  ...(reportMode ? { reportMode } : {}),
+                  snapshotAt: response.snapshotAt,
+                  stopReason: response.stopReason,
+                  usage: response.usage,
+                  ...(response.metrics ? { metrics: response.metrics } : {}),
+                }
+              : undefined,
           };
         } finally {
           conn.close();
         }
-      } catch (err) {
-        throw new Error(`peek ${peer.name} failed: ${err instanceof Error ? err.message : String(err)}`);
+      } catch (error) {
+        progress.stage = "error";
+        pushProgress();
+        const partial = reportText;
+        throw new Error(
+          `peek ${peer.name} failed: ${error instanceof Error ? error.message : String(error)}${partial ? `\n\nIncomplete report:\n${partial}` : ""}`,
+        );
+      } finally {
+        finished = true;
+        clearPush();
       }
     },
   });

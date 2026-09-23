@@ -2,7 +2,7 @@
  * Read peek configuration from settings files.
  *
  * Global (~/.pi/agent/settings.json) + project (.pi/settings.json), project
- * replaces global wholesale. Model role and request deadline live here; transport wait timeouts
+ * replaces global wholesale. Investigation limits live here; transport wait timeouts
  * belong to pi-peek-agent.
  */
 
@@ -47,7 +47,12 @@ export function loadPeekConfig(cwd?: string): PeekConfig {
   if (!raw) return { ...DEFAULT_PEEK_CONFIG };
 
   return {
-    timeoutMs: Math.min(positiveInteger(raw.timeoutMs, DEFAULT_PEEK_CONFIG.timeoutMs), 2_147_483_647),
+    timeoutMs: Math.min(
+      positiveInteger(raw.timeoutMs, DEFAULT_PEEK_CONFIG.timeoutMs),
+      2_147_483_647,
+    ),
     role: roleName(raw.role, DEFAULT_PEEK_CONFIG.role),
+    maxRounds: Math.min(positiveInteger(raw.maxRounds, DEFAULT_PEEK_CONFIG.maxRounds), 20),
+    maxOutputTokens: positiveInteger(raw.maxOutputTokens, DEFAULT_PEEK_CONFIG.maxOutputTokens),
   };
 }

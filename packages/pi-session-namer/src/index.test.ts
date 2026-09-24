@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { collectTurns } from "./index.ts";
+import { collectTurns, dueCheckpoint } from "./index.ts";
 
 let seq = 0;
 function msg(role: string, content: unknown) {
@@ -67,4 +67,45 @@ test("collectTurns ignores text-free and tool-result entries", () => {
     msg("user", "hello"),
   ];
   assert.deepEqual(collectTurns(entries), [{ user: "hello" }]);
+});
+
+function namedBranch(count: number) {
+  return [
+    { type: "session_info", id: "name-1", name: "Initial title" },
+    { type: "custom", customType: "pi-session-namer", data: { kind: "generated", sessionInfoId: "name-1" } },
+    ...Array.from({ length: count }, (_, i) => [
+      msg("user", `request ${i + 1}`),
+      msg("assistant", `result ${i + 1}`),
+    ]).flat(),
+  ];
+}
+
+test("periodic naming is due only after completed checkpoint turns", () => {
+  for (const checkpoint of [5, 10, 20, 50, 100]) {
+    const branch = namedBranch(checkpoint);
+    assert.equal(dueCheckpoint(branch, "Initial title")?.checkpoint, checkpoint);
+    assert.equal(dueCheckpoint(branch.slice(0, -1), "Initial title"), undefined);
+  }
+  assert.equal(dueCheckpoint(namedBranch(6), "Initial title"), undefined);
+});
+
+test("periodic naming skips attempted checkpoints and explicit names", () => {
+  const branch = namedBranch(5);
+  branch.push({ type: "custom", customType: "pi-session-namer", data: { kind: "attempt", checkpoint: 5 } } as any);
+  assert.equal(dueCheckpoint(branch, "Initial title"), undefined);
+
+  const manuallyNamed = namedBranch(10);
+  manuallyNamed.push({ type: "session_info", id: "name-2", name: "User title" } as any);
+  assert.equal(dueCheckpoint(manuallyNamed, "User title"), undefined);
+  manuallyNamed.push({ type: "session_info", id: "name-3", name: "Initial title" } as any);
+  assert.equal(dueCheckpoint(manuallyNamed, "Initial title"), undefined);
+  assert.equal(dueCheckpoint(namedBranch(5), "Different title"), undefined);
+});
+
+test("periodic naming ignores slash-command exchanges in its count", () => {
+  const branch = namedBranch(4);
+  branch.push(msg("user", "/namer:rename"), msg("assistant", "Renamed"));
+  assert.equal(dueCheckpoint(branch, "Initial title"), undefined);
+  branch.push(msg("user", "fifth request"), msg("assistant", "fifth result"));
+  assert.equal(dueCheckpoint(branch, "Initial title")?.checkpoint, 5);
 });

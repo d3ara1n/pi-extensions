@@ -44,6 +44,7 @@ export function loadNamerConfig(cwd?: string): SessionNamerConfig {
 
   return {
     enabled: raw.enabled ?? DEFAULT_CONFIG.enabled,
+    periodicRename: raw.periodicRename ?? DEFAULT_CONFIG.periodicRename,
     sideAgentRole: raw.sideAgentRole ?? DEFAULT_CONFIG.sideAgentRole,
     maxLength,
   };

@@ -6,21 +6,28 @@ Session naming for pi with layered correction paths.
 
 On the first user prompt of a new session, a lightweight side agent generates a
 concise title so the session is never "Untitled". When the initial name goes
-stale (the session drifted from its opening message), two correction paths are
-available: `/namer:rename` regenerates from a conversation excerpt, and
+stale (the session drifted from its opening message), `/namer:rename` can
+regenerate from a conversation excerpt, and
 the `rename_session` tool lets the main agent name the session directly —
 the agent's full context is the best naming source.
+Optionally, generated titles can also be refreshed after the 5th, 10th, 20th,
+50th, and 100th completed user turns.
 
 ## Features
 
 - **Zero-config**: Works out of the box with pi-model-roles' `utility` role
-- **First-turn only**: Adds ~0.5-1s latency on the first prompt, zero overhead after
+- **First-turn naming**: Names new sessions asynchronously on the opening prompt;
+  later naming calls happen only if periodic renaming is enabled
 - **Graceful fallback**: If the side agent fails, truncates the user prompt as name
 - **Manual rename**: `/namer:rename` regenerates from a conversation excerpt —
   each turn pairs a user prompt with the assistant's closing reply (the user
   gives direction, the assistant carries the substance); up to 8 turns,
   windowed to the first 4 and last 4 (the opening defines why the session
   exists, the latest shows what it became) when the session is longer
+- **Optional periodic rename**: Uses the same excerpt as `/namer:rename` after
+  completed turns 5, 10, 20, 50, and 100; disabled by default. Explicitly set
+  titles (via `/name` or `rename_session`) are never overwritten. Existing
+  titles without plugin provenance are also left alone.
 - **Agent rename**: `rename_session` tool lets the main agent set the session
   name on the user's request, with the full conversation as its source
 
@@ -32,6 +39,7 @@ In `~/.pi/agent/settings.json`:
 {
   "sessionNamer": {
     "enabled": true,
+    "periodicRename": false,
     "sideAgentRole": "utility",
     "maxLength": 50
   }
@@ -41,6 +49,7 @@ In `~/.pi/agent/settings.json`:
 | Field | Default | Description |
 |-------|---------|-------------|
 | `enabled` | `true` | Global on/off switch |
+| `periodicRename` | `false` | Refresh plugin-generated titles after completed turns 5, 10, 20, 50, and 100; set to `true` to enable |
 | `sideAgentRole` | `"utility"` | pi-model-roles role for the naming side agent |
 | `maxLength` | `50` | Maximum name length in characters; `0` means unlimited, and negative values are normalized to `0` |
 

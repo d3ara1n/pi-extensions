@@ -10,7 +10,9 @@ import { test } from "node:test";
 import { generateSessionName } from "./namer.ts";
 import type { SessionNamerConfig } from "./types.ts";
 
-const BASE_CONFIG: SessionNamerConfig = { enabled: true, sideAgentRole: "utility", maxLength: 0 };
+const BASE_CONFIG: SessionNamerConfig = {
+  enabled: true, periodicRename: false, sideAgentRole: "utility", maxLength: 0,
+};
 
 function fakeRolesApi(reply: string, capture?: { content?: string }) {
   return {

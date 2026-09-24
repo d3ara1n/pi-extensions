@@ -3,14 +3,13 @@
  *
  * L1: on the first user prompt of a new session, a lightweight side agent
  *     generates a concise title so the session is never "Untitled".
- * L2: `/namer:rename` regenerates from a conversation window (each turn
- *     pairs a user prompt with the assistant's closing reply) when the user
- *     finds the initial name stale.
+ * L2: `/namer:rename` and optional conversation checkpoints regenerate from
+ *     a window of user prompts paired with the assistant's closing replies.
  * L3: `rename_session` tool lets the main agent name the session on the
  *     user's request — the agent's context is the best naming source.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getModelRolesAPI } from "@d3ara1n/pi-model-roles";
 import type { ModelRolesAPI } from "@d3ara1n/pi-model-roles";
 import { Type } from "typebox";
@@ -19,6 +18,9 @@ import type { SessionNamerConfig } from "./types.ts";
 import { loadNamerConfig } from "./config.ts";
 import { cleanSessionName, generateSessionName, NAMING_RULES } from "./namer.ts";
 import type { NamingTurn } from "./namer.ts";
+
+const STATE_ENTRY = "pi-session-namer";
+const RENAME_CHECKPOINTS = new Set([5, 10, 20, 50, 100]);
 
 export default function sessionNamerExtension(pi: ExtensionAPI) {
   let config: SessionNamerConfig = DEFAULT_CONFIG;
@@ -32,7 +34,7 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
 
     // If the session already has a name (resume/fork/user-set), don't auto-name
     const existingName = pi.getSessionName();
-    if (existingName) {
+    if (existingName || collectTurns(_ctx.sessionManager.getBranch()).some((turn) => turn.user)) {
       hasNamed = true;
     }
   });
@@ -48,6 +50,7 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
 
     // Mark as handled (no retry regardless of subsequent success/failure)
     hasNamed = true;
+    const sessionFile = ctx.sessionManager.getSessionFile();
 
     // Name asynchronously so we don't block the main agent startup
     (async () => {
@@ -71,7 +74,8 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
           { turns: [{ user: event.prompt }] },
         );
 
-        pi.setSessionName(name);
+        if (ctx.sessionManager.getSessionFile() !== sessionFile || pi.getSessionName()) return;
+        setGeneratedName(pi, ctx.sessionManager, name);
       } catch (err) {
         // Side agent failed (upstream error, empty response, or timeout on
         // the cheap utility model) — fall back to a truncated prompt title
@@ -81,12 +85,45 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
           .slice(0, config.maxLength || undefined)
           .replace(/\n/g, " ")
           .trim();
-        pi.setSessionName(fallback || "New session");
+        if (ctx.sessionManager.getSessionFile() !== sessionFile || pi.getSessionName()) return;
+        setGeneratedName(pi, ctx.sessionManager, fallback || "New session");
         ctx.ui.notify(`Session naming failed (${reason}) — using fallback title.`, "warning");
       }
     })().catch(() => {
       ctx.ui.notify("Session naming encountered an error.", "warning");
     });
+  });
+
+  pi.on("agent_settled", async (_event, ctx) => {
+    if (!ctx.hasUI || !config.enabled || !config.periodicRename) return;
+    const branch = ctx.sessionManager.getBranch();
+    const currentName = pi.getSessionName();
+    const due = dueCheckpoint(branch, currentName);
+    if (!due) return;
+
+    // Record the attempt before the asynchronous call; a reload must not retry
+    // the same checkpoint or run two concurrent requests for it.
+    pi.appendEntry(STATE_ENTRY, { kind: "attempt", checkpoint: due.checkpoint });
+    const sessionFile = ctx.sessionManager.getSessionFile();
+    const lastUserId = lastUserEntryId(branch);
+    const nameEntryId = lastNameEntryId(branch);
+    try {
+      const rolesApi = getModelRolesAPI();
+      if (!rolesApi.resolveRole(config.sideAgentRole).model) return;
+      const name = await generateSessionName(rolesApi, config.sideAgentRole, config, {
+        turns: due.turns,
+      });
+      if (
+        ctx.sessionManager.getSessionFile() !== sessionFile ||
+        pi.getSessionName() !== currentName ||
+        lastNameEntryId(ctx.sessionManager.getBranch()) !== nameEntryId ||
+        lastUserEntryId(ctx.sessionManager.getBranch()) !== lastUserId
+      ) return;
+      setGeneratedName(pi, ctx.sessionManager, name);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      ctx.ui.notify(`Periodic rename failed: ${reason}`, "warning");
+    }
   });
 
   // ── /namer — show status ────────────────────────────────────────
@@ -100,9 +137,10 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
         `Max length: ${config.maxLength}`,
         `Current name: ${currentName ?? "(none)"}`,
         `Has auto-named: ${hasNamed}`,
+        `Periodic rename: ${config.periodicRename ? "enabled" : "disabled"}`,
         "",
         "Session toggles: /namer:enable or /namer:disable",
-        "Persistent config: set sessionNamer.enabled in settings.json",
+        "Persistent config: set sessionNamer.enabled / periodicRename in settings.json",
       ];
       ctx.ui.notify(lines.join("\n"), "info");
     },
@@ -158,7 +196,7 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
           { turns },
         );
 
-        pi.setSessionName(name);
+        setGeneratedName(pi, ctx.sessionManager, name);
         ctx.ui.notify(`Session renamed: ${name}`, "info");
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
@@ -190,6 +228,53 @@ export default function sessionNamerExtension(pi: ExtensionAPI) {
       return { content: [{ type: "text", text: `Session renamed to: ${name}` }], details: undefined };
     },
   });
+}
+
+/** @internal — decide whether the active branch has reached an untried checkpoint. */
+export function dueCheckpoint(entries: unknown[], currentName: string | undefined):
+  | { checkpoint: number; turns: NamingTurn[] }
+  | undefined {
+  if (!currentName || !isGeneratedName(entries, currentName)) return;
+  const turns = collectTurns(entries);
+  const numbered = turns.filter((turn) => turn.user);
+  const checkpoint = numbered.length;
+  if (!RENAME_CHECKPOINTS.has(checkpoint) || !numbered.at(-1)?.assistant) return;
+  if ((entries as any[]).some((entry) =>
+    entry?.type === "custom" && entry.customType === STATE_ENTRY &&
+    entry.data?.kind === "attempt" && entry.data.checkpoint === checkpoint
+  )) return;
+  return { checkpoint, turns };
+}
+
+function isGeneratedName(entries: unknown[], currentName: string): boolean {
+  const branch = entries as any[];
+  const latestName = branch.findLast((entry) => entry?.type === "session_info");
+  return latestName?.name === currentName && branch.some((entry) =>
+    entry?.type === "custom" && entry.customType === STATE_ENTRY &&
+    entry.data?.kind === "generated" && entry.data.sessionInfoId === latestName.id
+  );
+}
+
+function lastNameEntryId(entries: unknown[]): string | undefined {
+  return (entries as any[]).findLast((entry) => entry?.type === "session_info")?.id;
+}
+
+function lastUserEntryId(entries: unknown[]): string | undefined {
+  return (entries as any[]).findLast((entry) =>
+    entry?.type === "message" && entry.message?.role === "user"
+  )?.id;
+}
+
+function setGeneratedName(
+  pi: ExtensionAPI,
+  sessionManager: ExtensionContext["sessionManager"],
+  name: string,
+): void {
+  pi.setSessionName(name);
+  const sessionInfo = sessionManager.getBranch().findLast((entry) => entry.type === "session_info");
+  if (sessionInfo) {
+    pi.appendEntry(STATE_ENTRY, { kind: "generated", sessionInfoId: sessionInfo.id });
+  }
 }
 
 /**

@@ -19,6 +19,30 @@ export const PASSES: readonly ((text: string) => string)[] = [
   normalize,
 ];
 
+/** Remove BOM metadata only when comparing the first source line. @internal */
+export function comparisonPair(
+  actual: string,
+  expected: string,
+  sourceIndex: number,
+): [actual: string, expected: string] {
+  if (sourceIndex === 0 && actual.startsWith("\uFEFF")) {
+    actual = actual.slice(1);
+    if (expected.startsWith("\uFEFF")) expected = expected.slice(1);
+  }
+  return [actual, expected];
+}
+
+/** Compare logical source text using the same BOM policy as diagnostics. @internal */
+export function equalLine(
+  actual: string,
+  expected: string,
+  sourceIndex: number,
+  project: (text: string) => string,
+): boolean {
+  if (sourceIndex === 0) [actual, expected] = comparisonPair(actual, expected, sourceIndex);
+  return project(actual) === project(expected);
+}
+
 const STRATEGIES: readonly MatchStrategy[] = ["exact", "trim_end", "trim", "unicode"];
 
 /** @internal Name of the comparison pass at `pass` (0-based, PASSES order). */
@@ -37,7 +61,7 @@ export function seekPass(
     const project = PASSES[pass];
     let equal = true;
     for (let offset = 0; offset < pattern.length; offset++) {
-      if (project(lines[index + offset]) !== project(pattern[offset])) {
+      if (!equalLine(lines[index + offset], pattern[offset], index + offset, project)) {
         equal = false;
         break;
       }
@@ -47,7 +71,7 @@ export function seekPass(
   return undefined;
 }
 
-/** Search in Codex's default NormalizeToLf mode. @internal */
+/** Search logical source lines in fixed precision order. @internal */
 export function seekSequence(
   lines: readonly string[],
   pattern: readonly string[],
@@ -60,9 +84,9 @@ export function seekSequence(
   const first = eof ? end : start;
   // Complete each precision pass before attempting a looser match anywhere.
   for (const project of PASSES) {
-    const expected = pattern.map(project);
     for (let index = first; index <= end; index++) {
-      if (expected.every((line, offset) => project(lines[index + offset]) === line)) return index;
+      if (pattern.every((line, offset) => equalLine(lines[index + offset], line, index + offset, project)))
+        return index;
     }
   }
   return undefined;

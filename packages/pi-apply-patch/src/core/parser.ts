@@ -10,7 +10,13 @@ const UPDATE = "*** Update File: ";
 const MOVE = "*** Move to: ";
 const EOF = "*** End of File";
 
-type MutableChunk = { anchor?: string; oldLines: string[]; newLines: string[]; endOfFile: boolean };
+type MutableChunk = {
+  anchor?: string;
+  oldLines: string[];
+  newLines: string[];
+  newLineSources: (number | null)[];
+  endOfFile: boolean;
+};
 type PendingOperation =
   | { kind: "add"; path: string; content: string }
   | { kind: "delete"; path: string }
@@ -145,6 +151,7 @@ export function parsePatch(input: string): ParsedPatch {
         anchor: marker === "@@" ? undefined : marker.slice(3),
         oldLines: [],
         newLines: [],
+        newLineSources: [],
         endOfFile: false,
       });
       continue;
@@ -156,11 +163,14 @@ export function parsePatch(input: string): ParsedPatch {
     }
     const prefix = line[0];
     if (line === "" || prefix === " " || prefix === "+" || prefix === "-") {
-      const chunk = last ?? { oldLines: [], newLines: [], endOfFile: false };
+      const chunk = last ?? { oldLines: [], newLines: [], newLineSources: [], endOfFile: false };
       if (!last) current.chunks.push(chunk);
       const text = line.slice(1);
       if (prefix !== "+") chunk.oldLines.push(text);
-      if (prefix !== "-") chunk.newLines.push(text);
+      if (prefix !== "-") {
+        chunk.newLines.push(text);
+        chunk.newLineSources.push(prefix === "+" ? null : chunk.oldLines.length - 1);
+      }
       continue;
     }
     if (last && !empty(last))

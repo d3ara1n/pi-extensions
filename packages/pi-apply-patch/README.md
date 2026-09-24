@@ -61,6 +61,10 @@ Supported operations are Add, Delete, and Update, with an optional Move destinat
 
 Matching attempts exact text first, then ignores trailing whitespace, then leading and trailing whitespace, then normalizes selected Unicode punctuation and spaces. Each pass searches the complete remaining range before the next, looser pass. Repeated context is accepted; the first match in the successful pass wins.
 
+A BOM at the beginning of the source file is treated as metadata: the first line can match with or without it in the patch, and updates retain it. BOMs elsewhere remain literal content. LF and CRLF source lines share the same matching representation. Inline whitespace runs, zero-width characters, Unicode composition differences, and inserted or missing blank lines are not automatically ignored.
+
+Unchanged context lines retain their original text and line endings, even when matching used a looser comparison. Explicit `-`/`+` replacements inherit the removed lines' endings in order; additional lines inherit the last removed line's ending. Insertions use the preceding source line's ending, falling back to the following line, then the file's first ending, then LF. Existing blank lines are retained unless explicitly removed.
+
 Add overwrites existing files. Move writes the destination, overwriting it if necessary, then removes the source. Overwriting does not require the previous target contents to be readable as UTF-8; when an Add target cannot be read, its diff is unavailable. Missing destination directories are created. Paths are literal text, so quotes are part of a filename rather than shell quoting.
 
 ## Workspace and failure behavior
@@ -75,17 +79,28 @@ A verification failure leaves files untouched. A failure during execution can le
 
 ## Failure diagnostics
 
-When context matching fails, the error lists every unmatched hunk across every file — not just the first failure — so one round trip is enough to fix the whole patch. Each failed hunk reports:
+When context matching fails, the error summarizes failed hunks across every file, with detailed diagnostics for up to six hunks per file. Each detailed failure reports:
 
 - the hunk number and the line its forward search started from;
-- a bounded echo of the expected context lines (long contexts show first and last lines only);
-- the closest matching window in the file, classified as whitespace-only drift or content differences;
+- a bounded, visibly escaped echo of the expected context lines (long contexts show first and last lines only);
+- a nearby candidate window when one is found, classified as whitespace-only drift, content differences, or blank-line alignment differences;
+- up to three differing line examples showing expected and actual text, the first differing column (1-based Unicode code points), character codes, and adjacent invisible-character run counts; additional differences are counted;
+- inserted or missing blank lines between matching nonblank lines, with expected and actual line counts;
 - an exact match that lies outside the searched range (earlier in the file, or before an `*** End of File` anchor) — usually a chunk-ordering mistake;
 - whether the hunk's replacement text already occurs in the file, meaning the hunk was likely applied before.
 
+Spaces, tabs, zero-width characters, directional controls, and combining marks are rendered as visible Unicode escapes. These escapes are diagnostic notation; a patch must contain the literal source characters. Long line examples show an excerpt around the first difference. For example, a source with two inline spaces where the patch expects one reports:
+
+```text
+expected: "const\u0020x\u0020=\u00201;"
+actual:   "const\u0020\u0020x\u0020=\u00201;"
+first difference at column 7 (Unicode code points): expected "x" (U+0078); actual SPACE (U+0020)
+adjacent invisible run: expected SPACE (U+0020) × 1 at column 6; actual SPACE (U+0020) × 2 at column 6
+```
+
 Successful results carry per-hunk match details in `details`: the matched line, which comparison produced the match (exact, trailing-whitespace, whitespace, or Unicode normalization), and how many times the context occurs in the file — matching picks the first occurrence. Adds and moves that overwrite existing destinations are flagged, and a source that changed between verification and the write is rematched against its live content with a note. Candidate scans are budgeted and skipped for very large files.
 
-Approximate candidates are diagnostics only: the tool never applies a fuzzy match, picks between multiple candidates, or rewrites the patch on its own.
+Candidate discovery can collapse inline whitespace, ignore Unicode default-ignorable characters, normalize Unicode composition, and align interior blank lines. These extra comparisons are diagnostics only: they do not authorize a write or rewrite the patch. Candidate searches are bounded and may find no candidate; an error is not a guarantee that one retry will succeed.
 
 Successful results use the Codex summary format:
 
@@ -100,9 +115,9 @@ Errors are thrown through pi's tool failure contract. In the TUI the tool row he
 
 ## Compatibility baseline
 
-The grammar, parsing rules, matching algorithm, and fixtures are pinned to [OpenAI Codex `b04a2c264516ec2e6b3c91dd73ad18a21fd5a88f`](https://github.com/openai/codex/tree/b04a2c264516ec2e6b3c91dd73ad18a21fd5a88f/codex-rs/apply-patch). Source attribution and adaptation details are in [NOTICE](./NOTICE); this package is licensed under Apache-2.0.
+The grammar, parser, matching passes, and fixtures are based on [OpenAI Codex `b04a2c264516ec2e6b3c91dd73ad18a21fd5a88f`](https://github.com/openai/codex/tree/b04a2c264516ec2e6b3c91dd73ad18a21fd5a88f/codex-rs/apply-patch), with the host adaptations below. Source attribution and adaptation details are in [NOTICE](./NOTICE); this package is licensed under Apache-2.0.
 
-The update algorithm uses that revision's default **NormalizeToLf** mode. It adds a trailing newline to nonempty updated content when needed. Lines replaced by a chunk use LF; untouched CRLF lines may retain CRLF, so mixed endings are possible. CR-only separators are not recognized as source line boundaries. The experimental `PreserveLineEndings` mode is not enabled.
+Updates preserve a leading BOM, unchanged context text, existing blank lines, and LF/CRLF endings as described above. These are local adaptations rather than the pinned revision's default **NormalizeToLf** behavior or its experimental `PreserveLineEndings` implementation. A trailing newline is still added to nonempty text when needed. A BOM-only result retains its BOM without adding a newline. CR-only separators are not recognized as source line boundaries.
 
 The parser accepts upstream's lenient boundary whitespace and specific `<<EOF` wrappers, while the advertised grammar describes the normal freeform format. Empty Add operations are accepted by the parser. Empty patches and empty Update operations fail. Multi-environment `*** Environment ID:` routing is unsupported.
 
@@ -118,7 +133,6 @@ npm run test:integration --workspace=@d3ara1n/pi-apply-patch
 npx tsc --noEmit
 ```
 
-Default tests use pure functions and an injected in-memory filesystem. Upstream fixture files are read from the repository, with explicit expectations for the tool's prevalidation and the default line-ending mode. Protocol tests exercise pi's local conversion helpers without network calls.
+Default tests use pure functions and an injected in-memory filesystem. Upstream fixture files are read from the repository, with explicit expectations for prevalidation and unsupported CR-only separators. Additional cases cover format preservation and diagnostic-only Unicode and whitespace comparisons. Protocol tests exercise pi's local conversion helpers without network calls.
 
 Integration tests use temporary sandbox directories and clean them up. They exercise actual file operations, symlink boundaries, UTF-8 decoding, and shared mutation queues. They do not call a model. Live model acceptance requires loading the extension first.
-

@@ -35,10 +35,8 @@ for (const scenario of await readdir(root, { withFileTypes: true })) {
     let expected = await filesIn(join(directory, "expected"));
     const patch = await readFile(join(directory, "patch.txt"), "utf8");
     const fs = new MemoryFileSystem(initial);
-    // Upstream's CLI fixture runner uses PreserveLineEndings. Our pinned
-    // default is NormalizeToLf; these explicit expectations document the delta.
-    if (id === 23) expected = { "lines.txt": "ONE\ntwo\nbetween\nthree\n" };
-    if (id === 24) expected = initial; // CR-only separators are not source lines in legacy mode.
+    // CR-only separators are not supported source line boundaries.
+    if (id === 24) expected = initial;
     // Codex's tool verifies all operations before execution, unlike its CLI.
     if (id === 15) expected = initial;
     if ([5, 6, 7, 8, 9, 12, 13, 15, 24].includes(id)) {

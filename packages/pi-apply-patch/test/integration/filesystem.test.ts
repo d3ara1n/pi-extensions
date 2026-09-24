@@ -83,9 +83,9 @@ test("real filesystem: symlink escapes and dangling paths are blocked", async (t
 
 test("real filesystem: UTF-8 decoding preserves BOMs and rejects invalid source bytes", async () => {
   await sandbox(async (ctx) => {
-    await fs.writeFile(join(ctx.cwd, "bom"), "\ufefffirst\nold\n");
-    await applyPatch(patch("*** Update File: bom\n@@\n-old\n+new"), ctx);
-    assert.equal(await fs.readFile(join(ctx.cwd, "bom"), "utf8"), "\ufefffirst\nnew\n");
+    await fs.writeFile(join(ctx.cwd, "bom"), "\ufefffirst\r\nold\r\n");
+    await applyPatch(patch("*** Update File: bom\n@@\n-first\n+FIRST\n-old\n+new"), ctx);
+    assert.equal(await fs.readFile(join(ctx.cwd, "bom"), "utf8"), "\ufeffFIRST\r\nnew\r\n");
     const bytes = Buffer.from([0xff, 0xfe, 0x00]);
     await fs.writeFile(join(ctx.cwd, "binary"), bytes);
     await assert.rejects(
@@ -98,7 +98,7 @@ test("real filesystem: UTF-8 decoding preserves BOMs and rejects invalid source 
     assert.equal(await fs.readFile(join(ctx.cwd, "binary"), "utf8"), "text\n");
     await fs.writeFile(join(ctx.cwd, "binary"), bytes);
     await applyPatch(patch("*** Update File: bom\n*** Move to: binary\n@@\n-new\n+moved"), ctx);
-    assert.equal(await fs.readFile(join(ctx.cwd, "binary"), "utf8"), "\ufefffirst\nmoved\n");
+    assert.equal(await fs.readFile(join(ctx.cwd, "binary"), "utf8"), "\ufeffFIRST\r\nmoved\r\n");
   });
 });
 

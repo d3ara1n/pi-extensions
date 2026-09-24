@@ -1,4 +1,5 @@
 import type { FileOperation, HunkCandidate, HunkFailure, HunkOutcome } from "./core/types.ts";
+import { describeDifference, visibleText } from "./diagnostic-text.ts";
 
 /** Per-file reporting budget: keep model-facing failures actionable, not overwhelming. */
 const MAX_FAILED_HUNKS = 6;
@@ -27,15 +28,17 @@ function plural(count: number, singular: string): string {
 
 /** Bounded echo of the pattern: whole when short, otherwise first and last lines. */
 function echoPattern(pattern: readonly string[]): string[] {
-  if (pattern.length <= MAX_ECHO_LINES) return [...pattern];
+  if (pattern.length <= MAX_ECHO_LINES) return pattern.map((line) => visibleText(line));
   return [
-    ...pattern.slice(0, 3),
+    ...pattern.slice(0, 3).map((line) => visibleText(line)),
     `… ${pattern.length - MAX_ECHO_LINES} of ${pattern.length} lines omitted`,
-    ...pattern.slice(-3),
+    ...pattern.slice(-3).map((line) => visibleText(line)),
   ];
 }
 
 function candidateLine(candidate: HunkCandidate, total: number): string {
+  if (candidate.lineCount)
+    return `closest match at line ${candidate.line}: blank-line alignment differs (expected ${candidate.lineCount.expected} lines, actual ${candidate.lineCount.actual} lines)`;
   if (candidate.difference === "exact")
     return `context matches at line ${candidate.line}, outside the searched range`;
   const kind =
@@ -49,12 +52,17 @@ function hunkLines(hunk: number, failure: HunkFailure): string[] {
     : `search started at line ${failure.searchFrom}`;
   const rows: string[] =
     failure.anchor !== undefined
-      ? [`hunk ${hunk}: anchor '${failure.anchor}' not found (${searched})`]
+      ? [`hunk ${hunk}: anchor ${visibleText(failure.anchor)} not found (${searched})`]
       : [`hunk ${hunk}: context lines not found (${searched})`, "expected:"];
   if (failure.anchor === undefined)
     for (const line of echoPattern(failure.pattern)) rows.push(`| ${line}`);
-  for (const candidate of failure.candidates)
+  for (const candidate of failure.candidates) {
     rows.push(candidateLine(candidate, failure.pattern.length));
+    for (const detail of candidate.details ?? [])
+      rows.push(...describeDifference(detail).map((line) => `  ${line}`));
+    if (candidate.omittedDifferences)
+      rows.push(`  … ${candidate.omittedDifferences} more differing lines omitted`);
+  }
   if (failure.alreadyAppliedAt !== undefined)
     rows.push(
       `the replacement text already occurs at line ${failure.alreadyAppliedAt}; this hunk may already be applied`,
@@ -92,6 +100,9 @@ export function renderRejection(report: RejectionReport): string {
   const total = report.rejected.length + report.verified.length;
   return [
     `apply_patch verification failed: ${report.rejected.length} of ${total} operations failed; no files were written.`,
+    ...(report.rejected.some((file) => file.outcomes)
+      ? ["Quoted text uses diagnostic escapes; patch lines must contain the literal characters, not these escape sequences."]
+      : []),
     "",
     ...sections.flatMap((section) => [...section, ""]),
   ]

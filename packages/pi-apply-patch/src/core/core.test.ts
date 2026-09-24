@@ -99,7 +99,8 @@ test("matches trailing whitespace, indentation, punctuation, and Unicode spaces 
   assert.equal(seekSequence(["“hello”\u00a0—\u00a0‘world’"], ["\"hello\" - 'world'"], 0), 0);
   assert.equal(seekSequence(["X"], ["x"], 0), undefined);
   assert.equal(seekSequence(["\u0085x\u0085"], ["x"], 0), 0);
-  assert.equal(seekSequence(["\ufeffx"], ["x"], 0), undefined);
+  assert.equal(seekSequence(["\ufeffx"], ["x"], 0), 0);
+  assert.equal(seekSequence(["first", "\ufeffx"], ["x"], 0), undefined);
 });
 
 test("anchors advance past their context and subsequent chunks search forward", () => {
@@ -113,7 +114,7 @@ test("anchors advance past their context and subsequent chunks search forward", 
 test("pure additions append, including when a skip-ahead anchor is present", () => {
   assert.equal(update("fn a\nx\n", "@@ fn a\n+tail"), "fn a\nx\ntail\n");
   assert.equal(update("", "@@\n+first"), "first\n");
-  assert.equal(update("a\n\n", "@@\n+tail"), "a\ntail\n");
+  assert.equal(update("a\n\n", "@@\n+tail"), "a\ntail\n\n");
 });
 
 test("EOF anchors only match the end and retain upstream legacy overlapping behavior", () => {
@@ -125,9 +126,9 @@ test("EOF anchors only match the end and retain upstream legacy overlapping beha
   assert.equal(update("one\n", "@@\n-one\n+first\n@@\n-one\n+second\n*** End of File"), "first\n");
 });
 
-test("retries trailing empty context and follows the default line-ending baseline", () => {
+test("retries trailing empty context and preserves CRLF source endings", () => {
   assert.equal(update("a", "@@\n-a\n+b\n "), "b\n");
-  assert.equal(update("one\r\ntwo\r\n", "@@\n-one\n+ONE"), "ONE\ntwo\r\n");
+  assert.equal(update("one\r\ntwo\r\n", "@@\n-one\n+ONE"), "ONE\r\ntwo\r\n");
   assert.equal(update("a\n", "@@\n-a"), "");
 });
 
@@ -163,10 +164,16 @@ test("planUpdate reports match strategy, line, and occurrence counts", () => {
 
 test("candidate search classifies whitespace and content drift", () => {
   assert.deepEqual(findCandidates(["const  total = a;"], ["const total = a;"], 0), [
-    { line: 1, differing: 1, whitespace: 1, difference: "whitespace", beforeSearchStart: false },
+    {
+      line: 1, differing: 1, whitespace: 1, difference: "whitespace", beforeSearchStart: false,
+      details: [{ expectedLine: 1, actualLine: 1, expected: "const total = a;", actual: "const  total = a;" }],
+    },
   ]);
   assert.deepEqual(findCandidates(["keep", "other"], ["keep", "changed"], 0), [
-    { line: 1, differing: 1, whitespace: 0, difference: "content", beforeSearchStart: false },
+    {
+      line: 1, differing: 1, whitespace: 0, difference: "content", beforeSearchStart: false,
+      details: [{ expectedLine: 2, actualLine: 2, expected: "changed", actual: "other" }],
+    },
   ]);
   assert.deepEqual(findCandidates(["unrelated"], ["entirely different"], 0), []);
 });

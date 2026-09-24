@@ -1,8 +1,10 @@
-/** A Codex update chunk using the default NormalizeToLf representation. */
+/** A Codex update chunk with LF-separated patch text. */
 export interface Chunk {
   readonly anchor?: string;
   readonly oldLines: readonly string[];
   readonly newLines: readonly string[];
+  /** Old-line offsets for unchanged context; null marks an explicitly added line. */
+  readonly newLineSources?: readonly (number | null)[];
   readonly endOfFile: boolean;
 }
 
@@ -61,6 +63,20 @@ export interface HunkCandidate {
   readonly difference: "exact" | "whitespace" | "content";
   /** The candidate lies before the position the hunk's forward search started from. */
   readonly beforeSearchStart: boolean;
+  /** Bounded examples of the actual differences, never used for matching. */
+  readonly details?: readonly HunkLineDifference[];
+  readonly omittedDifferences?: number;
+  /** Present when diagnostic alignment found inserted or missing blank lines. */
+  readonly lineCount?: { readonly expected: number; readonly actual: number };
+}
+
+export interface HunkLineDifference {
+  /** 1-based line within the expected context; absent for an extra source line. */
+  readonly expectedLine?: number;
+  /** 1-based source line; absent for a missing source line. */
+  readonly actualLine?: number;
+  readonly expected?: string;
+  readonly actual?: string;
 }
 
 /** Per-chunk outcome of matching one file's update operation. */

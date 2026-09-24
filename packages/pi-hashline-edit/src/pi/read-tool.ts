@@ -1,5 +1,5 @@
 /**
- * Override read: text files output "lineNo#hash│content"; non-text (images /
+ * Override read: text files output "lineNo#hash│content" by default; non-text (images /
  * binary) and read errors delegate to the built-in read.
  *
  * Hashes are computed from the current content on the fly — nothing is stored.
@@ -9,7 +9,12 @@
  * @module pi-hashline-edit/pi
  */
 
-import { createReadTool, getLanguageFromPath, highlightCode } from "@earendil-works/pi-coding-agent";
+import {
+	createReadTool,
+	getLanguageFromPath,
+	highlightCode,
+	truncateHead,
+} from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -18,9 +23,22 @@ import { hashFileLines } from "../core/hash.ts";
 import { hasFinalNewline, splitLines } from "../core/lines.ts";
 import { getState } from "./state.ts";
 import { parseHashline } from "./render.ts";
+import { Type } from "typebox";
+import { serializeReadView, type ReadView } from "./output-view.ts";
 
 const MAX_LINES = 2000;
 const MAX_BYTES = 256 * 1024;
+const readSchema = Type.Object({
+	path: Type.String({ description: "Path to the file to read (relative or absolute)" }),
+	offset: Type.Optional(Type.Number({ description: "Line number to start reading from (1-indexed)" })),
+	limit: Type.Optional(Type.Number({ description: "Maximum number of lines to read" })),
+	anchored: Type.Optional(
+		Type.Boolean({
+			description:
+				"Include LINE#HASH anchors in text output (default: true); set false for read-only content without edit anchors",
+		}),
+	),
+});
 
 /**
  * Canonical absolute path: shared by read/edit/grep to resolve a file consistently.
@@ -104,21 +122,60 @@ function renderReadBody(raw: string, path: string, theme: any): string {
 	return out.join("\n");
 }
 
+/** Render a structured read view for the TUI. */
+function renderReadView(view: ReadView, theme: any): string {
+	const out: string[] = [];
+	const shownFrom = view.fromLine > 1 ? ` (from line ${view.fromLine})` : "";
+	const noFinalNewline = view.noFinalNewline ? " · no trailing newline" : "";
+	out.push(
+		theme.fg("success", view.path) +
+			theme.fg("dim", ` · ${view.totalLines} lines${shownFrom}${noFinalNewline}`),
+	);
+	const lineNos = view.rows.map((row) => String(row.lineNo));
+	const detabbed = view.rows.map((row) => row.content.replace(/\t/g, "   "));
+	const lang = getLanguageFromPath(view.path);
+	let rendered: string[];
+	if (lang) {
+		const highlighted = highlightCode(detabbed.join("\n"), lang);
+		rendered =
+			highlighted.length === detabbed.length
+				? highlighted
+				: detabbed.map((line) => theme.fg("toolOutput", line));
+	} else {
+		rendered = detabbed.map((line) => theme.fg("toolOutput", line));
+	}
+	for (let i = 0; i < rendered.length; i++) {
+		out.push(theme.fg("dim", `   ${lineNos[i]}: `) + rendered[i]);
+	}
+	for (const notice of view.displayNotices ?? view.notices) out.push(theme.fg("warning", notice));
+	return out.join("\n");
+}
+
 /** Build the read override (a ToolDefinition fragment for registerTool). */
 export function makeReadOverride(cwd: string) {
 	const builtin = createReadTool(cwd);
+	const delegate = (
+		toolCallId: string,
+		params: any,
+		signal: AbortSignal | undefined,
+		onUpdate: any,
+	) => {
+		const { anchored: _anchored, ...builtinParams } = params;
+		return builtin.execute(toolCallId, builtinParams, signal, onUpdate);
+	};
 
 	return {
 		name: "read" as const,
 		label: "read",
 		description:
-			"Read file contents. Text files display per-line content hashes (LINE#HASH│content) for hashline-verified editing.",
-		promptSnippet: "Read files; each text line shows a content hash (LINE#HASH│content) anchoring it for edits",
+			"Read file contents. Text files display per-line content hashes by default (LINE#HASH│content) for hashline-verified editing; set anchored:false for a read-only view without hashes.",
+		promptSnippet:
+			"Read files; each text line shows a content hash by default (LINE#HASH│content) anchoring it for edits",
 		promptGuidelines: [
-			'Text files display as `LINE#HASH│content` (e.g. `12#aF3│  return x`). The `#HASH` anchors each line for precise editing.',
-			"Pass `path`; optionally `offset` (1-indexed start line) and `limit` (max lines). Prefer read over cat/sed for files you intend to edit.",
+			'Text files display as `LINE#HASH│content` by default (e.g. `12#aF3│  return x`). Set `anchored:false` when you only need readable content; that view cannot provide edit anchors.',
+			"Pass `path`; optionally `offset` (1-indexed start line), `limit` (max lines), and `anchored` (default true). Prefer read over cat/sed for files you intend to edit.",
 		],
-		parameters: builtin.parameters,
+		parameters: readSchema,
 		renderShell: "default" as const,
 
 		renderCall(args: any, theme: any) {
@@ -139,13 +196,15 @@ export function makeReadOverride(cwd: string) {
 			// Collapsed (not expanded): show nothing — the call line carries the
 			// title, matching the built-in read's fold behavior.
 			if (!expanded) return new Text("", 0, 0);
+			const view = result.details?.hashlineView as ReadView | undefined;
+			if (view?.kind === "read") return new Text(renderReadView(view, theme), 0, 0);
 			const raw = content?.type === "text" ? content.text : "";
 			return new Text(renderReadBody(raw, String(context?.args?.path ?? ""), theme), 0, 0);
 		},
 
 		async execute(toolCallId: string, params: any, signal: AbortSignal | undefined, onUpdate: any) {
 			// User cancelled → delegate to the built-in (builtin handles abort itself)
-			if (signal?.aborted) return builtin.execute(toolCallId, params, signal, onUpdate);
+			if (signal?.aborted) return delegate(toolCallId, params, signal, onUpdate);
 
 			const absPath = canonicalPath(cwd, params.path as string);
 			let buf: Buffer;
@@ -153,11 +212,11 @@ export function makeReadOverride(cwd: string) {
 				buf = await readFile(absPath);
 			} catch {
 				// read error → delegate to the built-in (it has polished error messages)
-				return builtin.execute(toolCallId, params, signal, onUpdate);
+				return delegate(toolCallId, params, signal, onUpdate);
 			}
 
 			// binary/image detection (null byte) → delegate to the built-in (it uses file-type for images)
-			if (buf.includes(0)) return builtin.execute(toolCallId, params, signal, onUpdate);
+			if (buf.includes(0)) return delegate(toolCallId, params, signal, onUpdate);
 
 			const text = buf.toString("utf-8");
 			const allLines = splitLines(text);
@@ -170,32 +229,52 @@ export function makeReadOverride(cwd: string) {
 			const startIdx = Math.max(0, offset - 1);
 			const endIdx = Math.min(totalLines, startIdx + limit);
 
-			const rows: string[] = [];
-			let bytes = 0;
-			let truncated = false;
-			for (let i = startIdx; i < endIdx; i++) {
-				const lineNo = i + 1;
-				const row = `${lineNo}#${hashes[i]}│${allLines[i]}`;
-				bytes += Buffer.byteLength(row, "utf-8");
-				if (bytes > MAX_BYTES) {
-					truncated = true;
-					break;
-				}
-				rows.push(row);
-			}
-
-			const shownFrom = offset > 1 ? ` (from line ${offset})` : "";
 			// A file whose last line carries no terminator is a byte-level fact that the
 			// numbered rows cannot show; state it in the header, the one line the model
 			// never copies into an edit `body`.
-			const noFinalNewline = hasFinalNewline(text) ? "" : " · no trailing newline";
-			const tail = truncated ? `\n… (truncated at ${MAX_BYTES >> 10}KB; use offset/limit to read more)` : "";
-			const header = `${params.path} · ${totalLines} lines${shownFrom}${noFinalNewline}\n`;
-			const body = rows.join("\n");
+			const candidate: ReadView = {
+				version: 1,
+				kind: "read",
+				path: String(params.path),
+				totalLines,
+				fromLine: offset,
+				noFinalNewline: !hasFinalNewline(text),
+				rows: allLines.slice(startIdx, endIdx).map((content, index) => ({
+					lineNo: startIdx + index + 1,
+					content,
+					hash: hashes[startIdx + index],
+				})),
+				notices: [],
+			};
+			const anchored = params.anchored !== false;
+			const canonical = serializeReadView(candidate, anchored);
+			const truncation = truncateHead(canonical, {
+				maxBytes: MAX_BYTES,
+				maxLines: Math.max(1, endIdx - startIdx) + 1,
+			});
+			const visibleCount = Math.max(0, Math.min(candidate.rows.length, truncation.outputLines - 1));
+			const notices = truncation.truncated
+				? [`… (truncated at ${MAX_BYTES >> 10}KB; use offset/limit to read more)`]
+				: [];
+			const view: ReadView = {
+				...candidate,
+				rows: candidate.rows.slice(0, visibleCount),
+				notices,
+				displayNotices: notices,
+			};
+
+			// Notices are part of the model view too; remove a final row if the notice
+			// itself would push the response over the byte budget.
+			while (
+				view.rows.length > 0 &&
+				Buffer.byteLength(serializeReadView(view, anchored), "utf-8") > MAX_BYTES
+			) {
+				view.rows = view.rows.slice(0, -1);
+			}
 
 			return {
-				content: [{ type: "text" as const, text: header + body + tail }],
-				details: undefined,
+				content: [{ type: "text" as const, text: serializeReadView(view, anchored) }],
+				details: { hashlineView: view },
 			};
 		},
 	};

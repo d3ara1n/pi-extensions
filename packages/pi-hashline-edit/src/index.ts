@@ -1,7 +1,7 @@
 /**
  * pi-hashline-edit extension entry.
  *
- * Overrides the built-in read/edit: read outputs "lineNo#hash│content";
+ * Overrides the built-in read/edit: read outputs "lineNo#hash│content" by default;
  * edit accepts structured hashline ops (edits[] with LINE#HASH anchors), and
  * legacy oldText/newText is rejected explicitly (no silent degradation). grep
  * is overridden the same way so results carry usable anchors. A separate

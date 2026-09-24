@@ -11,8 +11,9 @@
  *
  * We run ripgrep directly (`--json`) rather than wrap the built-in grep, so we
  * control formatting and can compute each line's hash from its FULL content
- * while displaying a truncated copy. (The built-in grep truncates long lines
- * before formatting; hashing that truncated text would not match what edit
+ * while sending a bounded model projection and retaining a TUI snapshot.
+ * (The built-in grep truncates long lines before formatting; hashing that
+ * truncated text would not match what edit
  * verifies against the full line — so the hash must be computed from the full
  * content, independently of what is displayed.)
  *
@@ -36,9 +37,10 @@ import {
   truncateLine,
   formatSize,
   DEFAULT_MAX_BYTES,
+  DEFAULT_MAX_LINES,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { Text } from "@earendil-works/pi-tui";
+import { Text, truncateToWidth, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { access, constants, readFile, stat } from "node:fs/promises";
@@ -48,11 +50,19 @@ import { splitLines } from "../core/lines.ts";
 import { getState } from "./state.ts";
 import { canonicalPath } from "./read-tool.ts";
 import { parseHashline } from "./render.ts";
+import {
+	serializeGrepLine,
+	serializeGrepView,
+	type GrepView,
+	type GrepViewLine,
+	type OutputRow,
+} from "./output-view.ts";
 
 const DEFAULT_LIMIT = 100;
-/** Max chars per result line for display (mirrors pi's truncate.ts; not exported there). */
+/** Max chars per model result line (mirrors pi's truncate.ts; not exported there). */
 const GREP_MAX_LINE_LENGTH = 500;
 const GREP_CONTEXT_MAX = 20;
+const GREP_TUI_SNAPSHOT_MAX_BYTES = 256 * 1024;
 
 /** Locate ripgrep: pi's bundled bin first, then PATH. Returns null if not found. */
 async function findRg(): Promise<string | null> {
@@ -161,6 +171,12 @@ const grepOverrideSchema = Type.Object({
   ),
   limit: Type.Optional(
     Type.Number({ description: "Maximum number of matching lines to return (default: 100)" }),
+  ),
+  anchored: Type.Optional(
+    Type.Boolean({
+      description:
+        "Include LINE#HASH anchors in content output (default: true); set false for read-only content without edit anchors",
+    }),
   ),
 });
 
@@ -337,6 +353,95 @@ function toDisplayLines(raw: string, theme: any): string[] {
   return out;
 }
 
+/** Render a structured grep view; this path is independent of model anchor syntax. */
+function toDisplayLinesFromView(view: GrepView, theme: any): string[] {
+  const out: string[] = [];
+  const lineNoWidth = view.lines.reduce(
+    (width, line) => (line.kind === "row" ? Math.max(width, String(line.row.lineNo).length) : width),
+    0,
+  );
+  let i = 0;
+  while (i < view.lines.length) {
+    const line = view.lines[i];
+    if (line.kind === "header") {
+      out.push(
+        theme.fg("success", line.path) +
+          theme.fg("dim", ` · ${line.matchCount} match${line.matchCount !== 1 ? "es" : ""}`),
+      );
+      const group: OutputRow[] = [];
+      let j = i + 1;
+      while (j < view.lines.length && view.lines[j].kind === "row") {
+        group.push((view.lines[j] as { kind: "row"; row: OutputRow }).row);
+        j++;
+      }
+      const base = group.length
+        ? Math.min(...group.map((row) => countLeading(row.content)))
+        : 0;
+      const marker = base > 0 ? theme.fg("dim", "›") + " " : "";
+      for (const row of group) {
+        const body = row.content.slice(base);
+        out.push(
+          theme.fg("dim", `   ${String(row.lineNo).padStart(lineNoWidth)}: `) +
+            marker +
+            theme.fg("toolOutput", body),
+        );
+      }
+      i = j;
+      continue;
+    }
+    if (line.kind === "separator") out.push("");
+    i++;
+  }
+  const displayNotices = view.displayNotices ?? view.notices;
+  if (displayNotices.length) out.push("");
+  for (const notice of displayNotices) out.push(theme.fg("warning", `[${notice}]`));
+  return out;
+}
+
+function trimGrepTail(lines: GrepViewLine[]): GrepViewLine[] {
+  const trimmed = lines.slice();
+  while (trimmed.at(-1)?.kind === "separator") trimmed.pop();
+  if (trimmed.at(-1)?.kind === "header") trimmed.pop();
+  if (trimmed.at(-1)?.kind === "separator") trimmed.pop();
+  return trimmed;
+}
+
+class GrepResult implements Component {
+  private readonly lines: string[];
+  private readonly expanded: boolean;
+  private readonly theme: any;
+
+  constructor(lines: string[], expanded: boolean, theme: any) {
+    this.lines = lines;
+    this.expanded = expanded;
+    this.theme = theme;
+  }
+
+  invalidate(): void {}
+
+  render(width: number): string[] {
+    if (width <= 0) return [];
+    const maxLines = this.expanded ? this.lines.length : Math.min(this.lines.length, 15);
+    const rendered: string[] = [];
+    for (const line of this.lines.slice(0, maxLines)) {
+      if (this.expanded) {
+        rendered.push(...(line === "" ? [""] : wrapTextWithAnsi(line, width)));
+      } else {
+        rendered.push(truncateToWidth(line, width));
+      }
+    }
+    if (!this.expanded && this.lines.length > maxLines) {
+      rendered.push(
+        truncateToWidth(
+          this.theme.fg("muted", `… (${this.lines.length - maxLines} more lines)`),
+          width,
+        ),
+      );
+    }
+    return rendered;
+  }
+}
+
 /** Build the production grep override (a ToolDefinition fragment for registerTool). */
 export function makeGrepOverride(cwd: string) {
   return makeGrepOverrideWithBackend(cwd, {});
@@ -360,11 +465,11 @@ export function makeGrepOverrideWithBackend(cwd: string, overrides: Partial<Grep
     name: "grep" as const,
     label: "grep",
     description:
-      "Search file contents, respecting .gitignore. Content results are grouped by file and include LINE#HASH anchors usable in edit; built-in grep fallback results have no anchors.",
+      "Search file contents, respecting .gitignore. Content results are grouped by file and include LINE#HASH anchors by default when ripgrep is available; built-in fallback results have no anchors. Set anchored:false for read-only content without hashes.",
     promptSnippet: "Search file contents with edit-ready line anchors",
     promptGuidelines: [
       "Prefer the grep tool for file-content searches.",
-      "Use returned LINE#HASH anchors directly in edit when present; no re-read is needed.",
+      "Use returned LINE#HASH anchors directly in edit when present; no re-read is needed. Results requested with anchored:false are read-only and cannot provide edit anchors.",
       'Use outputMode:"files"/"count" when only paths or counts are needed; use matchMode:"all" and excludePattern for line-level filters instead of shell pipelines.',
     ],
     parameters: grepOverrideSchema,
@@ -405,14 +510,9 @@ export function makeGrepOverrideWithBackend(cwd: string, overrides: Partial<Grep
         return new Text(theme.fg("error", t), 0, 0);
       }
       const out = result.content?.[0]?.type === "text" ? result.content[0].text : "";
-      const styled = toDisplayLines(out, theme);
-      const maxLines = expanded ? styled.length : 15;
-      const shown = styled.slice(0, maxLines);
-      const more =
-        !expanded && styled.length > maxLines
-          ? `\n${theme.fg("muted", `… (${styled.length - maxLines} more lines)`)}`
-          : "";
-      return new Text(shown.join("\n") + more, 0, 0);
+      const view = result.details?.hashlineView as GrepView | undefined;
+      const styled = view?.kind === "grep" ? toDisplayLinesFromView(view, theme) : toDisplayLines(out, theme);
+      return new GrepResult(styled, expanded, theme);
     },
 
     async execute(
@@ -423,7 +523,9 @@ export function makeGrepOverrideWithBackend(cwd: string, overrides: Partial<Grep
     ): Promise<any> {
       const state = getState();
       const ctx = clampContext(params.context);
-      const delegatedParams = params.context === undefined ? params : { ...params, context: ctx };
+      const { anchored: _anchored, ...paramsWithoutView } = params;
+      const delegatedParams =
+        params.context === undefined ? paramsWithoutView : { ...paramsWithoutView, context: ctx };
       // aborted → built-in grep (it handles abort itself)
       if (signal?.aborted) return backend.delegate(toolCallId, delegatedParams, signal, onUpdate);
 
@@ -616,6 +718,8 @@ export function makeGrepOverrideWithBackend(cwd: string, overrides: Partial<Grep
 
             const blocks: string[] = [];
             if (outputMode === "content") {
+              const viewLines: GrepViewLine[] = [];
+              let snapshotBytes = 0;
               for (const [fp, matchLines] of byFile) {
                 const { lines, hashes } = await getFile(fp);
                 // Context windows are rebuilt from surviving matches so context
@@ -625,17 +729,84 @@ export function makeGrepOverrideWithBackend(cwd: string, overrides: Partial<Grep
                   for (let n = Math.max(1, ln - ctx); n <= Math.min(lines.length, ln + ctx); n++)
                     windowSet.add(n);
                 }
-                const header = `${formatPath(fp)} · ${matchLines.length} match${matchLines.length !== 1 ? "es" : ""}\n`;
-                const rows: string[] = [];
+                viewLines.push({
+                  kind: "header",
+                  path: formatPath(fp),
+                  matchCount: matchLines.length,
+                });
                 for (const n of [...windowSet].sort((a, b) => a - b)) {
-                  const content = lines[n - 1] ?? "";
+                  const content = (lines[n - 1] ?? "").replace(/\r/g, "");
                   const hash = hashes[n - 1] ?? "";
-                  const { text: disp, wasTruncated } = truncateLine(content.replace(/\r/g, ""));
+                  const { text: modelContent, wasTruncated } = truncateLine(content);
                   if (wasTruncated) linesTruncated = true;
-                  rows.push(`${n}#${hash}│${disp}`);
+                  const contentBytes = Buffer.byteLength(content, "utf-8");
+                  const displayContent =
+                    snapshotBytes + contentBytes <= GREP_TUI_SNAPSHOT_MAX_BYTES
+                      ? content
+                      : modelContent;
+                  if (displayContent === content) snapshotBytes += contentBytes;
+                  viewLines.push({
+                    kind: "row",
+                    row: { lineNo: n, content: displayContent, modelContent, hash },
+                  });
                 }
-                blocks.push(`${header}${rows.join("\n")}`);
+                if (fp !== [...byFile.keys()].at(-1)) viewLines.push({ kind: "separator" });
               }
+              const anchored = params.anchored !== false;
+              const canonical = viewLines.map((line) => serializeGrepLine(line, anchored)).join("\n");
+              const truncation = truncateHead(canonical, {
+                maxBytes: DEFAULT_MAX_BYTES,
+                maxLines: DEFAULT_MAX_LINES,
+              });
+              const visibleLines = trimGrepTail(viewLines.slice(0, truncation.outputLines));
+              const snapshotTruncated = visibleLines.some(
+                (line) =>
+                  line.kind === "row" &&
+                  line.row.modelContent !== undefined &&
+                  line.row.content !== line.row.modelContent,
+              );
+              const notices: string[] = [];
+              if (matchLimitReached)
+                notices.push(
+                  `${effectiveLimit} matches limit reached. Use limit=${effectiveLimit * 2} for more, or refine pattern`,
+                );
+              if (truncation.truncated) {
+                notices.push(
+                  truncation.truncatedBy === "lines"
+                    ? `${DEFAULT_MAX_LINES} output lines limit reached`
+                    : `${formatSize(DEFAULT_MAX_BYTES)} limit reached`,
+                );
+              }
+              if (linesTruncated)
+                notices.push(
+                  `Some lines truncated to ${GREP_MAX_LINE_LENGTH} chars. Use read to see full lines`,
+                );
+              const displayNotices = notices.filter(
+                (notice) => !notice.startsWith("Some lines truncated to "),
+              );
+              if (snapshotTruncated)
+                displayNotices.push("Some long lines are shown in compact form");
+              const view: GrepView = {
+                version: 1,
+                kind: "grep",
+                lines: visibleLines,
+                notices,
+                displayNotices,
+              };
+              while (
+                view.lines.length > 0 &&
+                Buffer.byteLength(serializeGrepView(view, anchored), "utf-8") > DEFAULT_MAX_BYTES
+              ) {
+                const next = view.lines.slice();
+                while (next.length && next.at(-1)?.kind !== "row") next.pop();
+                if (next.at(-1)?.kind === "row") next.pop();
+                view.lines = trimGrepTail(next);
+              }
+              resolvePromise({
+                content: [{ type: "text" as const, text: serializeGrepView(view, anchored) }],
+                details: { hashlineView: view },
+              });
+              return;
             } else if (outputMode === "files") {
               for (const fp of byFile.keys()) blocks.push(formatPath(fp));
             } else {
@@ -650,7 +821,7 @@ export function makeGrepOverrideWithBackend(cwd: string, overrides: Partial<Grep
               );
             }
 
-            let output = blocks.join(outputMode === "content" ? "\n\n" : "\n");
+            let output = blocks.join("\n");
             const truncation = truncateHead(output, { maxBytes: DEFAULT_MAX_BYTES });
             output = truncation.content;
 

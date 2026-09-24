@@ -52,6 +52,47 @@ test("read execute: text outputs LINE#HASH│content", async () => {
 	});
 });
 
+test("read execute: anchored=false keeps line numbers and source indentation without hashes", async () => {
+	await withDir(async (dir) => {
+		await writeFile(join(dir, "f.ts"), "  first\n\tsecond\n\n");
+		const tool = makeReadOverride(dir);
+		const anchored: any = await call(tool, { path: "f.ts" });
+		const plain: any = await call(tool, { path: "f.ts", anchored: false });
+		assert.match(anchored.content[0].text, /1#[0-9A-Z]+│  first/);
+		assert.match(plain.content[0].text, /1│  first/);
+		assert.match(plain.content[0].text, /2│\tsecond/);
+		assert.doesNotMatch(plain.content[0].text, /#[0-9A-Z]+│/);
+		assert.deepEqual(plain.details, anchored.details);
+	});
+});
+
+test("read anchored=false uses its own output budget instead of charging hidden hashes", async () => {
+	await withDir(async (dir) => {
+		const source = Array.from({ length: 5000 }, (_, index) => `${index.toString().padStart(4, "0")} ${"x".repeat(70)}`).join("\n");
+		await writeFile(join(dir, "large.txt"), source);
+		const tool = makeReadOverride(dir);
+		const anchored: any = await call(tool, { path: "large.txt", limit: 5000 });
+		const plain: any = await call(tool, { path: "large.txt", limit: 5000, anchored: false });
+		const countRows = (text: string) => (text.match(/^\d+(?:#[A-Z0-9]+)?│/gm) ?? []).length;
+		assert.ok(countRows(plain.content[0].text) > countRows(anchored.content[0].text));
+		assert.ok(Buffer.byteLength(plain.content[0].text, "utf8") <= 256 * 1024);
+		assert.ok(Buffer.byteLength(anchored.content[0].text, "utf8") <= 256 * 1024);
+	});
+});
+
+test("read renderer uses the same user-facing view for anchored and unanchored results", async () => {
+	await withDir(async (dir) => {
+		await writeFile(join(dir, "f.ts"), "  first\n\tsecond\n");
+		const tool = makeReadOverride(dir);
+		const anchored: any = await call(tool, { path: "f.ts" });
+		const plain: any = await call(tool, { path: "f.ts", anchored: false });
+		const context = { isError: false, args: { path: "f.ts" } };
+		const a = tool.renderResult(anchored, { isPartial: false, expanded: true }, stubTheme, context);
+		const p = tool.renderResult(plain, { isPartial: false, expanded: true }, stubTheme, context);
+		assert.deepEqual(a.render(120), p.render(120));
+	});
+});
+
 test("read execute: a missing final newline is stated in the header", async () => {
 	await withDir(async (dir) => {
 		await writeFile(join(dir, "f.txt"), "line1\nline2");

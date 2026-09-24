@@ -139,7 +139,7 @@ Including the ones that argue *for* the route I didn't take.
 
 ## Protocol
 
-`read` output (each line anchored):
+`read` output (each line anchored by default):
 
 ```
 src/foo.ts · 6 lines
@@ -148,7 +148,7 @@ src/foo.ts · 6 lines
 3#mP0│export function foo(x: number) {
 ```
 
-`grep` output (results grouped by file, each line anchored — copy `LINE#HASH` straight into an edit):
+`grep` output (results grouped by file, each line anchored by default — copy `LINE#HASH` straight into an edit):
 
 ```
 src/foo.ts · 2 matches
@@ -157,6 +157,12 @@ src/foo.ts · 2 matches
 src/util.ts · 1 match
 10#aF3│  const z = compute(x)
 ```
+
+Both `read` and `grep` accept `anchored:false` for a read-only model view. That
+view keeps line numbers and source indentation but omits the `#HASH` portion,
+so it cannot be used to construct `edit` anchors. The TUI display is unchanged
+in style: it renders from a structured snapshot, so unanchored output may show
+more lines when the smaller model representation fits within the output budget.
 
 The `grep` override also covers the compound queries that otherwise push models into bash pipelines:
 

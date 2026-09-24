@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { computeLineHash } from "../core/hash.ts";
 import { makeGrepOverrideWithBackend, type GrepBackend } from "./grep-tool.ts";
 import { makeEditOverride } from "./edit-tool.ts";
@@ -137,6 +138,119 @@ test("formats parsed rg matches with full-line hash anchors", async () => {
         path: "/fake/rg",
         args: ["--json", "--line-number", "--color=never", "--hidden", "-e", "alpha", "--", dir],
       });
+    }),
+  );
+});
+
+test("grep anchored=false preserves line numbers and indentation without hashes", async () => {
+  await withDir(async (dir) =>
+    withEnabled(true, async () => {
+      const file = join(dir, "a.ts");
+      await writeFile(file, "  alpha\n\talpha two\n");
+      const fake = fakeBackend({
+        lines: [rgMatch(file, 1, "  alpha\n"), rgMatch(file, 2, "\talpha two\n")],
+      });
+      const tool = makeGrepOverrideWithBackend(dir, fake.backend);
+      const result: any = await call(tool, { pattern: "alpha", anchored: false });
+      const output = text(result);
+      assert.match(output, /1│  alpha/);
+      assert.match(output, /2│\talpha two/);
+      assert.doesNotMatch(output, /#[0-9A-Z]+│/);
+      assert.equal(result.details.hashlineView.kind, "grep");
+    }),
+  );
+});
+
+test("grep keeps full selected lines for the TUI while projecting long lines for the model", async () => {
+  await withDir(async (dir) =>
+    withEnabled(true, async () => {
+      const file = join(dir, "long.ts");
+      const source = `const value = "${"x".repeat(700)}";`;
+      await writeFile(file, `${source}\n`);
+      const tool = makeGrepOverrideWithBackend(
+        dir,
+        fakeBackend({ lines: [rgMatch(file, 1, `${source}\n`)] }).backend,
+      );
+      const result: any = await call(tool, { pattern: "value" });
+      const row = result.details.hashlineView.lines.find((line: any) => line.kind === "row").row;
+      assert.equal(row.content, source);
+      assert.ok(row.modelContent.length < source.length);
+      assert.ok(text(result).length < source.length);
+      const rendered = tool
+        .renderResult(
+          result,
+          { isPartial: false, expanded: false },
+          { fg: (_color: string, value: string) => value },
+          {},
+        )
+        .render(40);
+      assert.ok(rendered.every((line: string) => visibleWidth(line) <= 40), JSON.stringify(rendered));
+    }),
+  );
+});
+
+test("grep anchored=false uses its own output budget instead of charging hidden hashes", async () => {
+  await withDir(async (dir) =>
+    withEnabled(true, async () => {
+      const file = join(dir, "large.ts");
+      const lines = Array.from(
+        { length: 2000 },
+        (_, index) => `${index.toString().padStart(4, "0")} ${"x".repeat(70)}`,
+      );
+      await writeFile(file, lines.join("\n"));
+      const backend = fakeBackend({
+        lines: lines.map((line, index) => rgMatch(file, index + 1, `${line}\n`)),
+      });
+      const tool = makeGrepOverrideWithBackend(dir, backend.backend);
+      const anchored: any = await call(tool, { pattern: "x", limit: 2000 });
+      const plain: any = await call(tool, { pattern: "x", limit: 2000, anchored: false });
+      const countRows = (result: any) =>
+        (text(result).match(/^\d+(?:#[A-Z0-9]+)?│/gm) ?? []).length;
+      assert.ok(countRows(plain) > countRows(anchored));
+      assert.ok(Buffer.byteLength(text(plain), "utf8") <= 50 * 1024);
+      assert.ok(Buffer.byteLength(text(anchored), "utf8") <= 50 * 1024);
+      const rendered = tool
+        .renderResult(
+          anchored,
+          { isPartial: false, expanded: true },
+          { fg: (_color: string, value: string) => value },
+          {},
+        )
+        .render(120);
+      const noticeIndex = rendered.findIndex((line: string) => line.startsWith("["));
+      assert.ok(noticeIndex > 0);
+      assert.equal(rendered[noticeIndex - 1], "");
+    }),
+  );
+});
+
+test("grep renderer is identical for anchored and unanchored model views", async () => {
+  await withDir(async (dir) =>
+    withEnabled(true, async () => {
+      const file = join(dir, "a.ts");
+      await writeFile(file, "  alpha\n\talpha two\n");
+      const make = () =>
+        fakeBackend({
+          lines: [rgMatch(file, 1, "  alpha\n"), rgMatch(file, 2, "\talpha two\n")],
+        });
+      const anchoredTool = makeGrepOverrideWithBackend(dir, make().backend);
+      const plainTool = makeGrepOverrideWithBackend(dir, make().backend);
+      const anchored: any = await call(anchoredTool, { pattern: "alpha" });
+      const plain: any = await call(plainTool, { pattern: "alpha", anchored: false });
+      const renderContext = { isError: false, args: {} };
+      const a = anchoredTool.renderResult(
+        anchored,
+        { isPartial: false, expanded: true },
+        { fg: (_color: string, value: string) => value, bold: (value: string) => value },
+        renderContext,
+      );
+      const p = plainTool.renderResult(
+        plain,
+        { isPartial: false, expanded: true },
+        { fg: (_color: string, value: string) => value, bold: (value: string) => value },
+        renderContext,
+      );
+      assert.deepEqual(a.render(120), p.render(120));
     }),
   );
 });
@@ -487,7 +601,9 @@ test("native fallback forwards parameters unchanged and propagates regex errors"
       assert.equal(text(await call(tool, input)), "delegated");
       assert.deepEqual(fake.delegates.at(-1)![1], input);
     }
-    assert.equal(fake.delegates.length, cases.length);
+    await call(tool, { pattern: "foo", anchored: false });
+    assert.deepEqual(fake.delegates.at(-1)![1], { pattern: "foo" });
+    assert.equal(fake.delegates.length, cases.length + 1);
     assert.equal(fake.calls.length, 0);
     fake.backend.delegate = async (...args) => {
       fake.delegates.push(args);
@@ -495,6 +611,6 @@ test("native fallback forwards parameters unchanged and propagates regex errors"
     };
     const failingTool = makeGrepOverrideWithBackend(dir, fake.backend);
     await assert.rejects(call(failingTool, { pattern: "queueTool(" }), /regex parse error/);
-    assert.equal(fake.delegates.length, cases.length + 1);
+    assert.equal(fake.delegates.length, cases.length + 2);
   });
 });

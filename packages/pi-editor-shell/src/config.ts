@@ -10,15 +10,16 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-/** Border icon slots that users can override. Each holds a single glyph
- *  (Nerd Font codepoint, Unicode symbol, or emoji) — whatever the user's
- *  terminal can render. Defaults live next to the renderer in index.ts. */
+/** Border icon prefixes, including any trailing padding needed by the glyph.
+ *  Templates append content directly without adding spaces. Defaults live
+ *  next to the renderer in index.ts. */
 export interface EditorShellIcons {
   model: string;
   thinking: string;
   context: string;
   cache: string;
   hitRate: string;
+  cost: string;
   turn: string;
   timer: string;
   folder: string;
@@ -38,8 +39,9 @@ export interface EditorShellConfig {
   pinnedStatus: string[];
   /**
    * Per-slot border-icon overrides. Any subset; missing keys fall back to
-   * the built-in icon set. Values are raw characters — JSON `"\uf0e7"`
-   * for a Nerd Font glyph, or `"↻"` for a Unicode symbol, etc.
+   * the built-in icon set. Values are used verbatim, including whitespace.
+   * Include a trailing space when the glyph needs room, e.g. JSON `"\uf4bc "`.
+   * An empty string hides the icon without leaving icon padding.
    */
   icons: Partial<EditorShellIcons>;
   /**
@@ -62,6 +64,7 @@ const ICON_KEYS: ReadonlyArray<keyof EditorShellIcons> = [
   "context",
   "cache",
   "hitRate",
+  "cost",
   "turn",
   "timer",
   "folder",

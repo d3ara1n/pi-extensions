@@ -7,7 +7,7 @@ Replaces pi's default editor and status bar with a unified rounded-corner shell 
 ## What shows up where
 
 - **Top border** — ` activity ·  model ·  thinking-level ` (left) + pinned extension statuses (right, via `pinnedStatus` config). The activity indicator shows a phase-aware spinner while working and ` Nm` while idle — see [Activity indicator](#activity-indicator).
-- **Bottom border** — `  ctx NN%/NNk|N.NM · ⚡cacheRead(total)  hitRate% · NN.N e2e t/s · $N.NNN ·  N ` (left) + `  ~/Projects (main +2 ~1 *4) ` (right, shows git branch plus staged, unstaged, and untracked file counts when in a repo; inside a linked worktree the branch carries an `@<name>` tag, e.g. `(feature-x @feature-x +2 ~1)`, so sibling worktrees of one repo are told apart at a glance). Response throughput defaults to client-observed end-to-end visible-text throughput, including local request preparation, network and queue latency, hidden reasoning, and visible generation. It can instead show generation throughput or be hidden; see [Throughput display](#throughput-display). A new turn clears the previous measurement, so unavailable samples never leave stale data in the border. Session cost includes assistant, tool, compaction, and branch-summary usage; the dollar segment is hidden when the provider reports no priced usage. ` N` counts persisted user messages on the current session branch. Session hit rate and detailed response timing are available via `/editor-shell:status`.
+- **Bottom border** — `  ctx NN%/NNk|N.NM · ⚡cacheRead(total)  hitRate% · NN.N e2e t/s · N.NNN ·  N ` (left) + `  ~/Projects (main +2 ~1 *4) ` (right, shows git branch plus staged, unstaged, and untracked file counts when in a repo; inside a linked worktree the branch carries an `@<name>` tag, e.g. `(feature-x @feature-x +2 ~1)`, so sibling worktrees of one repo are told apart at a glance). Response throughput defaults to client-observed end-to-end visible-text throughput, including local request preparation, network and queue latency, hidden reasoning, and visible generation. It can instead show generation throughput or be hidden; see [Throughput display](#throughput-display). A new turn clears the previous measurement, so unavailable samples never leave stale data in the border. Session cost includes assistant, tool, compaction, and branch-summary usage; the dollar segment is hidden when the provider reports no priced usage. ` N` counts persisted user messages on the current session branch. Session hit rate and detailed response timing are available via `/editor-shell:status`.
 - **Below shell** — Auto-wrapping extension status line (all `setStatus` entries not pinned to the top)
 - **Border color** follows pi's thinking-level / bash-mode indicator automatically.
 
@@ -23,25 +23,28 @@ In `~/.pi/agent/settings.json` under the `editorShell` key:
     "pinnedStatus": ["subagent", "access-denied"],
     "tpsDisplay": "end-to-end",
     "icons": {
-      "model": "robot",
-      "cache": "\\uf0e7"
+      "model": "robot ",
+      "cache": "\uf0e7"
     }
   }
 }
 ```
 
+Icon values are used verbatim as prefixes: every template joins the icon and its content without inserting a space. Include any desired trailing padding in the icon value itself. Some terminals use a following space to render wide Nerd Font glyphs at full size; this depends on the glyph, font, and terminal, not just the icon family. Set a slot to `""` to hide its icon without leaving icon padding. Custom overrides replace the entire prefix, including its padding.
+
 ### Default icons
 
-| Slot | Glyph | Icon source |
-|------|-------|-------------|
-| `model` | `` | oct-cpu |
-| `thinking` | `` | oct-light_bulb |
-| `context` | `` | oct-cache |
-| `cache` | `⚡` | oct-zap |
-| `hitRate` | `` | fa-bullseye |
-| `turn` | `` | oct-comment_discussion |
-| `timer` | `` | oct-clock |
-| `folder` | `` | fa-folder_open |
+| Slot | Glyph | Icon source | Trailing spaces |
+|------|-------|-------------|-----------------|
+| `model` | `` | oct-cpu | 1 |
+| `thinking` | `` | oct-light_bulb | 1 |
+| `context` | `` | oct-cache | 1 |
+| `cache` | `⚡` | oct-zap | 0 |
+| `hitRate` | `` | oct-goal | 1 |
+| `cost` | `` | fa-dollar_sign | 0 |
+| `turn` | `` | oct-comment_discussion | 1 |
+| `timer` | `` | oct-clock | 1 |
+| `folder` | `` | fa-folder_open | 1 |
 
 ### Branch counter
 

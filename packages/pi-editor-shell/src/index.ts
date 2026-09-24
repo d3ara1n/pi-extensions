@@ -70,15 +70,17 @@ function formatContextWindow(tokens: number): string {
 //    `editorShell.icons` config — see config.ts.
 //    `turn` and `timer` use Octicons, matching the model and thinking icons.
 //    `cache` uses U+26A1, which Nerd Fonts map to oct-zap directly.
+//    Icon values own their trailing padding; templates append content directly.
 const DEFAULT_ICONS: EditorShellIcons = {
-  model: "\uf4bc", //   oct-cpu
-  thinking: "\uf400", //   oct-light_bulb
-  context: "\uf49b", //   oct-cache
+  model: "\uf4bc ", //   oct-cpu
+  thinking: "\uf400 ", //   oct-light_bulb
+  context: "\uf49b ", //   oct-cache
   cache: "\u26a1", // ⚡  oct-zap (NF maps this codepoint to U+26A1)
-  hitRate: "\uf140", //   fa-bullseye（靶心，缓存命中率）
-  turn: "\uf442", //   oct-comment_discussion
-  timer: "\uf43a", //   oct-clock
-  folder: "\uf07c", //   fa-folder_open
+  hitRate: "\uf4de ", //   oct-goal
+  cost: "\uf155", //   fa-dollar_sign
+  turn: "\uf442 ", //   oct-comment_discussion
+  timer: "\uf43a ", //   oct-clock
+  folder: "\uf07c ", //   fa-folder_open
 };
 
 /** Minimal inline types to read cache-read totals without importing the
@@ -588,7 +590,7 @@ export default function (pi: ExtensionAPI) {
       const hitRate = cacheHitRate(_latestUsage);
       const cachePart =
         _cacheTotal > 0
-          ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.cache}${formatTokens(cacheReadNow)}(${formatTokens(_cacheTotal)})${hitRate != null ? ` ${icons.hitRate} ${hitRate.toFixed(1)}%` : ""}`)}`
+          ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.cache}${formatTokens(cacheReadNow)}(${formatTokens(_cacheTotal)})${hitRate != null ? ` ${icons.hitRate}${hitRate.toFixed(1)}%` : ""}`)}`
           : "";
       const displayedTps = config.tpsDisplay === "end-to-end"
         ? _latestPerformance?.e2eTps
@@ -601,17 +603,17 @@ export default function (pi: ExtensionAPI) {
         : "";
       const costPart =
         _sessionCost > 0
-          ? `${theme.fg("dim", " · ")}${theme.fg("muted", `$${_sessionCost.toFixed(3)}`)}`
+          ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.cost}${_sessionCost.toFixed(3)}`)}`
           : "";
       const turnPart = _turnCount > 0
-        ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.turn} ${_turnCount}`)}`
+        ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.turn}${_turnCount}`)}`
         : "";
 
       const activityView = activity?.read();
       const activityText = activityView?.kind === "busy"
         ? border(activityView.glyph)
         : activityView?.kind === "idle"
-          ? theme.fg(activityView.token, `${icons.timer} ${activityView.label}`)
+          ? theme.fg(activityView.token, `${icons.timer}${activityView.label}`)
           : "";
       const activityPart = activityText ? `${activityText}${theme.fg("dim", " · ")}` : "";
 
@@ -624,16 +626,16 @@ export default function (pi: ExtensionAPI) {
       const dirty = branch ? gitDirtyDisplay() : "";
       const cwdDisplay =
         branch && branch !== "detached"
-          ? `${icons.folder} ${cwdText} (${branch}${worktreeTag}${dirty})`
-          : `${icons.folder} ${cwdText}`;
+          ? `${icons.folder}${cwdText} (${branch}${worktreeTag}${dirty})`
+          : `${icons.folder}${cwdText}`;
 
       // Model in accent; thinking label in its level token — same hue the
       // border takes on, so switching levels visibly retints both together.
       return {
-        topLeft: ` ${activityPart}${theme.fg("accent", `${icons.model} ${model}`)}${theme.fg("dim", " · ")}${theme.fg(thinkingColor, `${icons.thinking} ${thinking}`)} `,
+        topLeft: ` ${activityPart}${theme.fg("accent", `${icons.model}${model}`)}${theme.fg("dim", " · ")}${theme.fg(thinkingColor, `${icons.thinking}${thinking}`)} `,
         topRight: buildPinned(),
         // Context in severity color; cwd stays muted so it never competes.
-        bottomLeft: ` ${theme.fg(contextToken(pct), `${icons.context} ${ctxText}`)}${cachePart}${tpsPart}${costPart}${turnPart} `,
+        bottomLeft: ` ${theme.fg(contextToken(pct), `${icons.context}${ctxText}`)}${cachePart}${tpsPart}${costPart}${turnPart} `,
         bottomRight: theme.fg("muted", ` ${cwdDisplay} `),
       };
     };

@@ -192,6 +192,18 @@ function cacheHitRate(u: UsageSnap | undefined): number | undefined {
   return ((u.cacheRead ?? 0) / totalPrompt) * 100;
 }
 
+/** @internal Color the whole cache-read segment from the latest reading. */
+export function cacheReadToken(cacheRead: number): ThemeColor {
+  return cacheRead === 0 ? "error" : "muted";
+}
+
+/** @internal Color the whole hit-rate segment from the unrounded percentage. */
+export function cacheHitRateToken(hitRate: number): ThemeColor {
+  if (hitRate < 50) return "error";
+  if (hitRate < 90) return "warning";
+  return "muted";
+}
+
 /** Format a token count for display: 14000000 → "14.0M", 132000 → "132.0k". */
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -590,7 +602,7 @@ export default function (pi: ExtensionAPI) {
       const hitRate = cacheHitRate(_latestUsage);
       const cachePart =
         _cacheTotal > 0
-          ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.cache}${formatTokens(cacheReadNow)}(${formatTokens(_cacheTotal)})${hitRate != null ? ` ${icons.hitRate}${hitRate.toFixed(1)}%` : ""}`)}`
+          ? `${theme.fg("dim", " · ")}${theme.fg(cacheReadToken(cacheReadNow), `${icons.cache}${formatTokens(cacheReadNow)}(${formatTokens(_cacheTotal)})`)}${hitRate != null ? theme.fg(cacheHitRateToken(hitRate), ` ${icons.hitRate}${hitRate.toFixed(1)}%`) : ""}`
           : "";
       const displayedTps = config.tpsDisplay === "end-to-end"
         ? _latestPerformance?.e2eTps

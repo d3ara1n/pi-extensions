@@ -1,6 +1,21 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
-import { sumSessionCost } from "./index.ts";
+import { cacheHitRateToken, cacheReadToken, sumSessionCost } from "./index.ts";
+
+test("cache-read color follows the latest reading, independently of session totals", () => {
+  assert.equal(cacheReadToken(0), "error");
+  assert.equal(cacheReadToken(1), "muted");
+  assert.equal(cacheReadToken(40_000), "muted");
+});
+
+test("hit-rate color uses the unrounded 50% and 90% thresholds", () => {
+  assert.equal(cacheHitRateToken(0), "error");
+  assert.equal(cacheHitRateToken(49.99), "error");
+  assert.equal(cacheHitRateToken(50), "warning");
+  assert.equal(cacheHitRateToken(89.99), "warning");
+  assert.equal(cacheHitRateToken(90), "muted");
+  assert.equal(cacheHitRateToken(100), "muted");
+});
 
 test("session cost includes non-message usage without counting unrelated entries", () => {
   const entries = [

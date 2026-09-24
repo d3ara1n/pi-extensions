@@ -52,6 +52,32 @@ test("read execute: text outputs LINE#HASH│content", async () => {
 	});
 });
 
+test("read delegates non-text files without adding hashline output", async () => {
+	await withDir(async (dir) => {
+		await writeFile(join(dir, "document.pdf"), "%PDF-1.7\n1 0 obj\nendobj\n");
+		const result: any = await call(makeReadOverride(dir), { path: "document.pdf" });
+		assert.equal(result.details, undefined);
+		assert.doesNotMatch(result.content[0].text, /^\d+#/m);
+	});
+});
+
+test("read delegates image rendering to the built-in renderer", async () => {
+	const tool = makeReadOverride(".");
+	const result = {
+		content: [
+			{ type: "text" as const, text: "Read image file [image/png]" },
+			{ type: "image" as const, data: "", mimeType: "image/png" },
+		],
+	};
+	const rendered: any = tool.renderResult(
+		result,
+		{ isPartial: false, expanded: true },
+		stubTheme,
+		{ isError: false, args: { path: "preview.png" }, showImages: false },
+	);
+	assert.match(rendered.render(120).join("\n"), /image\/png/);
+});
+
 test("read execute: anchored=false keeps line numbers and source indentation without hashes", async () => {
 	await withDir(async (dir) => {
 		await writeFile(join(dir, "f.ts"), "  first\n\tsecond\n\n");
@@ -90,6 +116,8 @@ test("read renderer uses the same user-facing view for anchored and unanchored r
 		const a = tool.renderResult(anchored, { isPartial: false, expanded: true }, stubTheme, context);
 		const p = tool.renderResult(plain, { isPartial: false, expanded: true }, stubTheme, context);
 		assert.deepEqual(a.render(120), p.render(120));
+		const collapsed = tool.renderResult(anchored, { isPartial: false, expanded: false }, stubTheme, context);
+		assert.deepEqual(collapsed.render(120), []);
 	});
 });
 

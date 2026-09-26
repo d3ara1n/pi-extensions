@@ -133,6 +133,30 @@ Edit `~/.pi/agent/settings.json`:
 
 All fields are optional. Defaults: `maxConcurrency: 4`, `maxDepth: 3`, `maxTurns: 0` (unlimited), `maxCost: 0` (unlimited), `history.enabled: true`, `summary.role: "utility"`, `summary.enabled: true`, and `inheritance.maxChars: 50000`.
 
+### Project overrides global (field-level merge)
+
+The same `subagent` block in a project's `.pi/settings.json` overrides the global settings **at the field level**, so you only pin the fields you want to change per project — every other field inherits the global value, and any field neither sets falls back to its default. Override precedence for every field is: project value > global value > default.
+
+- **Top-level scalars** (`maxConcurrency`, `maxDepth`, `maxTurns`, `maxCost`): a project value wins, otherwise the global value applies.
+- **Nested blocks** (`history`, `summary`, `inheritance`): merge field by field — a project-set field overrides the global, unset fields inherit the global.
+- **`agentOverrides`**: merges per role name. A project role's fields are merged into the global role's fields (shared keys: project wins), roles present only in the project are added, and global-only roles survive.
+
+```json
+// ~/.pi/agent/settings.json  (global)
+{ "subagent": { "maxConcurrency": 8, "summary": { "role": "global-summary" } } }
+
+// .pi/settings.json  (project)
+{ "subagent": { "summary": { "role": "project-summary" }, "agentOverrides": { "worker": { "timeout": 1500 } } } }
+
+// Effective result for this project:
+//   maxConcurrency: 8                 (inherited from global)
+//   summary.role:    "project-summary" (project override)
+//   summary.enabled: true             (global omitted → default, since global also omitted)
+//   agentOverrides.worker.timeout: 1500 (project-added role field)
+```
+
+If your project has no `.pi/settings.json`, or its `subagent` block is empty, the global config is used as-is.
+
 Timeouts are defined per role. Built-in defaults are `explorer: 900`, `reviewer: 3600`, `worker: 2400`, and `researcher: 2400` seconds. The timeout is active time — the clock pauses while the child is inside a nested `subagent_delegate` call, so delegate-capable roles need no extra headroom.
 
 `maxConcurrency`, `maxDepth`, `maxTurns`, `maxCost`, and per-role `timeout` accept `0` for unlimited. Negative values are normalized to `0`; non-numeric or non-finite values fall back to their defaults. `inheritance.maxChars` is different: it must be a positive finite integer, and zero, negative, invalid, or non-finite values use the default. `maxConcurrency: 0` runs delegates without queuing, and `maxDepth: 0` permits unrestricted nesting.

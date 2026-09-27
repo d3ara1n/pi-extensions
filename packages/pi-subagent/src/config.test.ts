@@ -5,11 +5,11 @@
  *   node --test packages/pi-subagent/src/config.test.ts
  */
 
-import { afterEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { afterEach, describe, test } from "node:test";
 import { loadSubagentConfig } from "./config.ts";
 import { DEFAULT_CONFIG } from "./types.ts";
 
@@ -102,7 +102,7 @@ describe("loadSubagentConfig", () => {
     assert.equal(config.maxTurns, 4);
   });
 
-  test("project subagent block replaces global wholesale and defaults omitted fields", () => {
+  test("project subagent block merges into global at the field level (omitted fields inherit global)", () => {
     const { agentDir, projectDir } = makeRoot();
     writeSettings(agentDir, {
       subagent: {
@@ -113,24 +113,104 @@ describe("loadSubagentConfig", () => {
         history: { enabled: false },
         summary: { enabled: false, role: "global-summary" },
         inheritance: { maxChars: 1234 },
-        agentOverrides: { global: { disabled: true } },
+        agentOverrides: { global: { disabled: true }, shared: { maxTurns: 10 } },
       },
     });
     writeSettings(path.join(projectDir, ".pi"), {
-      subagent: { summary: { role: "project-summary" } },
+      subagent: {
+        summary: { role: "project-summary" },
+        agentOverrides: { shared: { timeout: 1500 }, projectOnly: { disabled: true } },
+      },
     });
 
     const config = loadSubagentConfig(projectDir);
-    assert.equal(config.maxConcurrency, DEFAULT_CONFIG.maxConcurrency);
+    // Top-level scalars: project omits them, so they inherit the global values.
+    assert.equal(config.maxConcurrency, 8);
+    assert.equal(config.maxDepth, 7);
+    assert.equal(config.maxTurns, 6);
+    assert.equal(config.maxCost, 5);
+    // Nested blocks merge field by field: project sets summary.role, the rest
+    // inherits from global (not DEFAULT).
+    assert.deepEqual(config.history, { enabled: false });
+    assert.deepEqual(config.summary, { enabled: false, role: "project-summary" });
+    assert.deepEqual(config.inheritance, { maxChars: 1234 });
+    // agentOverrides merges per role: the shared role's fields are merged
+    // (global maxTurns:10 + project timeout:1500), global-only and project-only
+    // roles both survive.
+    assert.deepEqual(config.agentOverrides, {
+      global: { disabled: true },
+      shared: { maxTurns: 10, timeout: 1500 },
+      projectOnly: { disabled: true },
+    });
+  });
+
+  test("project overrides the same fields as global and falls back to DEFAULT for the rest", () => {
+    const { agentDir, projectDir } = makeRoot();
+    writeSettings(agentDir, {
+      subagent: { maxConcurrency: 8, summary: { enabled: false, role: "global-summary" } },
+    });
+    writeSettings(path.join(projectDir, ".pi"), {
+      subagent: { maxConcurrency: 2, summary: { role: "project-summary" } },
+    });
+
+    const config = loadSubagentConfig(projectDir);
+    // Project wins where it overrides.
+    assert.equal(config.maxConcurrency, 2);
+    assert.equal(config.summary.role, "project-summary");
+    // Global still supplies the project-omitted summary.enabled.
+    assert.equal(config.summary.enabled, false);
+    // Neither sets maxDepth/maxTurns/maxCost/history/inheritance, so DEFAULT.
     assert.equal(config.maxDepth, DEFAULT_CONFIG.maxDepth);
     assert.equal(config.maxTurns, DEFAULT_CONFIG.maxTurns);
     assert.equal(config.maxCost, DEFAULT_CONFIG.maxCost);
     assert.deepEqual(config.history, DEFAULT_CONFIG.history);
-    assert.deepEqual(config.summary, {
-      enabled: DEFAULT_CONFIG.summary.enabled,
-      role: "project-summary",
-    });
     assert.deepEqual(config.inheritance, DEFAULT_CONFIG.inheritance);
-    assert.deepEqual(config.agentOverrides, {});
+  });
+
+  test("explicit invalid project values do not inherit the global value", () => {
+    const { agentDir, projectDir } = makeRoot();
+    writeSettings(agentDir, {
+      subagent: {
+        maxConcurrency: 8,
+        maxDepth: 7,
+        maxTurns: 6,
+        maxCost: 5,
+        history: { enabled: false },
+        summary: { role: "global-summary", enabled: false },
+        inheritance: { maxChars: 1234 },
+        agentOverrides: { global: { disabled: true } },
+      },
+    });
+    writeSettings(path.join(projectDir, ".pi"), {
+      subagent: {
+        maxConcurrency: null,
+        maxDepth: "invalid",
+        maxTurns: null,
+        maxCost: false,
+        history: null,
+        summary: { role: null, enabled: null },
+        inheritance: null,
+        agentOverrides: null,
+      },
+    });
+
+    assert.deepEqual(loadSubagentConfig(projectDir), DEFAULT_CONFIG);
+  });
+
+  test("without a cwd, project settings are not loaded", () => {
+    const { agentDir, projectDir } = makeRoot();
+    writeSettings(agentDir, { subagent: { maxConcurrency: 8 } });
+    writeSettings(path.join(projectDir, ".pi"), { subagent: { maxConcurrency: 2 } });
+
+    assert.equal(loadSubagentConfig().maxConcurrency, 8);
+  });
+
+  test("untrusted projects do not contribute project settings", () => {
+    const { agentDir, projectDir } = makeRoot();
+    writeSettings(agentDir, { subagent: { maxConcurrency: 8 } });
+    writeSettings(path.join(projectDir, ".pi"), { subagent: { maxConcurrency: 2 } });
+
+    assert.equal(loadSubagentConfig(projectDir, false).maxConcurrency, 8);
+    assert.equal(loadSubagentConfig(projectDir, true).maxConcurrency, 2);
   });
 });

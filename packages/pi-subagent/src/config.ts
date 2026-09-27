@@ -1,16 +1,68 @@
 /**
  * Read subagent configuration from settings files.
  *
- * Global (~/.pi/agent/settings.json) + project (.pi/settings.json),
- * project overrides global.
+ * Pi has two settings scopes: global (~/.pi/agent/settings.json) and project
+ * (.pi/settings.json). SettingsManager reads those scopes with project values
+ * taking precedence. Its public API exposes the two snapshots separately, so
+ * this extension applies the same file-level merge to the custom `subagent`
+ * field before normalizing it against DEFAULT_CONFIG.
  */
 
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import * as fs from "node:fs";
-import * as path from "node:path";
+import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { SubagentConfig } from "./types.ts";
 import { DEFAULT_CONFIG } from "./types.ts";
 import { normalizeNonNegativeInteger, normalizeNonNegativeNumber } from "./utils.ts";
+
+type SettingsObject = Record<string, unknown>;
+
+function isSettingsObject(value: unknown): value is SettingsObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Match SettingsManager's merge contract for extension-owned settings:
+ * recursively merge plain objects, replace arrays/scalars, and let an
+ * explicitly provided value (including null) override the lower layer.
+ */
+function mergeSettingsObjects(base: SettingsObject, override: unknown): SettingsObject {
+  if (!isSettingsObject(override)) return base;
+
+  const merged: SettingsObject = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    if (value === undefined) continue;
+    if (isSettingsObject(merged[key]) && isSettingsObject(value)) {
+      merged[key] = mergeSettingsObjects(merged[key] as SettingsObject, value);
+    } else {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+function normalizeAgentOverrides(value: unknown): SubagentConfig["agentOverrides"] {
+  if (!isSettingsObject(value)) return {};
+
+  const overrides: SubagentConfig["agentOverrides"] = {};
+  for (const [role, override] of Object.entries(value)) {
+    if (isSettingsObject(override)) {
+      overrides[role] = override as SubagentConfig["agentOverrides"][string];
+    }
+  }
+  return overrides;
+}
+
+function loadMergedSettings(cwd: string | undefined, projectTrusted: boolean): SettingsObject {
+  const hasProjectScope = typeof cwd === "string" && cwd.length > 0;
+  const agentDir = getAgentDir();
+  const settingsManager = SettingsManager.create(hasProjectScope ? cwd : agentDir, agentDir, {
+    projectTrusted: hasProjectScope && projectTrusted,
+  });
+  const globalSettings = settingsManager.getGlobalSettings() as SettingsObject;
+  const projectSettings = hasProjectScope
+    ? (settingsManager.getProjectSettings() as SettingsObject)
+    : {};
+  return mergeSettingsObjects(globalSettings, projectSettings);
+}
 
 function normalizePositiveInteger(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value > 0
@@ -18,45 +70,53 @@ function normalizePositiveInteger(value: unknown, fallback: number): number {
     : fallback;
 }
 
-function readSettingsFile(filePath: string): any {
-  try {
-    const content = fs.readFileSync(filePath, "utf-8");
-    return JSON.parse(content);
-  } catch {
-    return {};
-  }
-}
-
-/** Read the `subagent` block from a settings file. */
-function readSubagent(filePath: string): Record<string, any> | undefined {
-  const raw = readSettingsFile(filePath)?.subagent;
-  return raw && typeof raw === "object" ? raw : undefined;
-}
-
 /**
- * Load subagent config. Project overrides global wholesale; per-field `??
- * DEFAULT` fills any gap. (No field-level merge — project replaces global.)
+ * Load subagent config from the effective Pi settings.
+ *
+ * Merge precedence for every field is project > global > builtin defaults.
+ * Nested objects, including agentOverrides keyed by role name, are merged
+ * recursively. Arrays and scalar values are replaced by the higher layer.
  */
-export function loadSubagentConfig(cwd?: string): SubagentConfig {
-  const globalRaw = readSubagent(path.join(getAgentDir(), "settings.json"));
-  const projectRaw = cwd ? readSubagent(path.join(cwd, ".pi", "settings.json")) : undefined;
-  const raw = projectRaw ?? globalRaw;
-  if (!raw) return DEFAULT_CONFIG;
+export function loadSubagentConfig(cwd?: string, projectTrusted = true): SubagentConfig {
+  const settings = loadMergedSettings(cwd, projectTrusted);
+  const mergedRaw = mergeSettingsObjects(
+    DEFAULT_CONFIG as unknown as SettingsObject,
+    settings.subagent,
+  );
+  const rawHistory = (isSettingsObject(mergedRaw.history) ? mergedRaw.history : {}) as {
+    enabled?: unknown;
+  };
+  const rawSummary = (isSettingsObject(mergedRaw.summary) ? mergedRaw.summary : {}) as {
+    role?: unknown;
+    enabled?: unknown;
+  };
+  const rawInheritance = (isSettingsObject(mergedRaw.inheritance) ? mergedRaw.inheritance : {}) as {
+    maxChars?: unknown;
+  };
+  const rawAgentOverrides = isSettingsObject(mergedRaw.agentOverrides)
+    ? mergedRaw.agentOverrides
+    : {};
 
-  const rawSummary = raw?.summary;
-  const rawHistory = raw?.history;
-  const rawInheritance = raw?.inheritance;
   return {
-    maxConcurrency: normalizeNonNegativeInteger(raw.maxConcurrency, DEFAULT_CONFIG.maxConcurrency),
-    maxDepth: normalizeNonNegativeInteger(raw.maxDepth, DEFAULT_CONFIG.maxDepth),
-    maxTurns: normalizeNonNegativeInteger(raw.maxTurns, DEFAULT_CONFIG.maxTurns),
-    maxCost: normalizeNonNegativeNumber(raw.maxCost, DEFAULT_CONFIG.maxCost),
+    maxConcurrency: normalizeNonNegativeInteger(
+      mergedRaw.maxConcurrency,
+      DEFAULT_CONFIG.maxConcurrency,
+    ),
+    maxDepth: normalizeNonNegativeInteger(mergedRaw.maxDepth, DEFAULT_CONFIG.maxDepth),
+    maxTurns: normalizeNonNegativeInteger(mergedRaw.maxTurns, DEFAULT_CONFIG.maxTurns),
+    maxCost: normalizeNonNegativeNumber(mergedRaw.maxCost, DEFAULT_CONFIG.maxCost),
     history: {
-      enabled: rawHistory?.enabled ?? DEFAULT_CONFIG.history.enabled,
+      enabled:
+        typeof rawHistory.enabled === "boolean"
+          ? rawHistory.enabled
+          : DEFAULT_CONFIG.history.enabled,
     },
     summary: {
-      role: rawSummary?.role ?? DEFAULT_CONFIG.summary.role,
-      enabled: rawSummary?.enabled ?? DEFAULT_CONFIG.summary.enabled,
+      role: typeof rawSummary.role === "string" ? rawSummary.role : DEFAULT_CONFIG.summary.role,
+      enabled:
+        typeof rawSummary.enabled === "boolean"
+          ? rawSummary.enabled
+          : DEFAULT_CONFIG.summary.enabled,
     },
     inheritance: {
       maxChars: normalizePositiveInteger(
@@ -64,6 +124,6 @@ export function loadSubagentConfig(cwd?: string): SubagentConfig {
         DEFAULT_CONFIG.inheritance.maxChars,
       ),
     },
-    agentOverrides: raw.agentOverrides ?? {},
+    agentOverrides: normalizeAgentOverrides(rawAgentOverrides),
   };
 }

@@ -359,7 +359,7 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
 
   pi.on("session_start", async (_event, ctx) => {
     sessionGeneration += 1;
-    config = loadSubagentConfig(ctx.cwd);
+    config = loadSubagentConfig(ctx.cwd, ctx.isProjectTrusted?.() ?? true);
     concurrencyGate = new AsyncSemaphore(config.maxConcurrency);
     const sessionId = ctx.sessionManager?.getSessionId();
     runStore.restore(
@@ -1053,7 +1053,7 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
 
         // 3. config
         try {
-          const cfg = loadSubagentConfig(ctx.cwd);
+          const cfg = loadSubagentConfig(ctx.cwd, ctx.isProjectTrusted?.() ?? true);
           lines.push(
             `[\u2713] config: concurrency=${cfg.maxConcurrency || "∞"} depth=${cfg.maxDepth || "∞"} turns=${cfg.maxTurns || "∞"} cost=$${cfg.maxCost || "∞"} summary=${cfg.summary.enabled ? cfg.summary.role : "off"} history=${cfg.history.enabled}`,
           );

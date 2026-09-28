@@ -6,7 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { CardEditor, type FrameProvider } from "./card-editor.ts";
 import { DEFAULT_CONFIG, loadEditorShellConfig, type EditorShellConfig, type EditorShellIcons } from "./config.ts";
-import { countUserMessages } from "./turn-count.ts";
+import { countCompactions, countUserMessages } from "./turn-count.ts";
 import {
   ActivityIndicator,
   lastActivityFromEntries,
@@ -68,7 +68,7 @@ function formatContextWindow(tokens: number): string {
 
 // ── Built-in icon set. Users can override any subset via the
 //    `editorShell.icons` config — see config.ts.
-//    `turn` and `timer` use Octicons, matching the model and thinking icons.
+//    `turn`, `compaction`, and `timer` use Nerd Font icons.
 //    `cache` uses U+26A1, which Nerd Fonts map to oct-zap directly.
 //    Icon values own their trailing padding; templates append content directly.
 const DEFAULT_ICONS: EditorShellIcons = {
@@ -79,6 +79,7 @@ const DEFAULT_ICONS: EditorShellIcons = {
   hitRate: "\uf4de ", //   oct-goal
   cost: "\uf155", //   fa-dollar_sign
   turn: "\uf442 ", //   oct-comment_discussion
+  compaction: "\uf4ea ", //   oct-iterations
   timer: "\uf43a ", //   oct-clock
   folder: "\uf07c ", //   fa-folder_open
 };
@@ -407,11 +408,17 @@ export default function (pi: ExtensionAPI) {
   // changes so restored sessions and branch switches cannot drift.
   let _turnCount = 0;
   let _turnCountLeafId: string | null = null;
+  let _compactionCount = 0;
+  let _compactionCountLeafId: string | null = null;
   const refreshTurnCount = (ctx: {
     sessionManager: { getBranch(): unknown[]; getLeafId(): string | null };
   }): void => {
-    _turnCount = countUserMessages(ctx.sessionManager.getBranch());
-    _turnCountLeafId = ctx.sessionManager.getLeafId();
+    const branch = ctx.sessionManager.getBranch();
+    const leafId = ctx.sessionManager.getLeafId();
+    _turnCount = countUserMessages(branch);
+    _turnCountLeafId = leafId;
+    _compactionCount = countCompactions(branch);
+    _compactionCountLeafId = leafId;
   };
 
   // Session-owned activity state survives editor replacements. Only TUI
@@ -485,6 +492,8 @@ export default function (pi: ExtensionAPI) {
     _costLeafId = null;
     _turnCount = 0;
     _turnCountLeafId = null;
+    _compactionCount = 0;
+    _compactionCountLeafId = null;
     activity?.stop();
     activity = undefined;
     editor = undefined;
@@ -563,7 +572,7 @@ export default function (pi: ExtensionAPI) {
     const provider: FrameProvider = (border) => {
       const leafId = ctx.sessionManager.getLeafId();
       if (_costLeafId !== leafId) refreshSessionCost(ctx);
-      if (_turnCountLeafId !== leafId) refreshTurnCount(ctx);
+      if (_turnCountLeafId !== leafId || _compactionCountLeafId !== leafId) refreshTurnCount(ctx);
       const theme = ctx.ui.theme;
 
       // Resolve pinned status keys → already-themed text, " · "-joined.
@@ -620,6 +629,9 @@ export default function (pi: ExtensionAPI) {
       const turnPart = _turnCount > 0
         ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.turn}${_turnCount}`)}`
         : "";
+      const compactionPart = _compactionCount > 0
+        ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.compaction}${_compactionCount}`)}`
+        : "";
 
       const activityView = activity?.read();
       const activityText = activityView?.kind === "busy"
@@ -647,7 +659,7 @@ export default function (pi: ExtensionAPI) {
         topLeft: ` ${activityPart}${theme.fg("accent", `${icons.model}${model}`)}${theme.fg("dim", " · ")}${theme.fg(thinkingColor, `${icons.thinking}${thinking}`)} `,
         topRight: buildPinned(),
         // Context in severity color; cwd stays muted so it never competes.
-        bottomLeft: ` ${theme.fg(contextToken(pct), `${icons.context}${ctxText}`)}${cachePart}${tpsPart}${costPart}${turnPart} `,
+        bottomLeft: ` ${theme.fg(contextToken(pct), `${icons.context}${ctxText}`)}${cachePart}${tpsPart}${costPart}${turnPart}${compactionPart} `,
         bottomRight: theme.fg("muted", ` ${cwdDisplay} `),
       };
     };
@@ -753,6 +765,7 @@ export default function (pi: ExtensionAPI) {
       lines.push("");
       lines.push("[branch counter]");
       lines.push(`  user messages: ${_turnCount}`);
+      lines.push(`  compactions: ${_compactionCount}`);
 
       lines.push("");
       lines.push("[response performance]");

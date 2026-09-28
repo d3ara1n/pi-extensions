@@ -7,7 +7,7 @@ Replaces pi's default editor and status bar with a unified rounded-corner shell 
 ## What shows up where
 
 - **Top border** — ` activity ·  model ·  thinking-level ` (left) + pinned extension statuses (right, via `pinnedStatus` config). The activity indicator shows a phase-aware spinner while working and ` Nm` while idle — see [Activity indicator](#activity-indicator).
-- **Bottom border** — `  ctx NN%/NNk|N.NM · ⚡cacheRead(total)  hitRate% · NN.N e2e t/s · N.NNN ·  N ` (left) + `  ~/Projects (main +2 ~1 *4) ` (right, shows git branch plus staged, unstaged, and untracked file counts when in a repo; inside a linked worktree the branch carries an `@<name>` tag, e.g. `(feature-x @feature-x +2 ~1)`, so sibling worktrees of one repo are told apart at a glance). The cache-read segment stays hidden until the session has cached reads; after that, a zero latest reading colors the whole segment red, including its icon and session total. The hit-rate segment stays muted at 90% or above, turns amber below 90%, and red below 50%. Response throughput defaults to client-observed end-to-end visible-text throughput, including local request preparation, network and queue latency, hidden reasoning, and visible generation. It can instead show generation throughput or be hidden; see [Throughput display](#throughput-display). A new turn clears the previous measurement, so unavailable samples never leave stale data in the border. Session cost includes assistant, tool, compaction, and branch-summary usage; the dollar segment is hidden when the provider reports no priced usage. ` N` counts persisted user messages on the current session branch. Session hit rate and detailed response timing are available via `/editor-shell:status`.
+- **Bottom border** — `  ctx NN%/NNk|N.NM · ⚡cacheRead(total)  hitRate% · NN.N e2e t/s · N.NNN ·  N ·  N ` (left) + `  ~/Projects (main +2 ~1 *4) ` (right, shows git branch plus staged, unstaged, and untracked file counts when in a repo; inside a linked worktree the branch carries an `@<name>` tag, e.g. `(feature-x @feature-x +2 ~1)`, so sibling worktrees of one repo are told apart at a glance). The cache-read segment stays hidden until the session has cached reads; after that, a zero latest reading colors the whole segment red, including its icon and session total. The hit-rate segment stays muted at 90% or above, turns amber below 90%, and red below 50%. Response throughput defaults to client-observed end-to-end visible-text throughput, including local request preparation, network and queue latency, hidden reasoning, and visible generation. It can instead show generation throughput or be hidden; see [Throughput display](#throughput-display). A new turn clears the previous measurement, so unavailable samples never leave stale data in the border. Session cost includes assistant, tool, compaction, and branch-summary usage; the dollar segment is hidden when the provider reports no priced usage. ` N` counts persisted user messages and ` N` counts successful compactions on the current session branch. Session hit rate and detailed response timing are available via `/editor-shell:status`.
 - **Below shell** — Auto-wrapping extension status line (all `setStatus` entries not pinned to the top)
 - **Border color** follows pi's thinking-level / bash-mode indicator automatically.
 
@@ -43,12 +43,13 @@ Icon values are used verbatim as prefixes: every template joins the icon and its
 | `hitRate` | `` | oct-goal | 1 |
 | `cost` | `` | fa-dollar_sign | 0 |
 | `turn` | `` | oct-comment_discussion | 1 |
+| `compaction` | `` | oct-iterations | 1 |
 | `timer` | `` | oct-clock | 1 |
 | `folder` | `` | fa-folder_open | 1 |
 
-### Branch counter
+### Branch counters
 
-The ` N` segment counts persisted user messages on the current session branch. Tool loops do not increase it, while steering and follow-up prompts count when they enter the branch. The value is rebuilt from branch history, so restored sessions, edited history, and branch switches show the correct branch-local count. Like the other optional stats, the segment stays hidden while the count is zero — a fresh session shows no counter.
+The ` N` segment counts persisted user messages on the current session branch. Tool loops do not increase it, while steering and follow-up prompts count when they enter the branch. The ` N` segment counts successful compactions on the same branch; failed or aborted attempts are not persisted and do not count. Both values are rebuilt from branch history, so restored sessions, edited history, and branch switches show the correct branch-local counts. Like the other optional stats, each segment stays hidden while its count is zero.
 
 ### Activity indicator
 

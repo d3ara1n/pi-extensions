@@ -11,3 +11,16 @@ export function countUserMessages(entries: readonly unknown[]): number {
   }
   return count;
 }
+
+/**
+ * Count persisted compaction entries on the active session branch.
+ *
+ * @internal — exported for testing.
+ */
+export function countCompactions(entries: readonly unknown[]): number {
+  let count = 0;
+  for (const entry of entries) {
+    if ((entry as { type?: unknown } | null)?.type === "compaction") count++;
+  }
+  return count;
+}

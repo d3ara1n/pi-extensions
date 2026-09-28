@@ -21,6 +21,7 @@ export interface EditorShellIcons {
   hitRate: string;
   cost: string;
   turn: string;
+  compaction: string;
   timer: string;
   folder: string;
 }
@@ -66,6 +67,7 @@ const ICON_KEYS: ReadonlyArray<keyof EditorShellIcons> = [
   "hitRate",
   "cost",
   "turn",
+  "compaction",
   "timer",
   "folder",
 ];

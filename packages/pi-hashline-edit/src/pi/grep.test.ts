@@ -255,6 +255,28 @@ test("grep renderer is identical for anchored and unanchored model views", async
   );
 });
 
+test("grep renderer: multi-line rg error shows the full stderr, including the cause", async () => {
+  await withDir(async (dir) =>
+    withEnabled(true, async () => {
+      const tool = makeGrepOverrideWithBackend(dir, fakeBackend().backend);
+      // rg's regex parse failure: header line, pattern, caret pointer, cause — the
+      // diagnosis ("unclosed group") lives on the LAST line.
+      const rgStderr =
+        "rg: regex parse error:\n    (?:.insert(\n    ^\nerror: unclosed group";
+      const theme = { fg: (_c: string, v: string) => v, bold: (v: string) => v };
+      const collapsed: any = tool.renderResult(
+        { content: [{ type: "text", text: rgStderr }] },
+        { isPartial: false, expanded: false },
+        theme,
+        { isError: true },
+      );
+      const out = collapsed.render(120).join("\n");
+      assert.match(out, /regex parse error/);
+      assert.match(out, /unclosed group/);
+    }),
+  );
+});
+
 test("grep in a subdirectory returns a path that edits the matching file", async () => {
   await withDir(async (dir) =>
     withEnabled(true, async () => {

@@ -505,9 +505,19 @@ export function makeGrepOverrideWithBackend(cwd: string, overrides: Partial<Grep
     renderResult(result: any, { isPartial, expanded }: any, theme: any, context: any) {
       if (isPartial) return new Text(theme.fg("warning", "Searching…"), 0, 0);
       if (context?.isError) {
-        const t =
-          result.content?.[0]?.type === "text" ? result.content[0].text.split("\n")[0] : "Error";
-        return new Text(theme.fg("error", t), 0, 0);
+        // Render the full error text, not just its first line: rg failures are
+        // multi-line with the cause on the LAST line ("regex parse error / <pattern>
+        // / ^ / error: unclosed group"), so a first-line projection would show a
+        // bare, information-less header. GrepResult gives the same collapsed/
+        // expanded behavior as successful results.
+        const t = result.content?.[0]?.type === "text" && result.content[0].text
+          ? result.content[0].text
+          : "Error";
+        return new GrepResult(
+          t.split("\n").map((line: string) => theme.fg("error", line)),
+          expanded,
+          theme,
+        );
       }
       const out = result.content?.[0]?.type === "text" ? result.content[0].text : "";
       const view = result.details?.hashlineView as GrepView | undefined;

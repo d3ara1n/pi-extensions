@@ -41,13 +41,14 @@ interface CapturedTool {
   promptGuidelines?: string[];
 }
 
-function setup() {
+function setup(allowedRoles?: string) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagent-init-test-"));
   tempRoots.push(root);
   const projectDir = path.join(root, "project");
   fs.mkdirSync(path.join(projectDir, ".pi"), { recursive: true });
   process.env.PI_CODING_AGENT_DIR = path.join(root, "agent");
-  delete process.env.PI_SUBAGENT_ALLOWED;
+  if (allowedRoles === undefined) delete process.env.PI_SUBAGENT_ALLOWED;
+  else process.env.PI_SUBAGENT_ALLOWED = allowedRoles;
 
   const tools: CapturedTool[] = [];
   let sessionStart: ((event: unknown, ctx: unknown) => Promise<void>) | undefined;
@@ -126,6 +127,60 @@ describe("subagent tool registration", () => {
     for (const [name, role] of Object.entries(BUILTIN_ROLES)) {
       assert.ok(guidelines.includes(`  - ${name}: ${role.description}`));
     }
+  });
+
+  test("merges partial built-in overrides before filtering all roles by the child allowlist", async () => {
+    const harness = setup("explorer");
+    await harness.start({
+      explorer: { description: "Customized explorer" },
+      reviewer: { description: "Customized reviewer" },
+      researcher: { description: "Customized researcher" },
+      cv_tailor: customRole,
+    });
+
+    const guidelines = harness.tools[TOOL_NAMES.length].promptGuidelines?.join("\n") ?? "";
+    assert.match(guidelines, /  - explorer: Customized explorer/);
+    assert.ok(guidelines.includes(BUILTIN_ROLES.explorer.examples[0]));
+    assert.deepEqual(
+      guidelines.split("\n").filter((line) => line.startsWith("  - ")),
+      ["  - explorer: Customized explorer"],
+    );
+  });
+
+  test("allows explicitly listed custom roles and honors disabled overrides", async () => {
+    const harness = setup("explorer,cv_tailor");
+    await harness.start({ explorer: { disabled: true }, cv_tailor: customRole });
+    const guidelines = harness.tools[TOOL_NAMES.length].promptGuidelines?.join("\n") ?? "";
+    assert.deepEqual(
+      guidelines.split("\n").filter((line) => line.startsWith("  - ")),
+      [`  - cv_tailor: ${customRole.description}`],
+    );
+  });
+
+  test("skips malformed role shapes without interrupting tool registration", async () => {
+    const harness = setup();
+    await harness.start({
+      researcher: { examples: null },
+      reviewer: { systemPrompt: 42 },
+      worker: { tools: ["read"], excludeTools: ["bash"] },
+      incomplete: { description: "Missing required fields" },
+      wrongExamples: { ...customRole, examples: [42] },
+      wrongTools: { ...customRole, tools: "read" },
+      wrongNestedRoles: { ...customRole, subagentRoles: [null] },
+      wrongTimeout: { ...customRole, timeout: "900" },
+      wrongFallback: { ...customRole, fallbackRole: false },
+      wrongDisabled: { ...customRole, disabled: "false" },
+      cv_tailor: customRole,
+    });
+    assert.deepEqual(harness.tools.slice(TOOL_NAMES.length).map((tool) => tool.name), TOOL_NAMES);
+    const guidelines = harness.tools[TOOL_NAMES.length].promptGuidelines?.join("\n") ?? "";
+    assert.deepEqual(
+      guidelines.split("\n").filter((line) => line.startsWith("  - ")),
+      [
+        `  - explorer: ${BUILTIN_ROLES.explorer.description}`,
+        `  - cv_tailor: ${customRole.description}`,
+      ],
+    );
   });
 
   test("repeated session starts replace roles instead of retaining stale guidelines", async () => {

@@ -106,15 +106,47 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
   })();
 
   const availableRoles: Record<string, SubagentRole> = {};
-  // Rebuild available roles from BUILTIN_ROLES, filtered by the child
-  // allowlist. Repeated session_start events must not accumulate overrides.
+  // Merge against the complete built-in set before applying child restrictions.
+  // Repeated session_start events must not accumulate overrides.
   function refreshAvailableRoles(): void {
+    const roles: Record<string, Partial<SubagentRole>> = Object.assign(
+      Object.create(null),
+      BUILTIN_ROLES,
+    );
+    for (const [name, override] of Object.entries(config.agentOverrides)) {
+      if (override.disabled !== undefined && typeof override.disabled !== "boolean") {
+        delete roles[name];
+      } else if (override.disabled) {
+        delete roles[name];
+      } else {
+        roles[name] = { ...roles[name], ...override };
+      }
+    }
+
     for (const key of Object.keys(availableRoles)) delete availableRoles[key];
-    for (const [name, role] of Object.entries(BUILTIN_ROLES)) {
-      if (!ALLOWLIST || ALLOWLIST.includes(name)) {
+    for (const [name, role] of Object.entries(roles)) {
+      if (isValidRole(role) && (!ALLOWLIST || ALLOWLIST.includes(name))) {
         availableRoles[name] = role;
       }
     }
+  }
+
+  function isValidRole(role: Partial<SubagentRole>): role is SubagentRole {
+    const strings = ["role", "description", "decisionTrigger", "systemPrompt"] as const;
+    if (!strings.every((field) => typeof role[field] === "string")) return false;
+    const isStringArray = (value: unknown): value is string[] =>
+      Array.isArray(value) && value.every((item) => typeof item === "string");
+    if (!isStringArray(role.examples)) return false;
+    for (const field of ["tools", "excludeTools", "subagentRoles"] as const) {
+      if (role[field] !== undefined && !isStringArray(role[field])) return false;
+    }
+    if (role.tools !== undefined && role.excludeTools !== undefined) return false;
+    if (role.fallbackRole !== undefined && typeof role.fallbackRole !== "string") return false;
+    for (const field of ["timeout", "maxTurns", "maxCost"] as const) {
+      const value = role[field];
+      if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value))) return false;
+    }
+    return true;
   }
 
   // Terminal bodies live in history; these registries retain metadata and live controls.
@@ -340,23 +372,6 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
     ];
   }
 
-  // Apply agent overrides on top of built-in roles
-  function applyAgentOverrides(
-    roles: Record<string, SubagentRole>,
-    overrides: Record<string, Partial<SubagentRole> & { disabled?: boolean }>,
-  ): void {
-    for (const [name, override] of Object.entries(overrides)) {
-      if (override.disabled) {
-        delete roles[name];
-      } else if (roles[name]) {
-        roles[name] = { ...roles[name], ...override };
-      } else {
-        // Custom role — must provide all required fields (validated in session_start)
-        roles[name] = override as SubagentRole;
-      }
-    }
-  }
-
   pi.on("session_start", async (_event, ctx) => {
     sessionGeneration += 1;
     config = loadSubagentConfig(ctx.cwd, ctx.isProjectTrusted?.() ?? true);
@@ -369,44 +384,6 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
     );
 
     refreshAvailableRoles();
-    applyAgentOverrides(availableRoles, config.agentOverrides);
-
-    // Tool policy is one-dimensional: `tools` is a closed allowlist,
-    // `excludeTools` an open denylist — carrying both is a contradiction
-    // (intent bug, e.g. "append to the allowlist" written as both fields),
-    // never a combination to resolve. Skip the role loudly; the surviving
-    // role set self-documents via guidelines, and delegate fast-fails on the
-    // missing name.
-    for (const [name, role] of Object.entries(availableRoles)) {
-      if (role.tools !== undefined && role.excludeTools !== undefined) {
-        delete availableRoles[name];
-        ctx.ui.notify(
-          `[pi-subagent] Role "${name}" skipped — "tools" and "excludeTools" are mutually exclusive; configure exactly one.`,
-          "error",
-        );
-      }
-    }
-
-    // Validate custom roles (skip built-in roles — they already have all fields)
-    // `tools` is optional — absent means the role gets all tools.
-    const REQUIRED_FIELDS = [
-      "role",
-      "description",
-      "examples",
-      "decisionTrigger",
-      "systemPrompt",
-    ] as const;
-    for (const [name, role] of Object.entries(availableRoles)) {
-      if (name in BUILTIN_ROLES) continue;
-      const missing = REQUIRED_FIELDS.filter((f) => !(f in (role as any)));
-      if (missing.length > 0) {
-        delete availableRoles[name];
-        ctx.ui.notify(
-          `[pi-subagent] Custom role "${name}" skipped — missing: ${missing.join(", ")}. Required: ${REQUIRED_FIELDS.join(", ")}.`,
-          "error",
-        );
-      }
-    }
 
     registerTools();
 

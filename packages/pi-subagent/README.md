@@ -209,7 +209,7 @@ The built-in roles are defined in [`src/roles.ts`](src/roles.ts) — read them a
 - `tools` — exact-name allowlist: absent means all tools, a list restricts to exactly those tool names, an **empty array means zero tools**.
 - `excludeTools` — denylist: everything except the listed tool names (handy for e.g. withholding interactive tools from an otherwise full-access role). Absent or empty means no restriction.
 
-Configuring both on the same role is an error — the role is skipped with an error notification at session start.
+Roles with both policies configured, missing required fields, or invalid field types are silently skipped at session start. Built-in overrides are merged with their complete definitions before validation. Child role restrictions are applied last and also cover custom roles.
 
 **Optional fields:** `subagentRoles` (roles this role can spawn via delegate; absent means any available role, mirroring the `tools` default — declare it explicitly when a restricted role grants `subagent_delegate`), `timeout` (per-role active-time timeout in seconds; unset or `0` is unlimited, negative values normalize to `0`), `maxTurns` / `maxCost` (per-role budget overrides; unset uses the top-level `maxTurns` / `maxCost` setting, `0` is unlimited, negative values normalize to `0`), `fallbackRole` (backup pi-model-roles role the whole run is retried on after a provider error; unset means no retry — see [Fallback observability](#fallback-observability)).
 

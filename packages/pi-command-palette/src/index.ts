@@ -1,13 +1,19 @@
 /**
  * pi-command-palette — Global command palette for pi.
  *
+ * Open with the Ctrl+Shift+P shortcut (configurable) or the /palette command;
+ * the shortcut dispatches the command so the palette runs with full session
+ * control (new / reload / resume) available.
+ *
  * Press Ctrl+Shift+P to open a searchable command palette overlay,
  * regardless of whether the editor has content.
  *
  * Features:
  * - Single overlay with nested pages: built-in actions on the root page,
  *   extension actions / commands / skills / templates as sub-pages, models
- *   loaded on first visit
+ *   and sessions loaded on first visit
+ * - Session operations (new / reload / resume) run pi's session APIs
+ *   directly — no editor round-trip
  * - Fuzzy search within the current page; searching the root page matches
  *   every leaf across sub-pages
  * - Floating overlay on top of existing content
@@ -15,8 +21,9 @@
  * - Clear editor into the restore buffer
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { copyToClipboard, DynamicBorder } from "@earendil-works/pi-coding-agent";
+import * as path from "node:path";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { copyToClipboard, DynamicBorder, SessionManager } from "@earendil-works/pi-coding-agent";
 import { paletteCommandRegistry } from "@d3ara1n/pi-command-palette-core";
 import {
   Container,
@@ -35,6 +42,9 @@ import { resolveShortcutKey } from "./config.ts";
 
 type CommandAction =
   | { type: "editor"; text: string }
+  | { type: "session-new" }
+  | { type: "session-resume"; path: string; label: string }
+  | { type: "noop" }
   | { type: "native"; id: string }
   | { type: "model"; provider: string; modelId: string }
   | { type: "compact" }
@@ -69,6 +79,10 @@ const BUILTIN_ORDER: Record<string, number> = {
 
 // ── Helpers ────────────────────────────────────────────────────────
 
+/** Uniform error text for notifications. */
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 /**
  * Sort ranks: built-in actions first, then native commands registered by other
  * extensions (direct callbacks), then everything that fills the editor with a
@@ -90,7 +104,7 @@ export function buildPaletteItems(pi: ExtensionAPI): PaletteItem[] {
   // ── Restore option (if previous editor text was saved) ────────
   if (savedEditorText) {
     const preview =
-      savedEditorText.length > 40 ? `${savedEditorText.slice(0, 37)}...` : savedEditorText;
+      savedEditorText.length > 40 ? `${savedEditorText.slice(0, 37)}…` : savedEditorText;
     items.push({
       value: "__restore",
       label: "Restore: Previous Editor Text",
@@ -106,7 +120,7 @@ export function buildPaletteItems(pi: ExtensionAPI): PaletteItem[] {
     label: "Session: New",
     description: "Start a new session",
     category: "Built-in",
-    action: { type: "editor", text: "/new" },
+    action: { type: "session-new" },
   });
 
   items.push({
@@ -123,30 +137,6 @@ export function buildPaletteItems(pi: ExtensionAPI): PaletteItem[] {
     description: "Reload extensions, skills, and config",
     category: "Built-in",
     action: { type: "reload" },
-  });
-
-  items.push({
-    value: "__fork",
-    label: "Session: Fork",
-    description: "Fork from selected entry",
-    category: "Built-in",
-    action: { type: "editor", text: "/fork" },
-  });
-
-  items.push({
-    value: "__tree",
-    label: "Session: Tree",
-    description: "Navigate session tree",
-    category: "Built-in",
-    action: { type: "editor", text: "/tree" },
-  });
-
-  items.push({
-    value: "__resume",
-    label: "Session: Resume",
-    description: "Resume a previous session",
-    category: "Built-in",
-    action: { type: "editor", text: "/resume" },
   });
 
   items.push({
@@ -255,7 +245,58 @@ function pageItem(value: string, label: string, description: string, page: Palet
   return { type: "page", value, label, description, page };
 }
 
-async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
+// ── Session list helpers ──────────────────────────────────────────
+
+/** One entry of SessionManager.list() — avoided a direct type import. */
+type SessionSummary = Awaited<ReturnType<typeof SessionManager.list>>[number];
+
+/** Compact relative time for session list descriptions. */
+function timeAgo(date: Date): string {
+  const seconds = Math.max(0, (Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return date.toISOString().slice(0, 10);
+}
+
+/** Single-line preview of a session's first message. */
+function firstMessagePreview(text: string, max = 60): string {
+  const single = text.replace(/\s+/g, " ").trim();
+  return single.length > max ? `${single.slice(0, max - 1)}…` : single || "(empty)";
+}
+
+/** Inert placeholder row for the Sessions page — renders a state, does nothing when selected. */
+function sessionPlaceholder(label: string): PaletteItem {
+  return {
+    value: "__sessions_placeholder",
+    label,
+    description: "",
+    category: "Sessions",
+    action: { type: "noop" },
+  };
+}
+
+/** Map SessionManager.list() results to palette items. */
+function sessionItems(sessions: readonly SessionSummary[], currentFile: string | undefined): PaletteItem[] {
+  return sessions.map((info) => {
+    const label = info.name?.trim() || firstMessagePreview(info.firstMessage);
+    const isCurrent =
+      currentFile !== undefined && path.resolve(currentFile) === path.resolve(info.path);
+    return {
+      value: `session:${info.path}`,
+      label,
+      description: `${timeAgo(info.modified)} · ${info.messageCount} messages${isCurrent ? " · current" : ""}`,
+      category: "Sessions",
+      action: { type: "session-resume", path: info.path, label },
+    };
+  });
+}
+
+async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> {
   if (ctx.mode !== "tui") return;
 
   const paletteItems = buildPaletteItems(pi);
@@ -272,8 +313,14 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionContext): Prom
   // while searching there. Built-in leaves live on the root page itself.
   const subLeaves = paletteItems.filter((item) => item.category !== "Built-in");
   const modelPage: PalettePage = { title: "Models", items: [] };
+  const sessionsPage: PalettePage = { title: "Sessions", items: [] };
+  /** Set once the Sessions page load has been kicked off (one per palette open). */
+  let sessionsLoadStarted = false;
+  /** Cleared when the palette overlay closes; guards late async callbacks. */
+  let paletteOpen = true;
   const rootItems: PalettePage["items"] = [
     pageItem("models", "Models", "Switch the active model", modelPage),
+    pageItem("sessions", "Sessions", "Resume a previous session", sessionsPage),
     // Built-in actions sit directly on the root page so urgent entries like
     // Restore are visible without descending into a sub-page.
     ...builtins,
@@ -367,7 +414,19 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionContext): Prom
               )
             : fuzzyFilter(items, query, getText)
           : items;
-        selectList = new SelectList(filtered, Math.min(Math.max(filtered.length, 1), 15), listTheme);
+        // Label/description split is 5:5 on every palette page: the primary
+        // column is pinned to half the list width instead of SelectList's
+        // default fixed 32 columns (~3:7 on wide terminals). The overlay spans
+        // 70% of the terminal with a floor of 50 columns (overlayOptions
+        // below); the 32-column floor keeps narrow terminals on the old default.
+        const overlayWidth = Math.max(50, Math.floor(tui.terminal.columns * 0.7));
+        const primaryColumn = Math.max(32, Math.floor(overlayWidth / 2));
+        selectList = new SelectList(
+          filtered,
+          Math.min(Math.max(filtered.length, 1), 15),
+          listTheme,
+          { minPrimaryColumnWidth: primaryColumn, maxPrimaryColumnWidth: primaryColumn },
+        );
         const restoredIndex = filtered.findIndex(
           (item) => item.value === current().selectedValue,
         );
@@ -395,6 +454,13 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionContext): Prom
               ctx.ui.notify("No models available.", "warning");
               return;
             }
+          }
+          // Entering the Sessions page kicks off an async load once per
+          // palette session; partial results stream in via onProgress and
+          // replace the placeholder as they arrive.
+          if (item.page === sessionsPage && !sessionsLoadStarted) {
+            sessionsPage.items = [sessionPlaceholder("Loading sessions…")];
+            startSessionLoad();
           }
           pushPage(item.page);
         };
@@ -428,6 +494,43 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionContext): Prom
         updateTitle();
         rebuild();
         tui.requestRender();
+      }
+
+      /**
+       * Load the session list for the Sessions page. Mirrors the native
+       * /resume picker's loaders: project-scoped, sorted by activity, with
+       * partial results delivered through onProgress so the list fills in
+       * progressively instead of paging.
+       */
+      function startSessionLoad() {
+        sessionsLoadStarted = true;
+        const currentFile = ctx.sessionManager.getSessionFile();
+        const apply = (sessions: readonly SessionSummary[]) => {
+          sessionsPage.items = sessions.length
+            ? sessionItems(sessions, currentFile)
+            : [sessionPlaceholder("No sessions found")];
+          rebuild();
+          tui.requestRender();
+        };
+        SessionManager.list(
+          ctx.sessionManager.getCwd(),
+          ctx.sessionManager.getSessionDir(),
+          (_loaded, _total, partial) => {
+            if (!paletteOpen || !partial) return;
+            apply(partial);
+          },
+        )
+          .then((sessions) => {
+            if (!paletteOpen) return;
+            apply(sessions);
+          })
+          .catch((err) => {
+            if (!paletteOpen) return;
+            sessionsPage.items = [sessionPlaceholder("Failed to load sessions")];
+            rebuild();
+            tui.requestRender();
+            ctx.ui.notify(`Failed to load sessions: ${errorMessage(err)}`, "error");
+          });
       }
 
       rebuild();
@@ -486,10 +589,16 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionContext): Prom
     { overlay: true, overlayOptions: { width: "70%", maxHeight: "80%", minWidth: 50 } },
   );
 
+  // The overlay is closed from here on — block late session-load callbacks.
+  paletteOpen = false;
+
   if (!result) return;
 
   // Execute the selected action
   const action = result.action;
+  // Set when an action replaced the extension runtime (reload): every
+  // captured reference below is dead, so nothing may run afterwards.
+  let runtimeReplaced = false;
   switch (action.type) {
     case "native": {
       const cmd = paletteCommandRegistry.get(action.id);
@@ -500,8 +609,24 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionContext): Prom
       try {
         await cmd.run(pi, ctx);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        ctx.ui.notify(`Palette command "${cmd.label}" failed: ${message}`, "error");
+        ctx.ui.notify(`Palette command "${cmd.label}" failed: ${errorMessage(err)}`, "error");
+      }
+      break;
+    }
+    case "session-new": {
+      try {
+        // The captured command context is invalid after session replacement,
+        // so post-switch work runs in withSession on the fresh context.
+        const outcome = await ctx.newSession({
+          withSession: async (fresh) => {
+            fresh.ui.notify("New session started", "info");
+          },
+        });
+        // cancelled = a session_before_switch handler vetoed; stay silent,
+        // matching native /new.
+        if (outcome.cancelled) break;
+      } catch (err) {
+        ctx.ui.notify(`Failed to create session: ${errorMessage(err)}`, "error");
       }
       break;
     }
@@ -540,13 +665,43 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionContext): Prom
       break;
     }
     case "reload": {
-      const currentText = ctx.ui.getEditorText();
-      if (currentText && currentText.trim()) {
-        savedEditorText = currentText;
+      if (!ctx.isIdle()) {
+        ctx.ui.notify("Wait for the current response to finish before reloading", "warning");
+        break;
       }
-      ctx.ui.setEditorText("/reload");
+      try {
+        // Reload replaces the extension runtime: this closure, the module
+        // state, and every captured reference die here. Await it last and
+        // return without touching anything afterwards.
+        await ctx.reload();
+        runtimeReplaced = true;
+      } catch (err) {
+        ctx.ui.notify(`Reload failed: ${errorMessage(err)}`, "error");
+      }
       break;
     }
+    case "session-resume": {
+      const currentFile = ctx.sessionManager.getSessionFile();
+      if (currentFile && path.resolve(currentFile) === path.resolve(action.path)) {
+        ctx.ui.notify("Already in this session", "info");
+        break;
+      }
+      try {
+        // Post-switch work runs on the fresh context — the captured command
+        // context is invalid after session replacement.
+        const outcome = await ctx.switchSession(action.path, {
+          withSession: async (fresh) => {
+            fresh.ui.notify(`Switched to ${action.label}`, "info");
+          },
+        });
+        if (outcome.cancelled) break;
+      } catch (err) {
+        ctx.ui.notify(`Failed to switch session: ${errorMessage(err)}`, "error");
+      }
+      break;
+    }
+    case "noop":
+      break;
     case "copy-editor": {
       const text = ctx.ui.getEditorText();
       if (text && text.trim()) {
@@ -572,6 +727,8 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionContext): Prom
     }
   }
 
+  if (runtimeReplaced) return;
+
   // The overlay close renders the underlying UI before this promise
   // resolves, and setEditorText mutates state without requesting a render —
   // without this, the editor shows stale text until the next keypress.
@@ -581,10 +738,26 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionContext): Prom
 // ── Extension entry point ──────────────────────────────────────────
 
 export default function commandPaletteExtension(pi: ExtensionAPI) {
+  // The palette opens through the command handler so it receives
+  // ExtensionCommandContext, which carries the session operations
+  // (newSession/fork/switchSession/navigateTree/reload). Those are command-only
+  // by design: shortcut handlers and lifecycle hooks get a plain context.
+  pi.registerCommand("palette", {
+    description: "Open the command palette",
+    handler: async (_args, ctx) => {
+      await showCommandPalette(pi, ctx);
+    },
+  });
+
   pi.registerShortcut(resolveShortcutKey(), {
     description: "Open command palette",
-    handler: async (ctx) => {
-      await showCommandPalette(pi, ctx);
+    handler: async () => {
+      // Dispatch the palette command instead of opening the palette directly.
+      // With expandPromptTemplates, prompt()'s command branch executes the
+      // registered command and returns before any session entry is written or
+      // an agent turn starts — also safe while the agent is streaming. This is
+      // the documented channel for dispatching extension commands.
+      await pi.sendUserMessage("/palette", { expandPromptTemplates: true });
     },
   });
 }

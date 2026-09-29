@@ -30,16 +30,18 @@ Or add to `~/.pi/agent/settings.json`:
 
 ## Usage
 
-| Shortcut | Action |
-|----------|--------|
+| Entry | Action |
+|-------|--------|
 | `Ctrl+Shift+P` _(default, configurable)_ | Open command palette |
+| `/palette` | Open command palette — typed like any extension command; the shortcut dispatches this command internally |
 
-The palette opens as a single macOS-launcher-style overlay with nested pages. The root page mixes leaves and sub-pages: built-in actions and the model selector sit directly on the root, while the remaining categories open as sub-pages — selecting one with **Enter** replaces the current list in the same overlay instead of opening a second overlay. Press **Backspace** with an empty search field to return to the parent page; press **Esc** to close the palette immediately.
+The palette opens as a single macOS-launcher-style overlay with nested pages. The root page mixes leaves and sub-pages: built-in actions sit directly on the root, while everything else — Models, Sessions, extension actions, commands, skills, templates — opens as a sub-page; selecting one with **Enter** replaces the current list in the same overlay instead of opening a second overlay. Press **Backspace** with an empty search field to return to the parent page; press **Esc** to close the palette immediately.
 
 The root page lists:
 
 - **Built-in actions** — curated shortcuts for common operations, shown directly on the root page so urgent entries like Restore never hide behind a sub-page (detailed below)
 - **Models** — a sub-page listing every model with a configured API key (see below)
+- **Sessions** — a sub-page listing this project's sessions for one-key resume (see below)
 - **Extension Actions** — a sub-page of entries registered by other extensions that run a callback directly (see below)
 - **Commands** / **Skills** / **Templates** — sub-pages for all registered `/command` entries, installed skills, and prompt templates; entries are labeled with their bare `/name` since the breadcrumb already names the category
 
@@ -47,26 +49,18 @@ Use **↑/↓** to move through entries and **←/→** to edit the search curso
 
 ### Built-in actions
 
-Built-in actions are grouped by how they run:
+Built-in actions call pi's API directly — no editor round-trip, no extra Enter:
 
 **Run immediately** — they call pi's API directly, no editor round-trip:
 
 | Action | What it does |
 |--------|--------------|
+| Session: New | Start a new session right away via pi's session API |
 | Session: Compact | Compact the conversation right away |
+| Session: Reload | Reload extensions, skills, and config right away (blocked while the agent is streaming) |
 | Editor: Copy Content | Copy current editor text to the clipboard |
 | Editor: Clear Content | Clear the editor, saving the current text to the restore buffer |
 | Restore: Previous Editor Text | Bring back text saved before the last command _(appears only when available)_ |
-
-**Fill the editor** — they insert the matching `/command` for you to submit, just like any extension command:
-
-| Action | Inserts |
-|--------|---------|
-| Session: New | `/new` |
-| Session: Reload | `/reload` |
-| Session: Fork | `/fork` |
-| Session: Tree | `/tree` |
-| Session: Resume | `/resume` |
 
 > Pi ships with more built-in slash commands (e.g. `/export`, `/share`, `/name`, `/settings`). This palette only surfaces a curated subset above — for the rest, type them directly into the editor.
 
@@ -96,6 +90,12 @@ When a command replaces your editor text, or you run **Editor: Clear Content**, 
 The "Models" entry opens a model page inside the same overlay. Models are loaded when the page is first entered, then can be searched and selected without stacking another overlay.
 
 **Scoped models float to the top**, marked with a ★ (favorite) prefix. "Scoped" here means the same set pi uses for its built-in selector's scoped tab and `Ctrl+P` cycling — the `enabledModels` patterns in your `settings.json` (project `.pi/settings.json` overrides global `~/.pi/agent/settings.json`). Everything else follows alphabetically. Filtering preserves that boundary too — scoped matches stay above the rest while you type, rather than collapsing into one score-ordered list. If no scope is configured, the list is a plain alphabetical roster — nothing breaks.
+
+### Sessions
+
+The "Sessions" entry opens a session page inside the same overlay — the palette equivalent of `/resume`. It lists the current project's sessions sorted by activity, showing each session's name (or first-message preview), relative time, and message count; the session you are in is marked `current`. Selecting an entry switches to it immediately via pi's session API — no editor round-trip.
+
+The list loads lazily when the page is first entered and fills in progressively as sessions are read from disk, so the picker is usable before the full scan completes. The page is scoped to the current working directory, matching the project scope pi uses everywhere else; use `/resume` for the cross-project picker.
 
 ## Configuration
 

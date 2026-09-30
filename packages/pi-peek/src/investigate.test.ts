@@ -11,7 +11,6 @@ import {
 } from "@earendil-works/pi-ai";
 import { createInvestigation } from "./investigate.ts";
 import { SessionSnapshot } from "./snapshot.ts";
-import { estimateRequestTokens } from "./budget.ts";
 
 const model = {
   id: "investigator",
@@ -98,7 +97,7 @@ test("search/read/report loop retains call pairing, hides intermediate text and 
   const queue = [
     call("search_session", { query: "distinctive-error" }, "search1"),
     call("read_session", { ids: ["T1"] }, "read1"),
-    response("The test expected 2 but received 3 (T1)."),
+    response("The test expected 2 but received 3."),
   ];
   const investigation = createInvestigation({
     snapshot: records,
@@ -201,33 +200,59 @@ test("tool mistakes are recoverable and the last round is tool-free", async () =
   investigation.dispose();
 });
 
-test("input budgets cover huge source text and retrieved results on a smaller model", async () => {
-  const smallModel = { ...model, contextWindow: 8000, maxTokens: 2000 };
-  const choices: SimpleStreamOptions["toolChoice"][] = [];
+test("the first request includes complete summaries and dialogue without requiring retrieval", async () => {
+  const summary = "Summary start " + "界".repeat(3000) + " summary end";
+  const question = "Question start " + "界".repeat(12000) + " question end";
+  const discussion = "Consider Linux. " + "界".repeat(3000) + "The proposal was rejected.";
   const requests: Context[] = [];
   const investigation = createInvestigation({
-    snapshot: snapshot("界".repeat(100000)),
-    model: smallModel,
-    stream: async (context, options) => {
-      choices.push(options.toolChoice);
+    snapshot: new SessionSnapshot([
+      { role: "compactionSummary", summary, tokensBefore: 50000, timestamp: 0 },
+      { role: "user", content: question, timestamp: 1 },
+      { ...response(), content: [{ type: "text", text: discussion }] },
+    ]),
+    model,
+    stream: async (context) => {
       requests.push(structuredClone(context));
-      return streamOf(
-        requests.length === 1
-          ? call("read_session", { ids: ["U1"], limit: 12000 })
-          : response("Only a bounded excerpt was inspected."),
-      );
+      return streamOf(response("The proposal was rejected."));
     },
   });
-  await investigation.investigate("What was saved?");
-  const budget = (8000 - 1000) * 0.8;
-  assert.ok(requests.every((context) => estimateRequestTokens(context) <= budget));
-  assert.equal(choices[1], "none");
-  assert.match(textOf(requests[1]!.messages), /tool calls are disabled/);
-  assert.match(textOf(requests[1]!.messages), /abbreviated|omitted/);
-  investigation.dispose();
+  try {
+    const result = await investigation.investigate("What happened to the proposal?");
+    assert.equal(requests.length, 1);
+    const prompt = requests[0]!.systemPrompt!;
+    assert.ok(prompt.includes(summary));
+    assert.ok(prompt.includes(question));
+    assert.ok(prompt.includes(discussion));
+    assert.ok(prompt.indexOf(summary) < prompt.indexOf(question));
+    assert.ok(prompt.indexOf(question) < prompt.indexOf(discussion));
+    assert.equal(result.metrics?.toolCalls, 0);
+  } finally {
+    investigation.dispose();
+  }
 });
 
-test("provider overflow shrinks requests with bounded retries; a failed question does not enter history", async () => {
+test("oversized dialogue fails explicitly instead of sending an abbreviated reference", async () => {
+  let requests = 0;
+  const investigation = createInvestigation({
+    snapshot: snapshot("界".repeat(100000)),
+    model: { ...model, contextWindow: 8000 },
+    stream: async () => {
+      requests++;
+      return streamOf(response());
+    },
+  });
+  try {
+    await assert.rejects(investigation.investigate("What was saved?"), {
+      code: "context_overflow",
+    });
+    assert.equal(requests, 0);
+  } finally {
+    investigation.dispose();
+  }
+});
+
+test("provider overflow is not retried with clipped context and failed questions stay out of history", async () => {
   const requests: Context[] = [];
   let fail = true;
   const overflow = response("", "error");
@@ -250,39 +275,92 @@ test("provider overflow shrinks requests with bounded retries; a failed question
     investigation.investigate("failed question"),
     (error: any) => error.code === "context_overflow",
   );
-  assert.equal(requests.length, 3);
-  assert.ok(estimateRequestTokens(requests[1]!) < estimateRequestTokens(requests[0]!));
-  assert.ok(estimateRequestTokens(requests[2]!) < estimateRequestTokens(requests[1]!));
+  assert.equal(requests.length, 1);
   fail = false;
   await investigation.investigate("new question");
   assert.doesNotMatch(textOf(requests.at(-1)!.messages), /failed question/);
   assert.equal(requests.at(-1)!.messages.length, 1);
+  assert.equal(requests.at(-1)!.systemPrompt, requests[0]!.systemPrompt);
   investigation.dispose();
 });
 
-test("overflow retry can recover without rerunning retrieval or leaking failed text", async () => {
-  const smallModel = { ...model, contextWindow: 12000 };
+test("complete retrieved blocks survive later rounds with their original call pairing", async () => {
+  const body = "Tool result start " + "x".repeat(16000) + " tool result end";
+  const other = "Second tool result " + "y".repeat(16000) + " second end";
   const requests: Context[] = [];
-  const overflow = response("rejected text", "error");
-  overflow.errorMessage = "maximum context length exceeded";
-  const queue = [call("read_session", { ids: ["U1"] }), overflow, response("recovered")];
-  const visible: string[] = [];
+  const queue = [
+    call("read_session", { ids: ["T1"] }, "first"),
+    call("read_session", { startId: "T2", endId: "T2" }, "second"),
+    response("report"),
+  ];
   const investigation = createInvestigation({
-    snapshot: snapshot("a".repeat(10000)),
-    model: smallModel,
+    snapshot: new SessionSnapshot([
+      {
+        role: "toolResult",
+        toolCallId: "a",
+        toolName: "read",
+        content: [{ type: "text", text: body }],
+        isError: false,
+        timestamp: 1,
+      },
+      {
+        role: "toolResult",
+        toolCallId: "b",
+        toolName: "read",
+        content: [{ type: "text", text: other }],
+        isError: false,
+        timestamp: 2,
+      },
+    ]),
+    model,
     stream: async (context) => {
       requests.push(structuredClone(context));
       return streamOf(queue.shift()!);
     },
   });
-  const result = await investigation.investigate("question", {
-    onToken: (delta) => visible.push(delta),
+  try {
+    await investigation.investigate("question");
+    assert.equal(requests.length, 3);
+    assert.ok(!requests[0]!.systemPrompt!.includes(body));
+    const results = requests[2]!.messages.filter((message) => message.role === "toolResult");
+    assert.deepEqual(
+      results.map((result) => result.toolCallId),
+      ["first", "second"],
+    );
+    for (const [i, expected] of [body, other].entries()) {
+      const payload = results[i]!.content[0] as { type: "text"; text: string };
+      assert.ok(JSON.parse(payload.text).records[0].text.endsWith(expected));
+    }
+  } finally {
+    investigation.dispose();
+  }
+});
+
+test("oversized retrieved blocks fail explicitly without truncating them for another request", async () => {
+  let requests = 0;
+  const investigation = createInvestigation({
+    snapshot: new SessionSnapshot([
+      {
+        role: "toolResult",
+        toolCallId: "a",
+        toolName: "read",
+        content: [{ type: "text", text: "界".repeat(100000) }],
+        isError: false,
+        timestamp: 1,
+      },
+    ]),
+    model: { ...model, contextWindow: 8000 },
+    stream: async () => {
+      requests++;
+      return streamOf(call("read_session", { ids: ["T1"] }));
+    },
   });
-  assert.equal(result.report, "recovered");
-  assert.deepEqual(visible, ["recovered"]);
-  assert.ok(estimateRequestTokens(requests[2]!) < estimateRequestTokens(requests[1]!));
-  assert.equal(result.usage.total, 54);
-  investigation.dispose();
+  try {
+    await assert.rejects(investigation.investigate("question"), { code: "context_overflow" });
+    assert.equal(requests, 1);
+  } finally {
+    investigation.dispose();
+  }
 });
 
 test("output-limited final reports remain verbatim and empty reports are rejected", async () => {
@@ -572,7 +650,6 @@ test("a failure after a visible tagged prefix never triggers a replay", async ()
     await rejected;
     assert.equal(requests, 1);
     assert.equal(stages.at(-1), "error");
-    assert.ok(!stages.includes("retrying"));
   } finally {
     investigation.dispose();
     await pending.catch(() => {});

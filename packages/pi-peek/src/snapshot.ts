@@ -1,5 +1,4 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { estimateTextTokens, textPrefix } from "./budget.ts";
 
 type ProjectedMessages = ReturnType<
   ExtensionContext["sessionManager"]["buildSessionProjection"]
@@ -101,7 +100,7 @@ export class SessionSnapshot {
             pending.set(block.id, queue);
           }
         }
-        if (m.errorMessage) add("A", "assistant_error", String(m.errorMessage), true, time);
+        if (m.errorMessage) add("A", "assistant_error", String(m.errorMessage), false, time);
       } else if (m.role === "toolResult") {
         const result =
           `Result${m.isError ? " (error)" : ""}:\n${contentText(m.content)}\n${evidence(m.details)}`.trimEnd();
@@ -130,7 +129,7 @@ export class SessionSnapshot {
           "C",
           "context",
           contentText(m.content),
-          true,
+          false,
           ` type=${JSON.stringify(m.customType)}${time}`,
         );
       } else if (m.role === "compactionSummary" || m.role === "branchSummary") {
@@ -147,57 +146,13 @@ export class SessionSnapshot {
     }
   }
 
-  /** A bounded outline; omitted bodies and older records remain searchable/readable. */
-  outline(maxTokens: number): string {
-    const header = `${SCOPE}\nSource thinking: ${this.includeThinking ? "readable saved blocks only" : "excluded"}.\nRecords: ${this.records.length}. The outline may omit or abbreviate records.\n`;
-    const selected = new Map<RecordItem, string>();
-    let remaining = maxTokens - estimateTextTokens(header) - 100;
-    const select = (record: RecordItem, allowance: number) => {
-      const rendered = this.preview(record, allowance);
-      const cost = estimateTextTokens(rendered) + 2;
-      if (cost > remaining || cost > allowance) return false;
-      selected.set(record, rendered);
-      remaining -= cost;
-      return true;
-    };
-    // Preserve task anchors before long recent dialogue can exhaust the outline.
-    const anchors = [
-      this.records.findLast((r) => r.kind === "user"),
-      this.records.findLast((r) => r.kind === "compactionSummary"),
-      this.records.find((r) => r.kind === "user"),
-    ];
-    for (const record of anchors) {
-      if (record && !selected.has(record) && remaining > 100) {
-        select(record, Math.min(2000, Math.floor(remaining / 4)));
-      }
-    }
-    // Reserve a compact reference sample even when tool calls are followed by long prose.
-    let referenceBudget = Math.floor(remaining / 3);
-    for (let i = this.records.length - 1; i >= 0; i--) {
-      const record = this.records[i]!;
-      if (record.inline) continue;
-      const before = remaining;
-      if (select(record, referenceBudget)) referenceBudget -= before - remaining;
-    }
-    for (let i = this.records.length - 1; i >= 0; i--) {
-      const record = this.records[i]!;
-      if (!selected.has(record) && remaining >= 80) select(record, Math.min(2000, remaining));
-    }
-    const omitted = this.records.length - selected.size;
+  /** Complete dialogue and summaries, with retrieval labels for all other admitted blocks. */
+  outline(): string {
+    const header = `${SCOPE}\nSource thinking: ${this.includeThinking ? "readable saved blocks only" : "excluded"}.\nRecords: ${this.records.length}. Dialogue and summaries are included in full; other blocks are represented by retrieval labels.\n`;
     const body = this.records
-      .flatMap((record) => (selected.has(record) ? [selected.get(record)!] : []))
+      .map((record) => (record.inline ? `${record.label}\n${record.text}` : record.label))
       .join("\n\n");
-    return textPrefix(
-      `${header}${omitted ? `\n[${omitted} records omitted from this outline; search the snapshot to locate them.]\n` : ""}\n${body || "(no records fit this outline; use search_session)"}`,
-      maxTokens,
-    );
-  }
-
-  private preview(record: RecordItem, tokens: number): string {
-    if (!record.inline) return record.label;
-    const budget = Math.max(0, tokens - estimateTextTokens(record.label) - 40);
-    const body = textPrefix(record.text, budget);
-    return `${record.label}\n${body}${body.length < record.text.length ? `\n[Body abbreviated; read_session id=${record.id}.]` : ""}`;
+    return `${header}\n${body || "(empty conversation)"}`;
   }
 
   /** Full admitted text for explicit local serialization; investigations use outline(). */
@@ -205,32 +160,24 @@ export class SessionSnapshot {
     return `${SCOPE}\n\n${this.records.map((r) => `${r.label}\n${r.text}`).join("\n\n") || "(empty conversation)"}`;
   }
 
-  read(ids: string[], offset = 0, limit = 8000): object {
-    const pages = [];
-    let remaining = Math.min(12000, limit);
-    const requested = ids.slice(0, 4);
-    for (const [index, id] of requested.entries()) {
-      const record = this.byId.get(id);
-      if (!record) {
-        pages.push({ id, error: "Unknown or unavailable record." });
-        continue;
-      }
-      const allowance = Math.ceil(remaining / (requested.length - index));
-      const text = record.text.slice(offset, offset + allowance);
-      const end = offset + text.length;
-      pages.push({
-        id,
-        label: record.label,
-        offset,
-        totalChars: record.text.length,
-        text,
-        nextOffset: end < record.text.length ? end : null,
-      });
-      remaining -= text.length;
-    }
+  read(ids: string[]) {
     return {
-      records: pages,
+      records: ids.map((id) => {
+        const record = this.byId.get(id);
+        return record
+          ? { id, label: record.label, text: record.text }
+          : { id, error: "Unknown or unavailable record." };
+      }),
     };
+  }
+
+  /** Inclusive range in snapshot order, spanning any admitted block kinds. */
+  readRange(startId: string, endId: string) {
+    const start = this.records.findIndex((record) => record.id === startId);
+    const end = this.records.findIndex((record) => record.id === endId);
+    if (start < 0 || end < 0) throw new Error("Unknown or unavailable range endpoint.");
+    if (end < start) throw new Error("endId must follow or equal startId in snapshot order.");
+    return this.read(this.records.slice(start, end + 1).map((record) => record.id));
   }
 
   search(query: string, cursor = 0, limit = 8): object {

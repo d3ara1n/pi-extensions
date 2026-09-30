@@ -8,7 +8,7 @@ Adds the `peek` tool. Discovery, identity, and the socket mesh live in pi-mesh �
 
 ## How it works
 
-Each call runs a temporary [`pi-peek`](../pi-peek) investigation on the target instance. The helper retrieves and summarizes its saved records; the caller handles evaluation and decisions. The target assistant does not receive the request.
+Each call runs a temporary [`pi-peek`](../pi-peek) investigation on the target instance. The helper receives complete dialogue and summaries, retrieves other saved blocks as needed, and reports focused summaries, explanations and findings. The target assistant does not receive the request.
 
 - **Fresh snapshot per call** — include context when following up. Saved thinking is excluded unless `includeThinking` is enabled.
 - **Live tool view** — the collapsed row shows activity and report character count, then the summary. The expanded view streams the Markdown report and stays at `…` before body text arrives.

@@ -3,14 +3,10 @@ import { test } from "node:test";
 import { buildSessionProjection, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import { SessionSnapshot } from "./snapshot.ts";
 import { executeSnapshotTool } from "./retrieval.ts";
-import { estimateTextTokens } from "./budget.ts";
 
 type Messages = ConstructorParameters<typeof SessionSnapshot>[0];
 const messages = (value: unknown[]) => value as Messages;
-const read = (snapshot: SessionSnapshot, id: string, offset = 0, limit = 12000) =>
-  snapshot.read([id], offset, limit) as {
-    records: { text?: string; error?: string; nextOffset?: number | null }[];
-  };
+const read = (snapshot: SessionSnapshot, id: string) => snapshot.read([id]);
 
 const source = () =>
   messages([
@@ -48,7 +44,7 @@ const source = () =>
 test("outlines retain dialogue and references while retrieval pairs exact arguments with results", () => {
   const input = source();
   const snapshot = new SessionSnapshot(input);
-  const outline = snapshot.outline(4000);
+  const outline = snapshot.outline();
   assert.match(outline, /Why did the edit fail\?|Checking the file/);
   assert.match(outline, /\[toolcall id=T1 name="edit" status=error/);
   assert.doesNotMatch(outline, /old-value|distinctive-error|saved patch|private rationale/);
@@ -71,13 +67,13 @@ test("thinking opt-out removes the records from every retrieval path", () => {
   assert.deepEqual((excluded.search("private rationale") as any).matches, []);
   assert.ok(read(excluded, "H1").records[0]!.error);
   const included = new SessionSnapshot(source(), { includeThinking: true });
-  assert.match(included.outline(4000), /\[thinking id=H1/);
-  assert.doesNotMatch(included.outline(4000), /private rationale/);
+  assert.match(included.outline(), /\[thinking id=H1/);
+  assert.doesNotMatch(included.outline(), /private rationale/);
   assert.match(read(included, "H1").records[0]!.text!, /private rationale/);
   assert.doesNotMatch(included.reference(), /redacted rationale|opaque signature/);
 });
 
-test("bounded outlines preserve references and allow paged recovery of omitted content", () => {
+test("outlines preserve complete long dialogue and every block in chronological order", () => {
   const body = "HEAD" + "界".repeat(20000) + "TAIL-needle";
   const snapshot = new SessionSnapshot(
     messages([
@@ -88,20 +84,16 @@ test("bounded outlines preserve references and allow paged recovery of omitted c
       })),
     ]),
   );
-  const outline = snapshot.outline(1000);
-  assert.ok(estimateTextTokens(outline) <= 1000);
-  assert.match(outline, /omitted|abbreviated/);
-  assert.doesNotMatch(outline, /TAIL-needle/);
-  assert.match(JSON.stringify(snapshot.search("tail-NEEDLE")), /U1/);
-  let recovered = "";
-  let offset: number | null = 0;
-  while (offset !== null) {
-    const page: ReturnType<typeof read>["records"][number] = read(snapshot, "U1", offset, 1000)
-      .records[0]!;
-    recovered += page.text;
-    offset = page.nextOffset!;
+  const outline = snapshot.outline();
+  assert.ok(outline.includes(body));
+  let previous = outline.indexOf(body);
+  for (let i = 0; i < 120; i++) {
+    const current = outline.indexOf(`record-${i}: ${"x".repeat(600)}`);
+    assert.ok(current > previous);
+    previous = current;
   }
-  assert.equal(recovered, body);
+  assert.match(JSON.stringify(snapshot.search("tail-NEEDLE")), /U1/);
+  assert.equal(read(snapshot, "U1").records[0]!.text, body);
   const first = snapshot.search("record-", 0, 2) as any;
   const second = snapshot.search("record-", first.nextCursor, 2) as any;
   assert.equal(first.matches.length, 2);
@@ -156,14 +148,21 @@ test("canonical projection governs edits, summaries and excluded shells", () => 
     snapshot.reference(),
     /removed original|hidden output|excluded command|omitted attempt/,
   );
+  const summaryText = "Earlier work summary " + "context ".repeat(4000) + "final decision";
   const summary = new SessionSnapshot(
     messages([
       { role: "system", content: "secret prompt" },
-      { role: "compactionSummary", summary: "Earlier work summary" },
+      { role: "compactionSummary", summary: summaryText },
       { role: "branchSummary", summary: "Branch summary" },
+      { role: "user", content: "Continue from the summary." },
+      { role: "custom", customType: "context", content: "on-demand context" },
     ]),
   );
-  assert.match(summary.outline(2000), /Earlier work summary/);
+  assert.ok(summary.outline().includes(summaryText));
+  assert.ok(summary.outline().indexOf(summaryText) < summary.outline().indexOf("Continue from"));
+  assert.match(summary.outline(), /\[context id=C1/);
+  assert.doesNotMatch(summary.outline(), /on-demand context/);
+  assert.equal(read(summary, "C1").records[0]!.text, "on-demand context");
   assert.match(summary.reference(), /Branch summary/);
   assert.doesNotMatch(summary.reference(), /secret prompt/);
 });
@@ -178,12 +177,18 @@ test("pending calls, orphaned results and invalid retrieval requests remain expl
       { role: "toolResult", toolCallId: "orphan", toolName: "read", content: "standalone result" },
     ]),
   );
-  assert.match(snapshot.outline(2000), /status=pending/);
+  assert.match(snapshot.outline(), /status=pending/);
   assert.match(read(snapshot, "T2").records[0]!.text!, /standalone result/);
   const invalidArgs: Parameters<typeof executeSnapshotTool>[1]["arguments"][] = [
     { ids: ["T1"], offset: -1 },
     { ids: ["../../secret"] },
     { ids: ["T1"], extra: true },
+    { ids: [] },
+    { ids: ["T1"], startId: "T1", endId: "T2" },
+    { startId: "T1" },
+    { endId: "T2" },
+    { startId: "T2", endId: "T1" },
+    { startId: "T1", endId: "T999" },
   ];
   for (const args of invalidArgs) {
     const result = executeSnapshotTool(snapshot, {
@@ -217,39 +222,77 @@ test("reused source call IDs pair pending calls with results in arrival order", 
   assert.match(read(snapshot, "T1").records[0]!.text!, /first.ts[\s\S]*FIRST_RESULT/);
   assert.doesNotMatch(read(snapshot, "T1").records[0]!.text!, /SECOND_RESULT/);
   assert.match(read(snapshot, "T2").records[0]!.text!, /second.ts[\s\S]*SECOND_RESULT/);
-  assert.doesNotMatch(snapshot.outline(2000), /status=pending/);
+  assert.doesNotMatch(snapshot.outline(), /status=pending/);
 });
 
-test("a small outline retains the task anchor and a tool reference despite long later prose", () => {
+test("all retrieval labels remain in the outline despite long later prose", () => {
   const snapshot = new SessionSnapshot(
     messages([
       { role: "user", content: "Find the deployment failure." },
-      { role: "assistant", content: [{ type: "toolCall", id: "c", name: "bash", arguments: {} }] },
+      ...Array.from({ length: 100 }, (_, i) => ({
+        role: "assistant",
+        content: [{ type: "toolCall", id: `c${i}`, name: "bash", arguments: {} }],
+      })),
       ...Array.from({ length: 20 }, () => ({
         role: "assistant",
         content: [{ type: "text", text: "later discussion ".repeat(100) }],
       })),
     ]),
   );
-  const outline = snapshot.outline(650);
-  assert.ok(estimateTextTokens(outline) <= 650);
+  const outline = snapshot.outline();
   assert.match(outline, /Find the deployment failure/);
-  assert.match(outline, /\[toolcall id=T1/);
+  for (let i = 1; i <= 100; i++) assert.ok(outline.includes(`[toolcall id=T${i} `));
 });
 
-test("batched reads divide the shared budget without starving later records", () => {
+test("search excerpts locate long blocks and batched reads return every body in full", () => {
+  const first = "a".repeat(20000) + "needle-first-tail";
+  const second = "needle-second-head" + "b".repeat(20000);
   const snapshot = new SessionSnapshot(
     messages([
-      { role: "user", content: "a".repeat(1000) },
-      { role: "user", content: "b".repeat(1000) },
+      { role: "toolResult", toolCallId: "a", toolName: "read", content: first },
+      { role: "toolResult", toolCallId: "b", toolName: "read", content: second },
     ]),
   );
-  const result = snapshot.read(["U1", "U2"], 0, 100) as {
-    records: { text: string; nextOffset: number }[];
-  };
-  assert.equal(
-    result.records.reduce((sum, page) => sum + page.text.length, 0),
-    100,
+  const matches = snapshot.search("needle") as { matches: { id: string; excerpt: string }[] };
+  assert.deepEqual(
+    matches.matches.map((match) => match.id),
+    ["T1", "T2"],
   );
-  assert.ok(result.records.every((page) => page.nextOffset > 0));
+  assert.ok(matches.matches.every((match) => match.excerpt.length < 400));
+  const result = executeSnapshotTool(snapshot, {
+    type: "toolCall",
+    id: "read",
+    name: "read_session",
+    arguments: { ids: ["T1", "T2"] },
+  });
+  assert.equal(result.isError, false);
+  const records = JSON.parse((result.content[0] as { text: string }).text).records;
+  assert.equal(records[0].text, `Tool: read\nCall ID: a\nResult:\n${first}`);
+  assert.equal(records[1].text, `Tool: read\nCall ID: b\nResult:\n${second}`);
+  assert.ok(records.every((record: object) => !("nextOffset" in record)));
+});
+
+test("inclusive range reads follow snapshot order across dialogue, thinking and tool blocks", () => {
+  const snapshot = new SessionSnapshot(source(), { includeThinking: true });
+  const result = executeSnapshotTool(snapshot, {
+    type: "toolCall",
+    id: "range",
+    name: "read_session",
+    arguments: { startId: "U1", endId: "T1" },
+  });
+  assert.equal(result.isError, false);
+  const records = JSON.parse((result.content[0] as { text: string }).text).records;
+  assert.deepEqual(
+    records.map((record: { id: string }) => record.id),
+    ["U1", "H1", "A1", "T1"],
+  );
+  for (const record of records) assert.deepEqual(record, read(snapshot, record.id).records[0]);
+  assert.deepEqual(snapshot.readRange("A1", "A1"), snapshot.read(["A1"]));
+
+  const excluded = new SessionSnapshot(source());
+  assert.deepEqual(
+    excluded.readRange("U1", "T1").records.map((record) => record.id),
+    ["U1", "A1", "T1"],
+  );
+  assert.throws(() => excluded.readRange("H1", "T1"), /unavailable/);
 });

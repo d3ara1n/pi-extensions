@@ -6,7 +6,7 @@ export const INVESTIGATION_TOOLS: Tool[] = [
   {
     name: "search_session",
     description:
-      "Search all snapshot records, including those omitted from the outline. Literal, case-insensitive match; returns IDs, one excerpt per record, and nextCursor.",
+      "Search all snapshot records, including bodies behind retrieval labels. Literal, case-insensitive match; returns IDs, one relevance excerpt per matching record, and nextCursor. Use read_session for complete blocks.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -35,26 +35,28 @@ export const INVESTIGATION_TOOLS: Tool[] = [
   {
     name: "read_session",
     description:
-      "Read saved content by record ID, including tool arguments and results. Returns bounded pages with nextOffset; does not open external files.",
+      "Read complete saved blocks, including tool arguments/results and admitted thinking. Select individual IDs or an inclusive range in snapshot order. Returns full block text without clipping or pagination; does not open external files.",
     parameters: {
       type: "object",
       additionalProperties: false,
       properties: {
-        ids: { type: "array", minItems: 1, maxItems: 4, items: { type: "string", maxLength: 32 } },
-        offset: {
-          type: "integer",
-          minimum: 0,
-          description:
-            "UTF-16 character offset within each record; defaults to 0. Use nextOffset to continue.",
+        ids: {
+          type: "array",
+          minItems: 1,
+          items: { type: "string", maxLength: 32 },
+          description: "Block IDs to read. Use either ids or both startId and endId.",
         },
-        limit: {
-          type: "integer",
-          minimum: 1,
-          maximum: 12000,
-          description: "Combined character budget across the records; defaults to 8000.",
+        startId: {
+          type: "string",
+          maxLength: 32,
+          description: "First block of a continuous range, inclusive; requires endId.",
+        },
+        endId: {
+          type: "string",
+          maxLength: 32,
+          description: "Last block of the range, inclusive; may have a different kind prefix.",
         },
       },
-      required: ["ids"],
     },
   },
 ];
@@ -78,7 +80,7 @@ export function executeSnapshotTool(snapshot: SessionSnapshot, call: ToolCall): 
       call.name === "search_session"
         ? ["query", "cursor", "limit"]
         : call.name === "read_session"
-          ? ["ids", "offset", "limit"]
+          ? ["ids", "startId", "endId"]
           : [];
     if (Object.keys(args).some((key) => !allowed.includes(key)))
       throw new Error("Unexpected tool argument.");
@@ -93,20 +95,19 @@ export function executeSnapshotTool(snapshot: SessionSnapshot, call: ToolCall): 
         ),
       );
     } else if (call.name === "read_session") {
-      if (
-        !Array.isArray(args.ids) ||
-        args.ids.length < 1 ||
-        args.ids.length > 4 ||
-        args.ids.some((id) => typeof id !== "string" || !/^[A-Z]\d{1,10}$/.test(id))
-      )
-        throw new Error("ids must contain 1–4 snapshot record IDs.");
-      text = JSON.stringify(
-        snapshot.read(
-          args.ids,
-          integer(args.offset, 0, 0, Number.MAX_SAFE_INTEGER),
-          integer(args.limit, 8000, 1, 12000),
-        ),
-      );
+      const validId = (id: unknown): id is string =>
+        typeof id === "string" && /^[A-Z]\d{1,10}$/.test(id);
+      if (args.ids !== undefined) {
+        if (args.startId !== undefined || args.endId !== undefined)
+          throw new Error("Use either ids or a startId/endId range, not both.");
+        if (!Array.isArray(args.ids) || !args.ids.length || !args.ids.every(validId))
+          throw new Error("ids must contain snapshot record IDs.");
+        text = JSON.stringify(snapshot.read(args.ids));
+      } else {
+        if (!validId(args.startId) || !validId(args.endId))
+          throw new Error("Provide ids or both startId and endId.");
+        text = JSON.stringify(snapshot.readRange(args.startId, args.endId));
+      }
     } else {
       throw new Error("Unknown investigation tool. Use search_session or read_session.");
     }

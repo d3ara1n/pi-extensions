@@ -7,18 +7,6 @@ export function estimateTextTokens(text: string): number {
   return Math.ceil(units / 3);
 }
 
-/** @internal A prefix bounded by the same heuristic, without splitting surrogate pairs. */
-export function textPrefix(text: string, tokens: number): string {
-  let units = 0;
-  let end = 0;
-  for (const char of text) {
-    units += char.codePointAt(0)! < 128 ? 1 : 6;
-    if (units > tokens * 3) break;
-    end += char.length;
-  }
-  return text.slice(0, end);
-}
-
 /** @internal Count serialized request content, including internal tool declarations. */
 export function estimateRequestTokens(context: Context): number {
   return (

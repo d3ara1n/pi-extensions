@@ -37,12 +37,11 @@ export type InvestigateStage =
   | "searching"
   | "reading"
   | "outputting"
-  | "retrying"
   | "done"
   | "error";
 
 export interface InvestigateMetrics {
-  /** Model requests started, including overflow retries. */
+  /** Model requests started for this question. */
   requests: number;
   /** Internal search/read tool calls executed. */
   toolCalls: number;
@@ -86,7 +85,7 @@ export interface InvestigateResult {
   metrics?: InvestigateMetrics;
   /** A length stop preserves the partial report without automatically continuing. */
   stopReason: "stop" | "length";
-  /** Usage is summed across retrieval, reporting and any overflow retries. */
+  /** Usage is summed across retrieval and reporting. */
   usage: {
     input: number;
     output: number;
@@ -108,7 +107,7 @@ export class PeekContextOverflowError extends Error {
 
 export interface PeekInvestigation {
   readonly snapshotAt: string;
-  /** Bounded retrieval over a fixed snapshot; follow-ups retain prior questions/reports. */
+  /** Full dialogue over a fixed snapshot with optional block retrieval; follow-ups retain prior questions/reports. */
   investigate(question: string, opts?: InvestigateOptions): Promise<InvestigateResult>;
   /** Abort pending work and release the snapshot and history. Idempotent. */
   dispose(): void;
@@ -122,7 +121,7 @@ export interface PeekAPI {
     question: string,
     opts?: InvestigateOptions & PeekReferenceOptions,
   ): Promise<InvestigateResult>;
-  /** Full admitted snapshot text for explicit serialization; model requests use a bounded outline. */
+  /** Full admitted snapshot text; model requests inline dialogue/summaries and label other blocks. */
   serializeMainConversation(options?: PeekReferenceOptions): string;
   getMainAgentStatus(): MainAgentStatus;
 }

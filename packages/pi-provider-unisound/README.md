@@ -23,7 +23,7 @@ Both channels share the endpoint `https://maas-api.unisound.com/v1`. The keys ar
 |---|---|---|---|---|
 | `u2-flash` | Yes (on/off, no effort levels) | text | 512K | 128K |
 | `u2` | Always on (cannot disable) | text | 160K | 64K |
-| `u2-med` | Yes (on/off) | text, image | 256K | not documented — declared as 64K |
+| `u2-med` | Yes (off / low / medium / high) | text, image | 256K | not documented — declared as 64K |
 | `u2-radimed` | No (cannot enable) | text, image | 40K | not documented — declared as 8K |
 
 ### `unisound-plan` (Token Plan)
@@ -32,7 +32,7 @@ Both channels share the endpoint `https://maas-api.unisound.com/v1`. The keys ar
 |---|---|---|---|---|
 | `u2-flash` | Yes (on/off) | text | 512K | 128K |
 | `u2` | Always on | text | 160K | 64K |
-| `u2-med` | Yes (on/off) | text, image | 256K | not documented — declared as 64K |
+| `u2-med` | Yes (off / low / medium / high) | text, image | 256K | not documented — declared as 64K |
 | `glm-5.2` | Yes (`reasoning_effort` off/high/max) | text | 1M | 128K |
 | `kimi-k3` | Always on (`reasoning_effort` low/high/max) | text, image | 1M | 1M |
 
@@ -40,8 +40,8 @@ Both channels share the endpoint `https://maas-api.unisound.com/v1`. The keys ar
 
 ## Compatibility
 
-- **Thinking** is on by default on the U2 models: `u2-flash` and `u2-med` can toggle it, `u2` always reasons, and `u2-radimed` never does. The U2 models only support on/off, so pi's reasoning-effort levels are not offered for them.
-- **Reasoning effort** applies to the plan-hosted models: `glm-5.2` exposes off / high / max, and `kimi-k3` is always-on with low / high / max.
+- **Thinking** is on by default on the U2 models: `u2-flash` and `u2-med` can toggle it, `u2` always reasons, and `u2-radimed` never does. `u2-flash` ignores `reasoning_effort` (re-verified live), so only on/off is offered for it.
+- **Reasoning effort** applies to `u2-med` and the plan-hosted models: `u2-med` exposes off / low / medium / high, `glm-5.2` exposes off / high / max, and `kimi-k3` is always-on with low / high / max. Gateway alias levels (e.g. `minimal` → `low` on `u2-med`) are hidden.
 - **Image input**: `u2-flash` is text-only; `u2-med` and `u2-radimed` accept images.
 - **Context overflow** errors match pi's built-in patterns, so auto-compaction works. Declared context windows are conservative, so pi compacts before the gateway rejects an oversized request.
 - **Caching**: the API reports cache-hit tokens, which pi shows as cache-read tokens in the cost estimate.
@@ -49,7 +49,7 @@ Both channels share the endpoint `https://maas-api.unisound.com/v1`. The keys ar
 
 ## Pricing
 
-pi tracks cost in USD. Unisound lists CNY prices, so `cost` fields are FX-converted estimates (~7.1 CNY/USD) for pi's status-bar display only — not real billing. List prices (input / cache-hit / output, CNY per million tokens): `u2-flash` 1/0.2/2 (60% launch discount excluded), `u2` 1/0.02/2, `u2-med` 8/2/28, `u2-radimed` 15/4/20. Token Plan models have subscription billing → `cost` 0. Cache-write pricing is not published.
+pi tracks cost in USD. Unisound lists CNY prices, so `cost` fields are FX-converted estimates (~7.1 CNY/USD) for pi's status-bar display only — not real billing. List prices (input / cache-hit / output, CNY per million tokens): `u2-flash` 1/0.2/2 (limited-time promos such as the Sept–Oct 2026 free month excluded), `u2` 1/0.02/2, `u2-med` 8/2/28, `u2-radimed` 15/4/20. Token Plan models have subscription billing → `cost` 0. Cache-write pricing is not published.
 
 ## Installation
 

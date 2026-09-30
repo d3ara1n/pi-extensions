@@ -13,10 +13,11 @@
  * provider uses the same endpoint; adjust if a plan key proves otherwise.
  *
  * Compat: `u2-flash` was verified against the live API (see README and
- * ../../PROVIDER.md). The remaining models follow the same wire contract per
- * official docs but were NOT live-tested (the dev key only has u2-flash
- * permission) — per-model thinking behavior still differs and is encoded
- * from the documented constraints below.
+ * ../../PROVIDER.md; re-checked 2026-09-30 after the U2-Flash release).
+ * The remaining models follow the same wire contract per official docs but
+ * were NOT live-tested (the dev key only has u2-flash permission) —
+ * per-model thinking behavior still differs and is encoded from the
+ * documented constraints below.
  *
  * Usage quota/balance reporting is not yet implemented — Unisound MaaS does
  * not currently expose a public quota or balance API (dashboard/billing,
@@ -45,8 +46,13 @@ const PLAN_API_KEY_ENV = "UNISOUND_PLAN_API_KEY";
  */
 const UNISOUND_COMPAT = {
   supportsDeveloperRole: false,
-  // U2 models ignore reasoning_effort entirely; models that honor it
-  // (glm-5.2, kimi-k3 in the Token Plan) override this per model.
+  // The gateway enum-validates reasoning_effort platform-wide (none/minimal/
+  // low/medium/high/xhigh/max), but validating ≠ honoring: u2-flash ignores
+  // it (re-verified live 2026-09-30 — effort high/low/none leave reasoning
+  // unchanged; the "four-level reasoning intensity" touted in the U2-Flash
+  // launch announcement is not exposed through this API), and u2 is absent
+  // from the docs effort table. Models that honor it (u2-med, plus glm-5.2 /
+  // kimi-k3 in the Token Plan) override this per model.
   supportsReasoningEffort: false,
   maxTokensField: "max_tokens" as const,
   thinkingFormat: "deepseek" as const,
@@ -73,9 +79,10 @@ const THINKING_ALWAYS_ON = {
 // ── Models ────────────────────────────────────────────────────────────────
 
 // pi tracks cost in USD; Unisound lists CNY per million tokens (u2-flash
-// shows a 60%-off launch price, excluded per repo pricing rules). Converted
-// at ~7.1 CNY/USD for display estimates only — not real billing. List
-// prices incl. cache-hit: flash ¥1/0.2/2, u2 ¥1/0.02/2, u2-med ¥8/2/28,
+// has run launch discounts and a 2026-09/10 free month, all excluded per
+// repo pricing rules). Converted at ~7.1 CNY/USD for display estimates
+// only — not real billing. List prices incl. cache-hit (re-checked on the
+// model hub 2026-09-30): flash ¥1/0.2/2, u2 ¥1/0.02/2, u2-med ¥8/2/28,
 // u2-radimed ¥15/4/20 (input/cache/output). Cache-write pricing is not
 // published anywhere.
 const FLASH_COST = { input: 0.14, output: 0.28, cacheRead: 0.03, cacheWrite: 0 };
@@ -91,7 +98,8 @@ const PLAN_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
 const PAYG_MODELS = [
   {
-    // Verified live: thinking toggles, no effort levels, text-only.
+    // Verified live (last re-checked 2026-09-30): thinking toggles,
+    // reasoning_effort is accepted but ignored, text-only.
     id: "u2-flash",
     name: "U2 Flash",
     reasoning: true,
@@ -120,8 +128,12 @@ const PAYG_MODELS = [
   },
   {
     // Docs put u2-med in neither the can't-disable nor can't-enable group,
-    // so it toggles like u2-flash. Max output is unpublished (/v1/models
-    // returns null) — 64K is a conservative placeholder.
+    // so thinking.type toggles like u2-flash. Per the 2026-09 docs it also
+    // honors reasoning_effort: native levels none/low/medium/high, with
+    // minimal→low and xhigh/max→high as gateway aliases (hidden per repo
+    // convention). Not live-tested — the dev key has no u2-med permission.
+    // Max output is unpublished (/v1/models returns null) — 64K is a
+    // conservative placeholder.
     id: "u2-med",
     name: "U2 Med",
     reasoning: true,
@@ -129,13 +141,23 @@ const PAYG_MODELS = [
     cost: MED_COST,
     contextWindow: 262_144,
     maxTokens: 65_536,
-    thinkingLevelMap: THINKING_TOGGLE,
-    compat: UNISOUND_COMPAT,
+    thinkingLevelMap: {
+      off: "disabled",
+      minimal: null, // alias of low
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: null, // alias of high
+      max: null, // alias of high
+    },
+    compat: { ...UNISOUND_COMPAT, supportsReasoningEffort: true },
   },
   {
     // Docs: thinking disabled by default and cannot be enabled → reasoning
     // false. Medical imaging model: image+text input, 40K context per model
     // hub. Max output unpublished — 8K placeholder. Not in the Token Plan.
+    // Still on the model hub and in the docs enum as of 2026-09-30, though
+    // /v1/models omits it — keep until officially retired.
     id: "u2-radimed",
     name: "U2 RadiMed",
     reasoning: false,
@@ -147,8 +169,9 @@ const PAYG_MODELS = [
   },
 ];
 
-// ── Token Plan models (per plan docs: u2-flash, u2, u2-med, glm-5.2,
-// kimi-k3 — no u2-radimed). glm/kimi honor reasoning_effort, unlike U2. ───
+// ── Token Plan models (per plan docs, re-checked 2026-09-30: u2-flash, u2,
+// u2-med, glm-5.2, kimi-k3 — no u2-radimed). u2-med/glm/kimi honor
+// reasoning_effort; u2-flash/u2 do not. ───
 
 const PLAN_ONLY_MODELS = [
   {

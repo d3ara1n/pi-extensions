@@ -60,13 +60,10 @@ export default function registerPeekAgentExtension(pi: ExtensionAPI): void {
   pi.events.on(MESH_READY_EVENT, (mesh: unknown) => serveInvestigations(mesh as MeshAPI));
 
   // (b) mesh inits BEFORE us, or in the same session_start pass → already on globalThis.
-  pi.on("session_start", async (_event, ctx) => {
+  pi.on("session_start", () => {
     const mesh = tryGetMeshAPI();
     if (!mesh) return; // waiting for the mesh:ready listener to fire
     serveInvestigations(mesh);
-    if (ctx.hasUI) {
-      ctx.ui.notify("pi-peek-agent ready (serving investigations on the mesh)", "info");
-    }
   });
 
   registerPeekTool(pi);

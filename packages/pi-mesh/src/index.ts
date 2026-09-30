@@ -137,10 +137,6 @@ export default function registerMeshExtension(pi: ExtensionAPI): void {
       .catch(() => {
         // ignore
       });
-
-    if (ctx.hasUI) {
-      ctx.ui.notify(`mesh ready as ${name}`, "info");
-    }
   });
 
   pi.on("model_select", (event) => {

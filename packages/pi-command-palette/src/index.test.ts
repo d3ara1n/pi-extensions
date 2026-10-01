@@ -125,3 +125,16 @@ test("buildPaletteItems picks up native commands registered after load", () => {
   const items = buildPaletteItems(fakePi([]));
   assert.ok(items.some((item) => item.value === "native:test:late"));
 });
+
+test("the root restore action targets the latest draft and disappears when there are no drafts", () => {
+  const pi = fakePi([]);
+  const drafts = [
+    { id: "latest", text: "next task\nmore detail", savedAt: "2026-01-02T00:00:00Z" },
+    { id: "earlier", text: "earlier task", savedAt: "2026-01-01T00:00:00Z" },
+  ];
+  const items = buildPaletteItems(pi, drafts);
+  assert.equal(items[0].label, "Editor: Restore Latest Draft");
+  assert.deepEqual(items[0].action, { type: "restore-draft", id: "latest" });
+  assert.ok(items.some((item) => item.label === "Editor: Save Draft"));
+  assert.equal(buildPaletteItems(pi).some((item) => item.value === "__restore"), false);
+});

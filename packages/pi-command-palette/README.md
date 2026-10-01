@@ -35,13 +35,14 @@ Or add to `~/.pi/agent/settings.json`:
 | `Ctrl+Shift+P` _(default, configurable)_ | Open command palette |
 | `/palette` | Open command palette — typed like any extension command; the shortcut dispatches this command internally |
 
-The palette opens as a single macOS-launcher-style overlay with nested pages. The root page mixes leaves and sub-pages: built-in actions sit directly on the root, while everything else — Models, Sessions, extension actions, commands, skills, templates — opens as a sub-page; selecting one with **Enter** replaces the current list in the same overlay instead of opening a second overlay. Press **Backspace** with an empty search field to return to the parent page; press **Esc** to close the palette immediately.
+The palette opens as a single macOS-launcher-style overlay with nested pages. The root page mixes leaves and sub-pages: built-in actions sit directly on the root, while Models, Sessions, Drafts, extension actions, commands, skills, and templates open as sub-pages; selecting one with **Enter** replaces the current list in the same overlay instead of opening a second overlay. Press **Backspace** with an empty search field to return to the parent page; press **Esc** to close the palette immediately. The palette requires TUI mode; other modes receive a notification.
 
 The root page lists:
 
 - **Built-in actions** — curated shortcuts for common operations, shown directly on the root page so urgent entries like Restore never hide behind a sub-page (detailed below)
 - **Models** — a sub-page listing every model with a configured API key (see below)
 - **Sessions** — a sub-page listing this project's sessions for one-key resume (see below)
+- **Drafts (N)** — a sub-page of this session's saved editor text, newest first; search includes the full draft text
 - **Extension Actions** — a sub-page of entries registered by other extensions that run a callback directly (see below)
 - **Commands** / **Skills** / **Templates** — sub-pages for all registered `/command` entries, installed skills, and prompt templates; entries are labeled with their bare `/name` since the breadcrumb already names the category
 
@@ -59,8 +60,8 @@ Built-in actions call pi's API directly — no editor round-trip, no extra Enter
 | Session: Compact | Compact the conversation right away |
 | Session: Reload | Reload extensions, skills, and config right away (blocked while the agent is streaming) |
 | Editor: Copy Content | Copy current editor text to the clipboard |
-| Editor: Clear Content | Clear the editor, saving the current text to the restore buffer |
-| Restore: Previous Editor Text | Bring back text saved before the last command _(appears only when available)_ |
+| Editor: Save Draft | Save current editor text as a new draft, then clear the editor |
+| Editor: Restore Latest Draft | Move the latest draft into the editor, saving any existing input as a new draft first _(appears only when drafts exist)_ |
 
 > Pi ships with more built-in slash commands (e.g. `/export`, `/share`, `/name`, `/settings`). This palette only surfaces a curated subset above — for the rest, type them directly into the editor.
 
@@ -81,9 +82,27 @@ paletteCommandRegistry.register({
 
 The registry is read every time the palette opens, so commands can be registered and unregistered at any time. Failures inside `run` are caught and surfaced as an error notification. See the [core package](../pi-command-palette-core) for the full API.
 
-### Editor text preservation
+### Drafts
 
-When a command replaces your editor text, or you run **Editor: Clear Content**, the original content is saved and a **Restore: Previous Editor Text** entry appears at the top of the palette. Select it to get your text back.
+Use **Editor: Save Draft** to set aside input while continuing the current conversation. When a palette command fills the editor, the existing text is also saved as a new draft. Multiple drafts are kept independently; saving another never overwrites earlier ones. Whitespace-only input is not saved.
+
+**Editor: Restore Latest Draft** provides a direct root-menu shortcut. The **Drafts (N)** page lists all drafts, newest first, with a text preview, save time, and line count. Fuzzy search on this page or the root page matches the full text.
+
+| Key | Action |
+|-----|--------|
+| Enter | Move the selected draft into the editor and close the palette |
+| Ctrl+P | Preview the selected draft's full text without taking it out |
+| Ctrl+D | Delete the selected draft |
+| Backspace (empty search) | Return to the parent page |
+| Esc | Close the palette |
+
+The preview supports **↑/↓**, **Page Up/Page Down**, and **Home/End** scrolling. **Enter** restores it, **Ctrl+D** deletes it, and **Backspace** or **Ctrl+P** returns to the list.
+
+Restoring removes the selected draft from the draft box. If the editor already contains text, that text becomes the newest draft in the same save operation. Nothing is sent automatically. After restoring, the text belongs to the editor; save it again to put it back in the draft box.
+
+Drafts are stored at `~/.pi/command-palette/drafts/{sessionId}.json`, using the user's home directory and pi's `CONFIG_DIR_NAME` (`.pi`). This plugin data directory is independent of `PI_CODING_AGENT_DIR`, which redirects pi's agent directory. Each file contains only the current draft list. Save, restore, and delete atomically replace the file before updating the in-memory list or editor. A failed write leaves the editor and draft list unchanged. There is no shutdown save or per-keystroke persistence.
+
+Drafts reload with their session and survive extension reloads and restarts. Navigating branches within that session does not rewind them; a new or forked session has its own draft box. Drafts are separate from the conversation log and are not added to model context. Deleting a session through pi does not automatically delete its separate draft file.
 
 ### Model selector
 

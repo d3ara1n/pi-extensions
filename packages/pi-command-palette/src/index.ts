@@ -17,13 +17,14 @@
  * - Fuzzy search within the current page; searching the root page matches
  *   every leaf across sub-pages
  * - Floating overlay on top of existing content
- * - Saves editor text before overwriting; offers "Restore" in palette
- * - Clear editor into the restore buffer
+ * - Saves editor text as session-scoped drafts before overwriting
+ * - Draft list with restore, full-text preview, and deletion
  */
 
+import { homedir } from "node:os";
 import * as path from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { copyToClipboard, DynamicBorder, SessionManager } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, copyToClipboard, DynamicBorder, SessionManager } from "@earendil-works/pi-coding-agent";
 import { paletteCommandRegistry } from "@d3ara1n/pi-command-palette-core";
 import {
   Container,
@@ -32,16 +33,18 @@ import {
   Input,
   Key,
   matchesKey,
+  ScrollView,
   SelectList,
   Text,
   type TUI,
 } from "@earendil-works/pi-tui";
 import { resolveShortcutKey } from "./config.ts";
+import { applyDraftEditorAction, DraftStore, type Draft, type DraftEditorAction } from "./drafts.ts";
 
 // ── Types ──────────────────────────────────────────────────────────
 
 type CommandAction =
-  | { type: "editor"; text: string }
+  | DraftEditorAction
   | { type: "session-new" }
   | { type: "session-resume"; path: string; label: string }
   | { type: "noop" }
@@ -49,9 +52,7 @@ type CommandAction =
   | { type: "model"; provider: string; modelId: string }
   | { type: "compact" }
   | { type: "reload" }
-  | { type: "restore" }
-  | { type: "copy-editor" }
-  | { type: "clear-editor" };
+  | { type: "copy-editor" };
 
 interface PaletteItem {
   value: string;
@@ -59,12 +60,8 @@ interface PaletteItem {
   description: string;
   category: string;
   action: CommandAction;
+  searchText?: string;
 }
-
-// ── Module state ───────────────────────────────────────────────────
-
-/** Editor text saved before the palette overwrites it. */
-let savedEditorText: string | null = null;
 
 /**
  * Explicit display order for built-in palette entries (lower = higher up).
@@ -74,7 +71,7 @@ let savedEditorText: string | null = null;
 const BUILTIN_ORDER: Record<string, number> = {
   __restore: 0,
   __copy_editor: 1,
-  __clear_editor: 2,
+  __save_draft: 2,
 };
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -98,19 +95,18 @@ function paletteSortRank(item: PaletteItem): number {
  * @internal — exported for testing; builds the palette item list from
  * built-ins, the native-command registry, and pi's command registry.
  */
-export function buildPaletteItems(pi: ExtensionAPI): PaletteItem[] {
+export function buildPaletteItems(pi: ExtensionAPI, drafts: readonly Draft[] = []): PaletteItem[] {
   const items: PaletteItem[] = [];
 
-  // ── Restore option (if previous editor text was saved) ────────
-  if (savedEditorText) {
-    const preview =
-      savedEditorText.length > 40 ? `${savedEditorText.slice(0, 37)}…` : savedEditorText;
+  // Resolve the latest draft before any editor text is saved during restore.
+  const latest = drafts[0];
+  if (latest) {
     items.push({
       value: "__restore",
-      label: "Restore: Previous Editor Text",
-      description: preview.replace(/\n/g, "⏎"),
+      label: "Editor: Restore Latest Draft",
+      description: firstMessagePreview(latest.text),
       category: "Built-in",
-      action: { type: "restore" },
+      action: { type: "restore-draft", id: latest.id },
     });
   }
 
@@ -148,11 +144,11 @@ export function buildPaletteItems(pi: ExtensionAPI): PaletteItem[] {
   });
 
   items.push({
-    value: "__clear_editor",
-    label: "Editor: Clear Content",
-    description: "Clear editor (recover via Restore)",
+    value: "__save_draft",
+    label: "Editor: Save Draft",
+    description: "Save current editor text as a draft and clear the editor",
     category: "Built-in",
-    action: { type: "clear-editor" },
+    action: { type: "save-draft" },
   });
 
   // ── Native commands from other extensions ────────────────────
@@ -296,10 +292,25 @@ function sessionItems(sessions: readonly SessionSummary[], currentFile: string |
   });
 }
 
-async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> {
+function draftItem(draft: Draft): PaletteItem {
+  return {
+    value: `draft:${draft.id}`,
+    label: firstMessagePreview(draft.text),
+    description: `${timeAgo(new Date(draft.savedAt))} · ${draft.text.split("\n").length} lines`,
+    category: "Drafts",
+    action: { type: "restore-draft", id: draft.id },
+    searchText: draft.text,
+  };
+}
+
+async function showCommandPalette(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  drafts: DraftStore | undefined,
+): Promise<void> {
   if (ctx.mode !== "tui") return;
 
-  const paletteItems = buildPaletteItems(pi);
+  const paletteItems = buildPaletteItems(pi, drafts?.items);
   const leaves = (category: string) =>
     paletteItems.filter((item) => item.category === category);
   const leafPage = (title: string, items: PaletteItem[]): PalettePage => ({ title, items });
@@ -314,11 +325,14 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionCommandContext
   const subLeaves = paletteItems.filter((item) => item.category !== "Built-in");
   const modelPage: PalettePage = { title: "Models", items: [] };
   const sessionsPage: PalettePage = { title: "Sessions", items: [] };
+  const draftsPage: PalettePage = { title: "Drafts", items: [] };
+  const draftsEntry = pageItem("drafts", "Drafts", "Saved editor text", draftsPage);
   /** Set once the Sessions page load has been kicked off (one per palette open). */
   let sessionsLoadStarted = false;
   /** Cleared when the palette overlay closes; guards late async callbacks. */
   let paletteOpen = true;
   const rootItems: PalettePage["items"] = [
+    draftsEntry,
     pageItem("models", "Models", "Switch the active model", modelPage),
     pageItem("sessions", "Sessions", "Resume a previous session", sessionsPage),
     // Built-in actions sit directly on the root page so urgent entries like
@@ -330,6 +344,31 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionCommandContext
     ...(templates.length ? [pageItem("templates", "Templates", "Prompt templates", leafPage("Templates", templates))] : []),
   ];
   const root: PalettePage = { title: "Command Palette", items: rootItems };
+
+  function refreshDrafts() {
+    const items = drafts?.items ?? [];
+    draftsEntry.label = drafts ? `Drafts (${items.length})` : "Drafts (unavailable)";
+    const entries = items.map(draftItem);
+    draftsPage.items = entries.length ? entries : [{
+      value: "__drafts_placeholder",
+      label: drafts ? "No drafts saved" : "Drafts unavailable",
+      description: drafts ? "Use Editor: Save Draft to save your input" : "Resolve the storage error and reopen the palette",
+      category: "Drafts",
+      action: { type: "noop" },
+    }];
+    for (let i = subLeaves.length - 1; i >= 0; i--) {
+      if (subLeaves[i].category === "Drafts") subLeaves.splice(i, 1);
+    }
+    subLeaves.push(...entries);
+    const restoreIndex = root.items.findIndex((item) => item.value === "__restore");
+    if (restoreIndex >= 0) root.items.splice(restoreIndex, 1);
+    const restore = buildPaletteItems(pi, items).find((item) => item.value === "__restore");
+    if (restore) {
+      const firstBuiltin = root.items.findIndex((item) => "action" in item && item.category === "Built-in");
+      root.items.splice(firstBuiltin < 0 ? root.items.length : firstBuiltin, 0, restore);
+    }
+  }
+  refreshDrafts();
 
   // Captured from the overlay factory so palette actions can request a
   // render after mutating editor state (see the action switch below).
@@ -377,6 +416,7 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionCommandContext
       ];
       let selectList!: SelectList;
       let visibleItems: Array<PaletteItem | PageEntry> = [];
+      let preview: { draft: Draft; text: Text; scroll: ScrollView } | undefined;
 
       const listTheme = {
         selectedPrefix: (t: string) => theme.fg("accent", t),
@@ -398,12 +438,14 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionCommandContext
         const items = visibleItems.map((item) => ({
           value: item.value,
           label: item.label,
+          searchText: "action" in item ? item.searchText : undefined,
           description:
             page === root && query.trim() && !("page" in item)
               ? `${item.category} › ${item.description}`
               : item.description,
         }));
-        const getText = (item: SelectItem) => `${item.label} ${item.description ?? ""}`;
+        const getText = (item: SelectItem & { searchText?: string }) =>
+          `${item.label} ${item.description ?? ""} ${item.searchText ?? ""}`;
         const filtered = query
           ? page === modelPage
             ? partitionedFuzzyFilter(
@@ -438,6 +480,7 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionCommandContext
           const item = visibleItems.find((candidate) => candidate.value === selected.value);
           if (!item) return;
           if (!("page" in item)) {
+            if (item.action.type === "noop") return;
             done(item);
             return;
           }
@@ -496,6 +539,29 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionCommandContext
         tui.requestRender();
       }
 
+      function selectedDraft(): Draft | undefined {
+        if (preview) return preview.draft;
+        const selected = selectList.getSelectedItem();
+        const item = visibleItems.find((candidate) => candidate.value === selected?.value);
+        if (!item || !("action" in item) || item.action.type !== "restore-draft") return;
+        const id = item.action.id;
+        return drafts?.items.find((draft) => draft.id === id);
+      }
+
+      function deleteDraft(draft: Draft) {
+        try {
+          if (!drafts) return;
+          drafts.delete(draft.id);
+          preview = undefined;
+          queryInput.focused = focused;
+          refreshDrafts();
+          rebuild();
+          tui.requestRender();
+        } catch (err) {
+          ctx.ui.notify(`Failed to delete draft: ${errorMessage(err)}`, "error");
+        }
+      }
+
       /**
        * Load the session list for the Sessions page. Mirrors the native
        * /resume picker's loaders: project-scoped, sorted by activity, with
@@ -538,9 +604,8 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionCommandContext
       container.addChild(titleText);
       container.addChild(queryInput);
       container.addChild(listHost);
-      container.addChild(
-        new Text(theme.fg("dim", "↑↓ navigate • enter open/select • backspace go back • esc close"), 1, 0),
-      );
+      const hintText = new Text("", 1, 0);
+      container.addChild(hintText);
       container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
 
       return {
@@ -549,19 +614,72 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionCommandContext
         },
         set focused(value: boolean) {
           focused = value;
-          queryInput.focused = value;
+          queryInput.focused = value && !preview;
         },
         render(w: number) {
+          if (preview) {
+            const border = new DynamicBorder((s: string) => theme.fg("accent", s)).render(w);
+            const header = new Text(theme.fg("accent", "Draft Preview"), 1, 0).render(w);
+            const hints = new Text(theme.fg("dim",
+              "↑↓/pgup/pgdn scroll • enter restore • ctrl+d delete • backspace return • esc close"), 1, 0).render(w);
+            const lines = preview.scroll.render(w);
+            const height = Math.max(1, Math.floor(tui.terminal.rows * 0.8)
+              - border.length * 2 - header.length - hints.length - 1);
+            preview.scroll.updateLayout(lines.length, height, () => tui.requestRender());
+            const start = preview.scroll.scrollTop;
+            const position = new Text(theme.fg("muted",
+              `${start + 1}–${Math.min(start + height, lines.length)} / ${lines.length}`), 1, 0).render(w);
+            return [...border, ...header, ...lines.slice(start, start + height), ...position, ...hints, ...border];
+          }
+          const draft = selectedDraft();
+          hintText.setText(theme.fg("dim", draft
+            ? "↑↓ navigate • enter restore • ctrl+p preview • ctrl+d delete • backspace go back • esc close"
+            : "↑↓ navigate • enter open/select • backspace go back • esc close"));
           return container.render(w);
         },
         invalidate() {
           container.invalidate();
           queryInput.invalidate();
           selectList.invalidate();
+          preview?.text.invalidate();
         },
         handleInput(data: string) {
           if (matchesKey(data, Key.escape)) {
             done(null);
+            return;
+          }
+          const draft = selectedDraft();
+          if (draft && matchesKey(data, Key.ctrl("d"))) {
+            deleteDraft(draft);
+            return;
+          }
+          if (preview) {
+            if (matchesKey(data, Key.backspace) || matchesKey(data, Key.ctrl("p"))) {
+              preview = undefined;
+              queryInput.focused = focused;
+            } else if (matchesKey(data, Key.enter)) {
+              done(draftItem(preview.draft));
+            } else if (matchesKey(data, Key.up)) {
+              preview.scroll.scrollBy(-1);
+            } else if (matchesKey(data, Key.down)) {
+              preview.scroll.scrollBy(1);
+            } else if (matchesKey(data, Key.pageUp)) {
+              preview.scroll.scrollBy(-preview.scroll.viewportHeight);
+            } else if (matchesKey(data, Key.pageDown)) {
+              preview.scroll.scrollBy(preview.scroll.viewportHeight);
+            } else if (matchesKey(data, Key.home)) {
+              preview.scroll.scrollToStart();
+            } else if (matchesKey(data, Key.end)) {
+              preview.scroll.scrollToEnd();
+            }
+            tui.requestRender();
+            return;
+          }
+          if (draft && matchesKey(data, Key.ctrl("p"))) {
+            const text = new Text(draft.text, 1, 0);
+            preview = { draft, text, scroll: new ScrollView(text) };
+            queryInput.focused = false;
+            tui.requestRender();
             return;
           }
           if (matchesKey(data, Key.backspace) && queryInput.getValue().length === 0) {
@@ -630,20 +748,17 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionCommandContext
       }
       break;
     }
-    case "restore": {
-      if (savedEditorText !== null) {
-        ctx.ui.setEditorText(savedEditorText);
-        savedEditorText = null;
-      }
-      break;
-    }
+    case "restore-draft":
+    case "save-draft":
     case "editor": {
-      // Save current editor text before overwriting, so user can restore
-      const currentText = ctx.ui.getEditorText();
-      if (currentText && currentText.trim()) {
-        savedEditorText = currentText;
+      try {
+        const changed = applyDraftEditorAction(drafts, ctx.ui, action);
+        if (action.type === "save-draft") {
+          ctx.ui.notify(changed ? "Draft saved" : "Editor is empty", changed ? "info" : "warning");
+        }
+      } catch (err) {
+        ctx.ui.notify(`Could not update editor: ${errorMessage(err)}`, "error");
       }
-      ctx.ui.setEditorText(action.text);
       break;
     }
     case "model": {
@@ -721,19 +836,6 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionCommandContext
       }
       break;
     }
-    case "clear-editor": {
-      // Save current editor text to the restore buffer before clearing, so
-      // the built-in Restore action can bring it back.
-      const currentText = ctx.ui.getEditorText();
-      if (currentText && currentText.trim()) {
-        savedEditorText = currentText;
-        ctx.ui.setEditorText("");
-        ctx.ui.notify("Cleared editor — use Restore to recover", "info");
-      } else {
-        ctx.ui.notify("Editor is empty", "warning");
-      }
-      break;
-    }
   }
 
   if (runtimeReplaced) return;
@@ -747,6 +849,21 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionCommandContext
 // ── Extension entry point ──────────────────────────────────────────
 
 export default function commandPaletteExtension(pi: ExtensionAPI) {
+  let drafts: DraftStore | undefined;
+  function loadDrafts(ctx: ExtensionContext) {
+    drafts = undefined;
+    if (ctx.mode !== "tui") return;
+    try {
+      drafts = new DraftStore(
+        path.join(homedir(), CONFIG_DIR_NAME, "command-palette", "drafts"),
+        ctx.sessionManager.getSessionId(),
+      );
+    } catch (err) {
+      ctx.ui.notify(`Failed to load drafts: ${errorMessage(err)}`, "error");
+    }
+  }
+  pi.on("session_start", (_event, ctx) => loadDrafts(ctx));
+
   // The palette opens through the command handler so it receives
   // ExtensionCommandContext, which carries the session operations
   // (newSession/fork/switchSession/navigateTree/reload). Those are command-only
@@ -754,7 +871,13 @@ export default function commandPaletteExtension(pi: ExtensionAPI) {
   pi.registerCommand("palette", {
     description: "Open the command palette",
     handler: async (_args, ctx) => {
-      await showCommandPalette(pi, ctx);
+      if (ctx.mode !== "tui") {
+        ctx.ui.notify("The command palette requires TUI mode.", "warning");
+        return;
+      }
+      // Refresh on open so externally changed draft files are not cached indefinitely.
+      loadDrafts(ctx);
+      await showCommandPalette(pi, ctx, drafts);
     },
   });
 

@@ -463,6 +463,11 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
         "Delegate a task to a specialized subagent. By default the call blocks until the run finishes and returns the final output — intermediate tool output stays out of your context. With background: true it returns an id immediately and you collect the result later with subagent_check. Subagents are isolated by default; inheritConversation optionally injects a filtered snapshot of the active parent branch.",
       promptSnippet: "Delegate tasks to specialized subagents",
       promptGuidelines: guidelines,
+      // Model-only: subagent runs are heavyweight top-level orchestration. Nested inside a
+      // codemode script, a foreground delegate blocks the script for the whole run, and any run
+      // still active when the script ends is cancelled. The whole subagent lifecycle
+      // (delegate/wait/check/steer/cancel) stays in the top-level agent loop.
+      exposure: "model-only",
 
       parameters: Type.Object({
         role: Type.String({ description: "Subagent role to use" }),
@@ -705,6 +710,7 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
       description:
         "Wait until all specified background subagent runs end. Omit ids to wait for all current background runs. Returns status and usage for each run; use subagent_check to retrieve results. Cancelling the wait leaves the runs running.",
       promptSnippet: "Wait for background subagents to finish",
+      exposure: "model-only",
       parameters: Type.Object({
         ids: Type.Optional(
           Type.Array(Type.String(), {
@@ -835,6 +841,7 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
       description:
         "Get an instant snapshot of ONE background subagent run: queued / running (with current activity, elapsed/budget, and usage so far) / finished (with the full output and usage) / failed or cancelled (with reason, partial output, and usage). Does not wait — use subagent_wait for that. Idempotent: checking a terminal run again re-delivers its result, including after branch navigation or compaction; with history enabled, results also survive reload and reopening the same session. One id per call because results can be large.",
       promptSnippet: "Inspect a background subagent run",
+      exposure: "model-only",
       parameters: Type.Object({
         id: Type.String({ description: "Run id returned by a background delegate call" }),
       }),
@@ -870,6 +877,7 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
       description:
         "Queue a correction or updated requirement into ONE running background subagent. The message is delivered after the child finishes its current tool batch, before its next LLM call; the run keeps its progress. Only running runs accept steering; queued and terminal runs reject it.",
       promptSnippet: "Send a mid-run correction to a background subagent",
+      exposure: "model-only",
       parameters: Type.Object({
         id: Type.String({ description: "Run id returned by a background delegate call" }),
         message: Type.String({
@@ -917,6 +925,7 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
       description:
         "Cancel ONE background subagent run (queued or running): the child process is killed and the run settles as cancelled (its own stop reason, same family as timeout — partial output kept), NOT as a plain failure. The reason is recorded with the run: whoever reads the partial output later via subagent_check sees why it was stopped. Cancelling does not remove the run — check still returns the partial output. A finished/failed run cannot be cancelled; check it instead.",
       promptSnippet: "Cancel a background subagent run",
+      exposure: "model-only",
       parameters: Type.Object({
         id: Type.String({ description: "Run id returned by a background delegate call" }),
         reason: Type.Optional(

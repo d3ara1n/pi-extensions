@@ -45,6 +45,10 @@ export function registerChatRoomTools(pi: ExtensionAPI): void {
       name: Type.String({ description: "Recipient's mesh name (as shown by mesh_list)." }),
       message: Type.String({ description: "The message body to deliver." }),
     }),
+    // Model-only: addressing another agent is a top-level decision with external side effects,
+    // and the reply only arrives as a [From: ...] user message after the turn ends — a codemode
+    // script could never consume it. Batch parallel top-level send_to calls instead.
+    exposure: "model-only",
 
     // Call cell: tool name + recipient (the message body appears in the result cell).
     renderCall(args, theme) {

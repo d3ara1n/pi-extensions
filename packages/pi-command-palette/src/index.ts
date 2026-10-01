@@ -349,13 +349,26 @@ async function showCommandPalette(
     const items = drafts?.items ?? [];
     draftsEntry.label = drafts ? `Drafts (${items.length})` : "Drafts (unavailable)";
     const entries = items.map(draftItem);
-    draftsPage.items = entries.length ? entries : [{
-      value: "__drafts_placeholder",
-      label: drafts ? "No drafts saved" : "Drafts unavailable",
-      description: drafts ? "Use Editor: Save Draft to save your input" : "Resolve the storage error and reopen the palette",
-      category: "Drafts",
-      action: { type: "noop" },
-    }];
+    // Empty state stays actionable: with a live store, Enter saves the
+    // current editor text as a draft instead of dead-ending on a hint.
+    // Only the storage-error placeholder remains inert.
+    draftsPage.items = entries.length ? entries : [
+      drafts
+        ? {
+            value: "__drafts_save",
+            label: "Save current editor text as a draft",
+            description: "No drafts saved yet",
+            category: "Drafts",
+            action: { type: "save-draft" },
+          }
+        : {
+            value: "__drafts_placeholder",
+            label: "Drafts unavailable",
+            description: "Resolve the storage error and reopen the palette",
+            category: "Drafts",
+            action: { type: "noop" },
+          },
+    ];
     for (let i = subLeaves.length - 1; i >= 0; i--) {
       if (subLeaves[i].category === "Drafts") subLeaves.splice(i, 1);
     }

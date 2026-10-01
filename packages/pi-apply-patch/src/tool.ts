@@ -30,9 +30,13 @@ export function makeApplyPatchTool(
     label: "apply_patch",
     promptSnippet: "Edit workspace files with Codex-format patches",
     description:
-      "Apply a Codex patch to files in the current workspace. Supports *** Add File:, *** Delete File:, *** Update File:, optional *** Move to:, @@ context markers, and *** End of File. Prefix added lines with +, removed lines with -, and context lines with a space. Relative and absolute paths must resolve within the workspace. Add and move operations can overwrite existing files. The entire patch is verified before writing, and failures list every unmatched hunk across every file with the closest matching locations. An I/O failure can leave partial changes.",
+      "Apply a Codex patch to files in the current workspace. Supports *** Add File:, *** Delete File:, *** Update File:, optional *** Move to:, @@ context markers, and *** End of File. Prefix added lines with +, removed lines with -, and context lines with a space. Relative and absolute paths must resolve within the workspace. Add and move operations can overwrite existing files. The entire patch is verified before writing, and failures list every unmatched hunk across every file with the closest matching locations. An I/O failure can leave partial changes. Direct tool call only — not callable from codemode scripts: it is absent from the script's `tools` object.",
     parameters: schema,
     constrainedSampling: { type: "grammar", variants: { openai_lark: CODEX_APPLY_PATCH_GRAMMAR } },
+    // Model-only: the tool is built around grammar-constrained patch generation by the
+    // model itself; a codemode script assembling patch text would bypass that contract.
+    // Scripts edit through pi's callable file tools instead.
+    exposure: "model-only",
     renderShell: "default",
     async execute(_id, { input }, signal, _onUpdate, ctx) {
       const result = await applyPatch(input, { ...dependencies, cwd: ctx.cwd, signal });

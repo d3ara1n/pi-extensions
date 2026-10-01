@@ -26,7 +26,7 @@ Or add to `~/.pi/agent/settings.json`:
 }
 ```
 
-Requires pi 0.84.3 or later. After changing extension source or loading configuration, run `/reload` or restart pi.
+After changing extension source or loading configuration, run `/reload` or restart pi.
 
 ## Tool and transport
 
@@ -37,6 +37,8 @@ For models with `compat.supportsOpenAIGrammarTools: true`, pi advertises a freef
 When grammar tools are unavailable, pi advertises a function tool with the same `input` parameter. Built-in Codex models enable grammar tools; custom gateway model definitions must accurately declare this capability. A gateway must support the corresponding custom tool protocol for freeform calls to work.
 
 This uses the Codex custom-tool protocol, not the distinct OpenAI API built-in `type: "apply_patch"` tool. Existing pi editing tools remain available. No shell command or shell-call interception is installed.
+
+The tool is registered with `model-only` exposure: it is declared to the model, but codemode scripts cannot call it — it is absent from the script's `tools` object, whose file edits go through pi's callable file tools instead.
 
 ## Patch format
 

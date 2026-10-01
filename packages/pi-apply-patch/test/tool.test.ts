@@ -25,6 +25,7 @@ test("tool uses the execution workspace and returns plain text plus serializable
   assert.deepEqual(JSON.parse(JSON.stringify(result.details)).files[0].path, "x");
   assert.equal(tool.name, "apply_patch");
   assert.equal(tool.constrainedSampling && tool.constrainedSampling.type, "grammar");
+  assert.equal(tool.exposure, "model-only");
   assert.deepEqual(tool.parameters.required, ["input"]);
 });
 

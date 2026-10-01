@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-chat-room",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "type": "module",
   "description": "Agent-to-agent messaging for pi — built on @d3ara1n/pi-mesh. Exposes the send_to tool so agents can message each other; incoming messages arrive as user messages prefixed [From: NAME], queued until idle. Role-agnostic and order-agnostic: just the messaging layer.",
   "homepage": "https://github.com/d3ara1n/pi-extensions/tree/main/packages/pi-chat-room#readme",

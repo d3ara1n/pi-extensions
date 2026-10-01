@@ -97,12 +97,14 @@ function addFallbackRow(container: Container, r: SubagentResult, fg: Fg): void {
 
 // ── wait entries: id'd status line, process stream, status-only result line ──
 
-/** wait status line: `<icon> <id> (running|queued) <preview>` live; bare `<id> <preview>` once terminal. */
+/** wait status line: `<icon> <id> (<role> · running|queued) <preview>` live; bare `<id> <preview>`
+ * once terminal. The role rides in the state parens — a wait row identifies
+ * its runs even when the delegate call rows are scrolled away. */
 function waitStatusLine(entry: RunViewEntry, fg: Fg): string {
   const r = entry.result;
   const state = deriveRunState(r);
   if (state === "queued" || state === "running") {
-    const label = state === "queued" ? "(queued)" : "(running)";
+    const label = `(${entry.role} · ${state})`;
     return `${runIcon(r, fg)} ${fg("accent", entry.id)} ${fg("dim", label)} ${fg("text", taskPreview(r.task))}`;
   }
   // Terminal: no icon — the result line takes over the status display.
@@ -158,20 +160,21 @@ function waitEntryExpandedContainer(entry: RunViewEntry, fg: Fg): Container {
 
 // ── check entry: no id (single run), result line + expanded view show output ──
 
-/** check status line: `<icon> (running|queued) <preview>` live; bare `<preview>` once terminal. No id — there is only one. */
-function checkStatusLine(r: SubagentResult, fg: Fg): string {
+/** check status line: `<icon> (<role> · running|queued) <preview>` live; bare `<preview>` once
+ * terminal. No id — there is only one, and the call row right above carries it. */
+function checkStatusLine(role: string, r: SubagentResult, fg: Fg): string {
   const state = deriveRunState(r);
   if (state === "queued" || state === "running") {
-    const label = state === "queued" ? "(queued)" : "(running)";
+    const label = `(${role} · ${state})`;
     return `${runIcon(r, fg)} ${fg("dim", label)} ${fg("text", taskPreview(r.task))}`;
   }
   // Terminal: no icon — the result line takes over the status display.
   return fg("text", taskPreview(r.task));
 }
 
-function checkEntryCollapsedText(r: SubagentResult, fg: Fg): string {
+function checkEntryCollapsedText(role: string, r: SubagentResult, fg: Fg): string {
   const state = deriveRunState(r);
-  let text = checkStatusLine(r, fg);
+  let text = checkStatusLine(role, r, fg);
 
   if (state === "running") {
     const activity = buildDisplayItems(r.activityLog);
@@ -191,11 +194,11 @@ function checkEntryCollapsedText(r: SubagentResult, fg: Fg): string {
   return text;
 }
 
-function checkEntryExpandedContainer(r: SubagentResult, fg: Fg): Container {
+function checkEntryExpandedContainer(role: string, r: SubagentResult, fg: Fg): Container {
   const state = deriveRunState(r);
   const container = new Container();
 
-  container.addChild(new Text(checkStatusLine(r, fg), 0, 0));
+  container.addChild(new Text(checkStatusLine(role, r, fg), 0, 0));
   addFallbackRow(container, r, fg);
   container.addChild(new Spacer(1));
 
@@ -399,8 +402,8 @@ export const renderCheckResult: RenderResultFn = (result, { expanded }, theme, _
   const fg = theme.fg.bind(theme) as Fg;
   // Static snapshot — never starts the animation timer (the execute layer
   // freezes the frame before handing it over).
-  if (expanded) return checkEntryExpandedContainer(details.result, fg);
-  return collapsedText(checkEntryCollapsedText(details.result, fg));
+  if (expanded) return checkEntryExpandedContainer(details.role, details.result, fg);
+  return collapsedText(checkEntryCollapsedText(details.role, details.result, fg));
 };
 
 // ── steer: correction echo (check verifies the effect) ──

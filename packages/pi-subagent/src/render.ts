@@ -76,8 +76,8 @@ export const renderDelegateResult: RenderResultFn = (result, { expanded }, theme
   const preview = taskPreview(r.task);
   let taskline: string;
   if (isRunning) {
-    const label = r.queued ? "(queued)" : "(running)";
-    taskline = `${icon} ${theme.fg("dim", label)} ${theme.fg("text", preview)}`;
+    const state = r.queued ? "queued" : "running";
+    taskline = `${icon} ${theme.fg("dim", `(${r.role} · ${state})`)} ${theme.fg("text", preview)}`;
   } else {
     taskline = theme.fg("text", preview);
   }

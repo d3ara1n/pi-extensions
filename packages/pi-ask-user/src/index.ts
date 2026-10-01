@@ -3,9 +3,9 @@
  *
  * Design notes:
  *   - Collapsible panel (Ctrl+\) shrinks the panel to one row so more of the
- *     transcript stays on screen. Chat scrolling does NOT depend on keyboard
- *     focus at all — it is the terminal scrollback (see Layout note below), so
- *     it works whether the panel is expanded, collapsed, or focused.
+ *     transcript stays on screen. Chat scrolling never depends on keyboard
+ *     focus or on the panel's state — it works whether the panel is expanded,
+ *     collapsed, or focused (see Layout note below).
  *   - Per-question state (cursor position, scroll offset, type-something draft,
  *     multi-select picks) survives tab navigation — switching tabs never loses
  *     what you typed.
@@ -18,14 +18,14 @@
  *     otherwise it renders single-column full-width.
  *
  * Layout: renders into pi's bottom `editorContainer` slot (overlay:false, NOT a
- *   screen overlay). The chat transcript stays visible ABOVE the panel and is
- *   scrollable via the terminal's native scrollback (mouse wheel / Shift-PgUp /
- *   Cmd-↑). This works because pi's TUI never enters alt-screen and never tracks
- *   the mouse, so every rendered chat line lives in the terminal buffer and can
- *   be scrolled back at any time — the exact mechanism ctx.ui.select()/input()
- *   rely on. (overlay:true would route through ui.showOverlay(), compositing the
- *   panel over the whole screen and visually hiding the transcript — making it
- *   unscrollable.) Collapses to one status row.
+ *   screen overlay). The chat transcript stays visible ABOVE the panel and keeps
+ *   its own scrolling under either `tuiMode`: fullscreen (pi's default since
+ *   1.0) owns scrollback in-app, while "regular" leaves it to the terminal's
+ *   native buffer (mouse wheel / Shift-PgUp / Cmd-↑) — the exact mechanism
+ *   ctx.ui.select()/input() rely on. (overlay:true would route through
+ *   ui.showOverlay(), compositing the panel over the whole screen and visually
+ *   hiding the transcript — making it unscrollable.) Collapses to one status
+ *   row.
  */
 
 import type { ExtensionAPI, ExtensionUIContext, Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
@@ -80,6 +80,11 @@ import { DEFAULT_CONFIG, formatKeyId, loadConfig } from "./config.ts";
 // ────────────────────────────────────────────────────────────────────────────
 // The overlay component
 // ────────────────────────────────────────────────────────────────────────────
+
+// TODO(mouse): pi's fullscreen TUI (default since 1.0) routes normalized mouse
+// events to components. Add click-to-select for options/tabs and wheel
+// scrolling for the option list, keeping a keyboard path for every
+// interaction ("regular" mode leaves the mouse to the terminal).
 
 class AskUserPanel implements Component, Focusable {
   focused = false;
@@ -1422,7 +1427,7 @@ export default function askUserExtension(pi: ExtensionAPI) {
                 // overlay:false renders the panel into pi's bottom editorContainer slot
                 // (the same path ctx.ui.select()/input() take) instead of compositing a
                 // screen overlay over everything. The chat transcript stays visible above
-                // the panel and is scrollable via the terminal's native scrollback. See
+                // the panel and keeps its own scrolling under either tuiMode. See
                 // "Layout" note at the top of this file for why overlay:true breaks
                 // transcript scrolling.
                 overlay: false,

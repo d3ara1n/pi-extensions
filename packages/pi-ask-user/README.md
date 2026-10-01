@@ -7,7 +7,7 @@ When the agent needs a decision from you — picking an approach, confirming a d
 
 Most ask-user tools slide in as a full-screen overlay that covers the transcript, so you choose without seeing the analysis that should inform your choice. This one doesn't — the panel lives in pi's bottom area and the conversation stays right above it, scrollable the whole time.
 
-That matters most with [`pi-powerline-footer`](https://github.com/nicobailon/pi-powerline-footer): once that extension loads, the terminal's native scrollback stops working, so an overlay panel becomes a dead end — it hides a transcript you then can't scroll back through. This panel keeps the transcript in the content area, so it stays reachable even alongside `pi-powerline-footer`, exactly where overlay tools break.
+That matters most in pi's `"regular"` TUI mode with [`pi-powerline-footer`](https://github.com/nicobailon/pi-powerline-footer): once that extension loads, the terminal's native scrollback stops working, so an overlay panel becomes a dead end — it hides a transcript you then can't scroll back through. This panel keeps the transcript in the content area, so it stays reachable even alongside `pi-powerline-footer`, exactly where overlay tools break. Under pi's fullscreen default (1.0+) the same layout holds: the transcript scrolls in-app and stays visible above the panel.
 
 Press `Ctrl+\` any time to **collapse** the panel to a single status row, freeing even more of the screen while you think.
 

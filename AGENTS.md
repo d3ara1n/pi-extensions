@@ -273,7 +273,7 @@ agent 的边界：
 
 **`overlay: true` 的问题**：面板通过 `ui.showOverlay()` 全屏叠加，聊天区被完全遮挡、不可滚动——用户无法边看 agent 的指示边操作面板。pi-ask-user 最早踩过这个坑，pi-access-denied 重构 `AuthPanel` 时又踩了一次。
 
-**正确做法**：`overlay: false` 渲染在底部 `editorContainer` 槽位（与 `ctx.ui.select()` / `input()` 共用），聊天区在上方保持可见、可通过终端原生滚动回溯。键盘焦点自动交给面板，上下箭头导航不受影响。
+**正确做法**：`overlay: false` 渲染在底部 `editorContainer` 槽位（与 `ctx.ui.select()` / `input()` 共用），聊天区在上方保持可见。滚动在两种 `tuiMode` 下都成立：fullscreen（pi 1.0 起默认）由 app 内滚动，`"regular"` 走终端原生 scrollback。键盘焦点自动交给面板，上下箭头导航不受影响。
 
 参考：`pi-ask-user` 的 `AskUserPanel` 和已修复的 `pi-access-denied` 的 `AuthPanel`。
 

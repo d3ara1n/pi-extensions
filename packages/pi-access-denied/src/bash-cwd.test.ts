@@ -142,7 +142,10 @@ describe("bash directory tracking", () => {
     for (const operand of ['"$DEST"', '"$(getdir)"', '"${HOME:-/fallback}"', "a*", "-P aaa"]) {
       const command = `cd ${operand} && rm ../bbb; cat /known/absolute`;
       assert.deepEqual(targets(command, "rm ../bbb"), []);
-      assert.deepEqual(targets(command, "cat /known/absolute"), [path.resolve("/known/absolute")]);
+      // POSIX-style absolutes stay drive-less on win32 (MSYS namespace
+      // marker — builtin roots like /dev/null rely on it), so expect
+      // normalize, not resolve (which would graft the process drive).
+      assert.deepEqual(targets(command, "cat /known/absolute"), [path.normalize("/known/absolute")]);
     }
     assert.deepEqual(targets('cd "$DEST" || rm ../bbb', "rm ../bbb"), [local("../bbb")]);
   });
@@ -199,7 +202,7 @@ describe("bash directory tracking", () => {
   test("calling a local function invalidates directory assumptions", () => {
     const command = "f() { cd /outside; }; f && rm ../bbb; cat /known/absolute";
     assert.deepEqual(targets(command, "rm ../bbb"), []);
-    assert.deepEqual(targets(command, "cat /known/absolute"), [path.resolve("/known/absolute")]);
+    assert.deepEqual(targets(command, "cat /known/absolute"), [path.normalize("/known/absolute")]);
     assert.deepEqual(targets("cd() { true; }; cd aaa && rm ../bbb", "rm ../bbb"), []);
   });
 
@@ -214,7 +217,7 @@ describe("bash directory tracking", () => {
     }
     assert.deepEqual(targets("HOME=/outside; rm ../bbb", "rm ../bbb"), [local("../bbb")]);
     assert.deepEqual(targets("HOME=/outside; cat $HOME/data", "cat $HOME/data"), [
-      path.resolve("/outside/data"),
+      path.normalize("/outside/data"),
     ]);
     assert.deepEqual(targets('HOME=\"$DEST\"; cd && rm ../bbb', "rm ../bbb"), []);
   });

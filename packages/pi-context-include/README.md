@@ -4,8 +4,6 @@
 
 `@path` syntax for AGENTS.md — include files by reference.
 
-Requires pi 0.86.0 or newer.
-
 ## Features
 
 - **Line-start only**: `@path` sits at the start of a line, optionally after a Markdown list marker (`-`, `*`, `+`, or `1.`) — prevents false positives from emails/code

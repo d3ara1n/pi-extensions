@@ -687,6 +687,11 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionCommandContext
         break;
       }
       try {
+        // Acknowledge before the dead-air window: session replacement loads
+        // the target session and re-runs session_start hooks, and only a
+        // transcript status line (chat content, not extension UI) survives
+        // the teardown — it clears when the new session renders.
+        ctx.ui.notify(`Switching to ${action.label}…`, "info");
         // Post-switch work runs on the fresh context — the captured command
         // context is invalid after session replacement.
         const outcome = await ctx.switchSession(action.path, {
@@ -694,7 +699,11 @@ async function showCommandPalette(pi: ExtensionAPI, ctx: ExtensionCommandContext
             fresh.ui.notify(`Switched to ${action.label}`, "info");
           },
         });
-        if (outcome.cancelled) break;
+        if (outcome.cancelled) {
+          // Vetoed before teardown, so this context is still live; the tail
+          // status line updates in place instead of leaving "Switching…" dangling.
+          ctx.ui.notify("Session switch cancelled", "info");
+        }
       } catch (err) {
         ctx.ui.notify(`Failed to switch session: ${errorMessage(err)}`, "error");
       }

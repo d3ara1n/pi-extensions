@@ -183,7 +183,7 @@ export default function (pi: ExtensionAPI) {
 
     // 1. Extract the targets this call wants to reach.
     //    write/edit: the single `path` argument — exact.
-    //    bash:       heuristic scan of the command string (escaping candidates only).
+    //    bash:       escaping path candidates and known cd destinations.
     let targets: ExtractedTarget[];
     if (isToolCallEventType("write", event) || isToolCallEventType("edit", event)) {
       targets = [{ path: resolveTarget(event.input.path, cwd) }];

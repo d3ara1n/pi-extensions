@@ -1,4 +1,4 @@
-import { generateDiffString, type Theme } from "@earendil-works/pi-coding-agent";
+import { generateDiffString, renderDiff, type Theme } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences, Text } from "@earendil-works/pi-tui";
 import type { FileChange } from "./apply.ts";
 import type { HunkMatchInfo } from "./core/types.ts";
@@ -132,19 +132,12 @@ export function renderPatchResult(
     if (file.diff === undefined)
       rows.push(dim("Diff unavailable: previous content could not be read."));
     if (expanded && file.diff) {
+      // Delegate to pi's renderer: semantic diff colors plus word-level
+      // highlighting on single-line modifications, matching the built-in edit
+      // tool. Slice before rendering so a +/- pair split at the cap degrades
+      // to whole-line colors instead of a dangling intra-line highlight.
       const lines = safe(file.diff).split("\n");
-      for (const line of lines.slice(0, 120)) {
-        rows.push(
-          theme.fg(
-            line.startsWith("+")
-              ? "toolDiffAdded"
-              : line.startsWith("-")
-                ? "toolDiffRemoved"
-                : "toolDiffContext",
-            line,
-          ),
-        );
-      }
+      rows.push(renderDiff(lines.slice(0, 120).join("\n")));
       if (lines.length > 120) rows.push(theme.fg("dim", `… ${lines.length - 120} more diff lines`));
     }
   }

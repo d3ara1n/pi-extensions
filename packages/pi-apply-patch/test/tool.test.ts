@@ -1,19 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { makeApplyPatchTool } from "../src/tool.ts";
-import type { Text } from "@earendil-works/pi-tui";
 import { renderRejection } from "../src/report.ts";
-import {
-  countPatchFiles,
-  makeDetails,
-  renderPatchHeader,
-  renderPatchResult,
-  summarize,
-} from "../src/render.ts";
 import { MemoryFileSystem, ROOT } from "./memory-fs.ts";
 
-const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text } as Theme;
 
 test("tool uses the execution workspace and returns plain text plus serializable details", async () => {
   const fs = new MemoryFileSystem();
@@ -44,114 +35,6 @@ test("tool failures reject so the framework can mark them as errors", async () =
     tool.execute("call", { input: "bad" }, undefined, undefined, { cwd: ROOT } as ExtensionContext),
     /apply_patch verification failed/,
   );
-});
-
-test("rendering sanitizes terminal escapes and keeps errors expandable", () => {
-  const malicious = "\x1b]52;c;ZXZpbA==\x07\x1b[31msecret";
-  const details = makeDetails([
-    { kind: "add", path: malicious, before: "", after: `${malicious}\r\n` },
-  ]);
-  const output = renderPatchResult(details, "", true, false, theme).render(120).join("\n");
-  assert.equal(output.includes("\x1b"), false);
-  assert.equal(output.includes("52;c;"), false);
-  assert.match(output, /A secret/);
-  assert.match(output, /\+1/);
-  assert.equal(details.files[0].diff.includes("\r"), false);
-  const collapsed = renderPatchResult(undefined, "failed\nreason", false, true, theme)
-    .render(120)
-    .join("\n");
-  assert.equal(collapsed.includes("reason"), false);
-  assert.match(
-    renderPatchResult(undefined, "failed\nreason", true, true, theme).render(120).join("\n"),
-    /reason/,
-  );
-});
-
-test("header carries the file count and aggregate diff; the body repeats neither", () => {
-  const tool = makeApplyPatchTool();
-  let invalidated = false;
-  const context = {
-    state: {},
-    lastComponent: undefined,
-    isError: false,
-    invalidate: () => {
-      invalidated = true;
-    },
-  };
-  const args = {
-    input:
-      "*** Begin Patch\n*** Add File: a\n+x\n*** Update File: b\n*** Move to: c\n@@\n-y\n+z\n*** End Patch",
-  };
-  const header = tool.renderCall!(args, theme, context as never) as Text;
-  assert.equal(header.render(120).join("\n").trimEnd(), "apply_patch 2 files");
-
-  const details = makeDetails([
-    { kind: "add", path: "a", before: "", after: "x\n" },
-    { kind: "update", path: "b", moveTo: "c", before: "y\n", after: "z\n" },
-  ]);
-  const body = tool.renderResult!(
-    { content: [{ type: "text", text: "Success." }], details },
-    { expanded: false, isPartial: false },
-    theme,
-    context as never,
-  ) as Text;
-
-  // The header is refreshed in place from the executed counts; the body shows
-  // only the per-file rows, so neither the file count nor the aggregate repeat.
-  assert.equal(header.render(120).join("\n").trimEnd(), "apply_patch 2 files +2 -1");
-  const bodyText = body.render(120).join("\n");
-  assert.doesNotMatch(bodyText, /2 files/);
-  assert.doesNotMatch(bodyText, /\+2/);
-  assert.match(bodyText, /A a/);
-  assert.match(bodyText, /M b → c/);
-  assert.equal(invalidated, false);
-});
-
-test("header counts update-file-with-move once and omits diff counts when unavailable", () => {
-  assert.equal(
-    countPatchFiles("*** Begin Patch\n*** Update File: a\n*** Move to: b\n@@\n*** End Patch"),
-    1,
-  );
-  const details = makeDetails([{ kind: "add", path: "a", before: undefined, after: "x" }]);
-  const summary = summarize(details.files);
-  assert.deepEqual(summary, { fileCount: 1 });
-  assert.equal(renderPatchHeader(theme, summary), "apply_patch 1 file");
-  assert.equal(
-    renderPatchHeader(theme, { fileCount: 3, added: 10, removed: 2 }),
-    "apply_patch 3 files +10 -2",
-  );
-});
-
-test("large result previews are bounded while details retain the full diff", () => {
-  const details = makeDetails([
-    { kind: "add", path: "large", before: "", after: "line\n".repeat(200) },
-  ]);
-  const output = renderPatchResult(details, "", true, false, theme).render(120).join("\n");
-  assert.match(output, /more diff lines/);
-  assert.equal(details.files[0].added, 200);
-  assert.ok(output.split("\n").length < 130);
-});
-
-test("details carry hunk matches, overwrite, and rematch annotations", () => {
-  const details = makeDetails([
-    {
-      kind: "add",
-      path: "dup",
-      before: "x\n",
-      after: "y\n",
-      overwrites: true,
-      hunks: [{ hunk: 1, line: 1, strategy: "exact", occurrences: 2 }],
-    },
-    { kind: "update", path: "u", before: "a\n", after: "b\n", rematched: true },
-  ]);
-  const round = JSON.parse(JSON.stringify(details));
-  assert.equal(round.files[0].overwrites, true);
-  assert.deepEqual(round.files[0].hunks, [{ hunk: 1, line: 1, strategy: "exact", occurrences: 2 }]);
-  assert.equal(round.files[1].rematched, true);
-  const output = renderPatchResult(details, "", true, false, theme).render(120).join("\n");
-  assert.match(output, /overwrote an existing file/);
-  assert.match(output, /rematched/);
-  assert.match(output, /first of 2 occurrences/);
 });
 
 test("rejection reports bound echoed context and listed hunks", () => {

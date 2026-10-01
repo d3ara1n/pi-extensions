@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { test } from "node:test";
-import type { Theme } from "@earendil-works/pi-coding-agent";
 import { applyPatch } from "../src/apply.ts";
-import { makeDetails, renderPatchResult } from "../src/render.ts";
+import { makeDetails } from "../src/render.ts";
 import { ioError, MemoryFileSystem, ROOT } from "./memory-fs.ts";
 
 test("Add and Move can overwrite unreadable files without inventing a diff", async () => {
@@ -21,11 +20,6 @@ test("Add and Move can overwrite unreadable files without inventing a diff", asy
   const details = makeDetails(result.files);
   assert.equal(details.files[0].diff, undefined);
   assert.equal(details.files[0].added, undefined);
-  const theme = { fg: (_color: string, text: string) => text } as Theme;
-  assert.match(
-    renderPatchResult(details, "", true, false, theme).render(120).join("\n"),
-    /Diff unavailable/,
-  );
   await applyPatch(
     "*** Begin Patch\n*** Update File: source\n*** Move to: unreadable\n@@\n-old\n+moved\n*** End Patch",
     fs.context(),

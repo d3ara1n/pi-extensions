@@ -34,7 +34,7 @@ export function registerChatRoomTools(pi: ExtensionAPI): void {
       "Send a message to another pi instance on the agent mesh. The recipient's agent receives it as a user message prefixed [From: <your name>], reads it, and can act or reply. " +
       "Use this to address another agent directly — your normal output is seen by the human user, not by other agents. " +
       "Delivery is asynchronous: this returns once the recipient's mesh acknowledges receipt, NOT when the recipient agent reads or replies; the reply arrives as a [From: ...] user message after your current turn ends, starting a new turn. " +
-      "Use mesh_list first to discover names.",
+      "Use mesh_list first to discover names. Direct tool call only — not callable from codemode scripts: it is absent from the script's `tools` object.",
     promptSnippet: "Send a message to another pi agent on the mesh",
     promptGuidelines: [
       "Use send_to to address another agent on the mesh; your normal output is seen by the human user only, never by other agents.",

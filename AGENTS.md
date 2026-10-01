@@ -175,9 +175,23 @@ description / promptSnippet / promptGuidelines / 参数描述里不得提及**�
 
 **原因：组合性。** 用户可能只装其中一个、或装竞品替代——没装时是幽灵引用，装了竞品时是误导。两个工具的边界引导靠各自把自身语义写准（如 read-only、对方无感知 vs 进入对方对话流、可行动），语义差自然涌现，不需要互相指名。
 
+### 编排与交互类工具注册为 model-only
+
+pi 的 `ToolExposure` 默认 `direct`：声明给模型的同时，codemode 脚本也能经 `ctx.executeTool()`（即脚本的 `tools` 对象）调用。语义寄存在顶层回合生命周期里的工具必须显式 `exposure: "model-only"`（声明给模型、脚本永远不可调用）：
+
+- **编排/长阻塞** — 管理子任务生命周期或整轮等待（pi-subagent：脚本内前台调用阻塞整个脚本，脚本结束仍在跑的 run 直接被取消）
+- **人机交互** — 阻塞等待用户应答（pi-ask-user：脚本 teardown/timeout/abort 会连着取消挂起的对话框，丢失用户输入）
+- **跨 agent 消息** — 回复以 `[From: ...]` 用户消息在回合结束后到达（pi-chat-room 的 send_to：脚本永远消费不到回复）
+- **契约绑定模型直调** — 核心契约在直调路径上（pi-apply-patch 的 Lark grammar 约束采样，脚本拼 patch 绕开契约；脚本改文件走 pi 可调用的 file tools）
+
+共同判据：调用的意义依赖顶层回合的等待、应答或副作用归属，嵌进脚本就会阻塞到被取消、或效果无法送达。这类工具的 description 尾部统一追加同一句固定提示，跨包逐字一致、勿改写：
+
+> Direct tool call only — not callable from codemode scripts: it is absent from the script's `tools` object.
+
 ### README 与依赖文档规范
 
 **每个包 README 必须包含 `## Installation` 和 `## Dependencies`。** 即使是只给其他插件消费的基础设施扩展（不注册 tool/command，只注册 hook），也要有 Install 段告诉用户如何加载。
+**README 不写 pi 版本要求。** 扩展始终面向最新版 pi 发布，不声明 "Requires pi X.Y or later" 之类的版本绑定——pi 迭代频繁，版本标注必然过时。需要新 API 时直接使用；描述机制时写行为本身，不引入版本号。
 
 **Extension vs Library 判定：**
 

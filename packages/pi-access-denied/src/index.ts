@@ -119,7 +119,8 @@ async function promptDecision(
       // overlay:false renders the panel into pi's bottom editorContainer slot
       // (the same path ctx.ui.select()/input() take) instead of compositing a
       // screen overlay over everything. The chat transcript stays visible above
-      // the panel and is scrollable via the terminal's native scrollback.
+      // the panel and keeps its own scrolling under either tuiMode (in-app in
+      // fullscreen, the terminal's native scrollback in "regular").
       // overlay:true would hide the transcript via ui.showOverlay(), making it
       // unscrollable — see pi-ask-user for the same design decision.
       overlay: false,

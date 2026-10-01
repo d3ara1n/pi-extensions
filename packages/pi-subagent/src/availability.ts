@@ -19,6 +19,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 
 /** One disabled entry, keyed by agent role name. */
 export interface DisabledEntry {
@@ -40,7 +41,7 @@ const EMPTY_STATE: AvailabilityState = { version: 1, disabled: {} };
 
 /** Default state file location, sibling of the history directory. */
 export function availabilityFilePath(): string {
-  return path.join(os.homedir(), ".pi", "subagent", "availability.json");
+  return path.join(os.homedir(), CONFIG_DIR_NAME, "subagent", "availability.json");
 }
 
 /** True while the entry exists and its TTL (if any) has not lapsed. */

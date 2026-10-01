@@ -13,6 +13,7 @@
 
 import * as os from "node:os";
 import * as path from "node:path";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -215,5 +216,5 @@ export function defaultSockDir(): string {
 /** Default registry directory for PID-file markers. */
 export function defaultMeshRegistryDir(): string {
   // os.homedir() resolves to $HOME on POSIX and %USERPROFILE% on Windows.
-  return path.join(os.homedir(), ".pi", "mesh", "registry");
+  return path.join(os.homedir(), CONFIG_DIR_NAME, "mesh", "registry");
 }

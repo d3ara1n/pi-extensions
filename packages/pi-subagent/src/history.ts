@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type { SubagentResult } from "./types.ts";
 import { emptyUsage, MAX_OUTPUT_CHARS, sanitizeFilename, taskPreview } from "./utils.ts";
 
@@ -43,7 +44,7 @@ export function summarizeResult(r: SubagentResult): SubagentResult {
 }
 
 export function historyDirectory(sessionId: string): string {
-  return path.join(os.homedir(), ".pi", "subagent", "history", sanitizeFilename(sessionId));
+  return path.join(os.homedir(), CONFIG_DIR_NAME, "subagent", "history", sanitizeFilename(sessionId));
 }
 
 function runNumber(id: unknown): number | undefined {

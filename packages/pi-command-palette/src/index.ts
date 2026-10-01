@@ -36,6 +36,7 @@ import {
   ScrollView,
   SelectList,
   Text,
+  truncateToWidth,
   type TUI,
 } from "@earendil-works/pi-tui";
 import { resolveShortcutKey } from "./config.ts";
@@ -104,7 +105,7 @@ export function buildPaletteItems(pi: ExtensionAPI, drafts: readonly Draft[] = [
     items.push({
       value: "__restore",
       label: "Editor: Restore Latest Draft",
-      description: firstMessagePreview(latest.text),
+      description: singleLinePreview(latest.text),
       category: "Built-in",
       action: { type: "restore-draft", id: latest.id },
     });
@@ -259,10 +260,9 @@ function timeAgo(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-/** Single-line preview of a session's first message. */
-function firstMessagePreview(text: string, max = 60): string {
-  const single = text.replace(/\s+/g, " ").trim();
-  return single.length > max ? `${single.slice(0, max - 1)}…` : single || "(empty)";
+/** Normalize list text; the list handles truncation at the available width. */
+function singleLinePreview(text: string): string {
+  return text.replace(/\s+/g, " ").trim() || "(empty)";
 }
 
 /** Inert placeholder row for the Sessions page — renders a state, does nothing when selected. */
@@ -279,7 +279,7 @@ function sessionPlaceholder(label: string): PaletteItem {
 /** Map SessionManager.list() results to palette items. */
 function sessionItems(sessions: readonly SessionSummary[], currentFile: string | undefined): PaletteItem[] {
   return sessions.map((info) => {
-    const label = info.name?.trim() || firstMessagePreview(info.firstMessage);
+    const label = info.name?.trim() || singleLinePreview(info.firstMessage);
     const isCurrent =
       currentFile !== undefined && path.resolve(currentFile) === path.resolve(info.path);
     return {
@@ -295,7 +295,7 @@ function sessionItems(sessions: readonly SessionSummary[], currentFile: string |
 function draftItem(draft: Draft): PaletteItem {
   return {
     value: `draft:${draft.id}`,
-    label: firstMessagePreview(draft.text),
+    label: singleLinePreview(draft.text),
     description: `${timeAgo(new Date(draft.savedAt))} · ${draft.text.split("\n").length} lines`,
     category: "Drafts",
     action: { type: "restore-draft", id: draft.id },
@@ -485,7 +485,11 @@ async function showCommandPalette(
           filtered,
           Math.min(Math.max(filtered.length, 1), 15),
           listTheme,
-          { minPrimaryColumnWidth: primaryColumn, maxPrimaryColumnWidth: primaryColumn },
+          {
+            minPrimaryColumnWidth: primaryColumn,
+            maxPrimaryColumnWidth: primaryColumn,
+            truncatePrimary: ({ text, maxWidth }) => truncateToWidth(text, maxWidth, "…"),
+          },
         );
         const restoredIndex = filtered.findIndex(
           (item) => item.value === current().selectedValue,

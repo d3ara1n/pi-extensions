@@ -1,7 +1,8 @@
-# pi-todo — 双端可编辑、常驻 context 的任务列表（设计计划）
+# pi-todo — 双端可编辑、常驻 context 的任务列表（已归档）
 
-> **状态：计划中，待实施**（2026-06 与用户讨论定稿；本期只做设计，不写代码）
-> 旧版 sidekick 侧栏方向已归档至 [`archived/pi-todo-sidekick.md`](./archived/pi-todo-sidekick.md)。
+> **状态：已归档（2026-09-30）— 放弃实施**。评估结论：todo 列表对模型和用户的效率提升有限，不值得投入。
+> 设计本身已定稿，若日后推翻该结论可从 git history 恢复本计划继续实施。
+> 旧版 sidekick 侧栏方向更早前已归档至 [`archived/pi-todo-sidekick.md`](../archived/pi-todo-sidekick.md)。
 
 ## 背景与动机
 

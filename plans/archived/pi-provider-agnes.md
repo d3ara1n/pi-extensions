@@ -1,8 +1,10 @@
-# pi-provider-agnes — Usage Quota/Balance Integration Plan
+# pi-provider-agnes — Usage Quota/Balance Integration Plan (Archived)
 
-> **Status**: NOT IMPLEMENTED — blocked by lack of public API.
-> Agnes AI does not currently expose a quota or balance endpoint.
-> When they do, follow this plan to integrate via `@d3ara1n/pi-usage-block-core`.
+> **Status**: ARCHIVED (2026-09-30) — provider 本体已交付，本计划仅剩 usage 集成部分。
+> 2026-09-30 re-check: Agnes AI still publishes no public quota/balance query API — quota
+> tables are static docs (requests per 5h/week, images/day, video seconds/day), usage is
+> dashboard-only, and signals surface only as 402/429 error codes. If they ever expose an
+> endpoint, recover this plan from git history and integrate via `@d3ara1n/pi-usage-block-core`.
 
 ## Overview
 

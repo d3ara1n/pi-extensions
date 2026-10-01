@@ -1,4 +1,10 @@
-# pi-tool-summarize — 工具结果摘要（待办）
+# pi-tool-summarize — 工具结果摘要（已被取代）
+
+> **状态：已被 pi 内置 codemode 取代（2026-09-30 归档）**。
+> 核心场景（一次读大量日志定位问题）codemode 解决得更优：脚本内 `tools.<name>()` 真实调用
+> 保留权限拦截，bash 输出上限 1 MiB，JS 确定性过滤后再给模型，零额外成本。
+> 残余的“LLM 摘要”需求 codemode 做不了（chat 模型不能从 script 调用）；真需要时
+> 用小扩展包 `pi-model-roles` 的 `completeWithRole("utility", ...)` 实现，无需恢复本计划。
 
 ## 需求
 

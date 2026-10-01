@@ -404,6 +404,11 @@ async function showCommandPalette(
       });
   }
 
+  // TODO(mouse): pi's fullscreen TUI (default since 1.0) routes normalized mouse
+  // events to components. Add click-to-pick for list items and wheel scrolling
+  // for the list/preview, keeping a keyboard path for every interaction
+  // ("regular" mode leaves the mouse to the terminal).
+
   const result = await ctx.ui.custom<PaletteItem | null>(
     (tui, theme, _kb, done) => {
       tuiRef = tui;

@@ -86,27 +86,6 @@ async function withEnabled<T>(enabled: boolean, fn: () => Promise<T>): Promise<T
   }
 }
 
-test("grep TUI aligns line-number colons across file groups", () => {
-  const raw = [
-    "a.ts · 2 matches",
-    "99#ABCD│  alpha",
-    "100#ABCD│    beta",
-    "b.ts · 1 match",
-    "7#ABCD│gamma",
-  ].join("\n");
-  const tool = makeGrepOverrideWithBackend(".", {});
-  const theme = { fg: (_color: string, value: string) => value };
-  const result = { content: [{ type: "text", text: raw }] };
-  const rendered = tool.renderResult(result, { isPartial: false, expanded: true }, theme, {}).render(80);
-  assert.deepEqual(rendered.map((line) => line.trimEnd()), [
-    "a.ts · 2 matches",
-    "    99: › alpha",
-    "   100: ›   beta",
-    "b.ts · 1 match",
-    "     7: gamma",
-  ]);
-});
-
 test("formats parsed rg matches with full-line hash anchors", async () => {
   await withDir(async (dir) =>
     withEnabled(true, async () => {

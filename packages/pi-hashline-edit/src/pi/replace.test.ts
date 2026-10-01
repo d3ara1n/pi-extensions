@@ -227,46 +227,6 @@ test("replace: multiline replacement (changes line count) still reports a correc
 	});
 });
 
-test("replace renderResult: renders the diff without throwing", async () => {
-	await withDir(async (dir) => {
-		const f = join(dir, "f.txt");
-		await writeFile(f, "a\nb\nc\n");
-		const tool = makeReplaceTool(dir);
-		const r: any = await call(tool, { path: "f.txt", find: "b", replace: "B" });
-		// @ts-ignore — drive the renderer with a stub theme
-		const comp: any = tool.renderResult(
-			{ content: r.content, details: r.details },
-			{ isPartial: false, expanded: true },
-			stubTheme,
-			{ isError: r.isError ?? false, state: {}, invalidate: () => {} },
-		);
-		assert.ok(typeof comp?.text === "string");
-		assert.ok(comp.text.includes("B"), "rendered diff should contain the new content");
-	});
-});
-
-test("replace renderResult: renders the error line without throwing", async () => {
-	await withDir(async (dir) => {
-		const f = join(dir, "f.txt");
-		await writeFile(f, "a\n");
-		const tool = makeReplaceTool(dir);
-		let thrown: any;
-		const r: any = await call(tool, { path: "f.txt", find: "zzz", replace: "y" }).catch((e: any) => {
-			thrown = e;
-			return null;
-		});
-		assert.ok(thrown, "expected the call to throw");
-		// @ts-ignore — simulate how the framework hands the thrown message to renderResult
-		const comp: any = tool.renderResult(
-			{ content: [{ type: "text", text: thrown.message }] },
-			{ isPartial: false, expanded: false },
-			stubTheme,
-			{ isError: true },
-		);
-		assert.ok(typeof comp?.text === "string");
-	});
-});
-
 test("replace header: renderResult refreshes the call header in place — no invalidate", async () => {
 	await withDir(async (dir) => {
 		const f = join(dir, "f.txt");

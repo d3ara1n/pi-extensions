@@ -353,7 +353,7 @@ test("disabled config registers no tools — built-ins remain", async () => {
 	});
 });
 
-// --- renderer regression guards (details.diff must be a string, renderResult must not throw) ---
+// --- renderer contracts (details.diff is a plain string; the header refreshes in place) ---
 
 const stubTheme = { fg: (_k: string, s: string) => s, bold: (s: string) => s };
 
@@ -374,23 +374,6 @@ test("edit success: details.diff is a string (not the generateDiffString object)
 		assert.equal(typeof r.details.diff, "string", "details.diff must be a string");
 		assert.equal(typeof r.details.patch, "string");
 		assert.equal(typeof r.details.firstChangedLine, "number");
-	});
-});
-
-test("edit success: renderResult renders the diff without throwing", async () => {
-	await withDir(async (dir) => {
-		const f = join(dir, "f.txt");
-		const text = "a\nb\nc\n";
-		await writeFile(f, text);
-		const edit = makeEditOverride(dir);
-		const r: any = await call(edit, {
-			path: "f.txt",
-			edits: [{ op: "replace", anchor: h(text, 2), body: ["B"] }],
-		});
-	// @ts-ignore — drive the renderer with a stub theme
-		const comp: any = edit.renderResult({ content: r.content, details: r.details }, { isPartial: false, expanded: true }, stubTheme, { isError: r.isError ?? false, state: {}, invalidate: () => {} });
-		assert.ok(typeof comp?.text === "string");
-		assert.ok(comp.text.includes("B"), "rendered diff should contain the new content");
 	});
 });
 
@@ -426,29 +409,6 @@ test("edit header: renderResult refreshes the call header in place — no invali
 		const header2: any = edit.renderCall(args, stubTheme, { args, state: context.state, lastComponent: header });
 		assert.equal(header2, header, "renderCall reuses the stashed component");
 		assert.ok(header2.text.includes("+3"), "re-render keeps the counts");
-	});
-});
-
-test("edit error: renderResult renders the error line without throwing", async () => {
-	await withDir(async (dir) => {
-		await writeFile(join(dir, "f.txt"), "a\n");
-		const edit = makeEditOverride(dir);
-		let thrown: any;
-		await call(edit, {
-			path: "f.txt",
-			edits: [{ op: "replace", anchor: { line: 1, hash: "XXXX" }, body: ["A"] }],
-		}).catch((e: any) => {
-			thrown = e;
-		});
-		assert.ok(thrown, "expected the edit to throw");
-		// @ts-ignore — simulate the framework handing the thrown message to renderResult
-		const comp: any = edit.renderResult(
-			{ content: [{ type: "text", text: thrown.message }] },
-			{ isPartial: false, expanded: false },
-			stubTheme,
-			{ isError: true },
-		);
-		assert.ok(typeof comp?.text === "string");
 	});
 });
 

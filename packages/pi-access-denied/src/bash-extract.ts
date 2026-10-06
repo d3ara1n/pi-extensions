@@ -3,7 +3,8 @@
  * PathManager applies access policy separately.
  *
  * General arguments contribute absolute, home-prefixed, and parent-traversal
- * candidates. Quoted arguments remain data, except for known cd operands.
+ * candidates. Quoted literals remain data; known variable references and cd
+ * operands are decoded without executing shell code.
  * Nested commands are inspected in their own shell environments.
  *
  * Each command returns directory states partitioned by success and failure.
@@ -29,13 +30,16 @@ import type {
 } from "unbash";
 import { resolveTarget } from "./paths.ts";
 import {
+  assignVariable,
   cdArguments,
   changeDirectory,
   continuing,
   directoryAssignments,
   initialDirectoryState,
   joinStates,
+  staticWord,
   unknownDirectoryState,
+  unknownVariables,
 } from "./bash-cwd.ts";
 import type { DirectoryFlow, DirectoryState } from "./bash-cwd.ts";
 
@@ -89,10 +93,14 @@ function consider(
   state: DirectoryState,
   source: string,
   targets: Map<string, string>,
+  expanded = false,
 ): void {
   if (token.startsWith("-")) return; // option flag (--foo, -rf)
   if (!isEscapingCandidate(token)) return;
-  if (token === "~" || token.startsWith("~/") || token === "$HOME" || token.startsWith("$HOME/")) {
+  if (
+    !expanded &&
+    (token === "~" || token.startsWith("~/") || token === "$HOME" || token.startsWith("$HOME/"))
+  ) {
     if (state.home === null) return;
     token = state.home + token.slice(token.startsWith("~") ? 1 : 5);
     if (!token) return;
@@ -101,21 +109,54 @@ function consider(
   if (
     state.cwd === null &&
     !path.isAbsolute(token) &&
-    !token.startsWith("~") &&
-    !token.startsWith("$HOME")
+    (expanded || (!token.startsWith("~") && !token.startsWith("$HOME")))
   )
     return;
-  const resolved = resolveTarget(token, state.cwd ?? (path.parse(token).root || "/"));
+  // Expansion results are literal strings: a stored "~" or "$HOME" is not
+  // expanded a second time by Bash, even when the reference is unquoted.
+  const resolved =
+    expanded && !path.isAbsolute(token)
+      ? path.resolve(state.cwd!, token)
+      : resolveTarget(token, state.cwd ?? (path.parse(token).root || "/"));
   if (!targets.has(resolved)) targets.set(resolved, source);
 }
 
 // ── Word inspection ─────────────────────────────────────────────────────────
 
-/**
- * Word parts that defeat static path analysis: quoted literals (data, not a
- * path) and variable expansions other than `$HOME`/`${HOME}` (unknowable at
- * parse time). Literal text, brace/glob patterns, and `$HOME` are left through.
- */
+function hasVariableReference(parts: WordPart[]): boolean {
+  return parts.some(
+    (part) =>
+      part.type === "SimpleExpansion" ||
+      part.type === "ParameterExpansion" ||
+      (part.type === "DoubleQuoted" && hasVariableReference(part.parts)),
+  );
+}
+
+/** Expansions that may assign in the current shell cannot retain old values. */
+function hasVariableEffects(parts: WordPart[]): boolean {
+  return parts.some((part) => {
+    if (part.type === "ArithmeticExpansion") return true;
+    if (part.type === "DoubleQuoted" || part.type === "LocaleString")
+      return hasVariableEffects(part.parts);
+    if (part.type === "ParameterExpansion")
+      return part.operator === "=" ||
+        part.operator === ":=" ||
+        part.index !== undefined ||
+        hasVariableEffects(part.operand?.parts ?? []);
+    return false;
+  });
+}
+
+function expansionState(
+  words: (Word | undefined)[],
+  state: DirectoryState,
+): DirectoryState {
+  return words.some((word) => hasVariableEffects(word?.parts ?? []))
+    ? unknownVariables(state)
+    : state;
+}
+
+/** Quoted data stays opaque after variable references have been handled. */
 function isUnanalyzable(p: WordPart): boolean {
   switch (p.type) {
     case "SingleQuoted":
@@ -123,12 +164,8 @@ function isUnanalyzable(p: WordPart): boolean {
     case "AnsiCQuoted":
     case "LocaleString":
       return true;
-    case "SimpleExpansion":
-      return p.text !== "$HOME";
-    case "ParameterExpansion":
-      return p.parameter !== "HOME";
     default:
-      return false; // Literal, BraceExpansion, ExtendedGlob, ArithmeticExpansion, CommandExpansion, ProcessSubstitution
+      return false;
   }
 }
 
@@ -193,6 +230,11 @@ function scanWord(
   // dequoted `value` (which collapses `C:\Users` → `C:Users`).
   if (isWindowsNativePath(word.text)) {
     consider(word.text, state, source, targets);
+    return;
+  }
+  if (hasVariableReference(parts)) {
+    const value = staticWord(word, state, "candidate");
+    if (value !== null) consider(value, state, source, targets, true);
     return;
   }
   // Quoted data literal, or unresolvable variable — not a static path. Nested
@@ -284,6 +326,21 @@ function walkTestExpr(
   }
 }
 
+function testWords(expression: TestExpression): Word[] {
+  switch (expression.type) {
+    case "TestUnary":
+      return [expression.operand];
+    case "TestBinary":
+      return [expression.left, expression.right];
+    case "TestLogical":
+      return [...testWords(expression.left), ...testWords(expression.right)];
+    case "TestNot":
+      return testWords(expression.operand);
+    case "TestGroup":
+      return testWords(expression.expression);
+  }
+}
+
 function walkNode(
   node: Node,
   command: string,
@@ -299,6 +356,14 @@ function walkCommand(
   state: DirectoryState,
   targets: Map<string, string>,
 ): DirectoryFlow {
+  const words = [
+    node.name, ...node.suffix,
+    ...node.prefix.flatMap((assignment) => [assignment.value, ...(assignment.array ?? [])]),
+    ...node.redirects.flatMap((redirect) => [redirect.target, redirect.body]),
+  ];
+  state = expansionState(words, state);
+  if (node.prefix.some((assignment) => assignment.index !== undefined))
+    state = unknownVariables(state);
   const states = [state];
   // Leaf command text — verbatim slice of the original source.
   const source = command.slice(node.pos, node.end);
@@ -316,16 +381,28 @@ function walkCommand(
   for (const r of node.redirects) walkRedirect(r, state, source, command, targets);
   // Assignment values are data (not file access) — only recurse for nested
   // commands, never scan them as paths.
+  let assigned = state;
   for (const a of node.prefix) {
-    if (a.value) collectNested(a.value.parts ?? [], command, state, targets);
-    if (a.array) for (const w of a.array) collectNested(w.parts ?? [], command, state, targets);
+    if (a.value) collectNested(a.value.parts ?? [], command, assigned, targets);
+    if (a.array) for (const w of a.array) collectNested(w.parts ?? [], command, assigned, targets);
+    assigned = directoryAssignments({ ...node, prefix: [a] }, assigned);
   }
   if (changed) {
     if (changed.target !== null && !targets.has(changed.target))
       targets.set(changed.target, source);
     return { success: changed.success, failure: states };
   }
-  if (!node.name) return both([directoryAssignments(node, state)]);
+  if (!node.name) {
+    const staticAssignments = node.prefix.every((assignment) =>
+      assignment.value && staticWord(assignment.value, assigned, "assignment") !== null,
+    );
+    if (staticAssignments && node.redirects.length === 0)
+      return { success: [assigned], failure: [] };
+    return {
+      success: [assigned],
+      failure: node.redirects.length ? joinStates(states, [assigned]) : [assigned],
+    };
+  }
   if (localFunction) return both([unknownDirectoryState(state.functions)]);
   // Only an unambiguous exit terminates the list. `return` can fail outside
   // a function, and `exit` with too many arguments also leaves Bash running.
@@ -346,11 +423,50 @@ function walkCommand(
   if ((name === ":" || name === "true") && node.redirects.length === 0)
     return { success: states, failure: [] };
   if (name === "false" && node.redirects.length === 0) return { success: [], failure: states };
+  let invoked: string | null | undefined = name;
+  let args = node.suffix;
+  while (invoked === "builtin" || invoked === "command") {
+    let index = 0;
+    for (; index < args.length; index++) {
+      const option = staticWord(args[index], state);
+      if (option === null) return both([unknownDirectoryState(state.functions)]);
+      if (option === "--") {
+        index++;
+        break;
+      }
+      if (!option.startsWith("-") || option === "-") break;
+      if (invoked === "command" && /^-[pvV]+$/.test(option)) {
+        // Query forms do not invoke the named command.
+        if (/[vV]/.test(option)) return both(states);
+      } else {
+        return both([unknownDirectoryState(state.functions)]);
+      }
+    }
+    invoked = args[index] ? staticWord(args[index], state) : undefined;
+    args = args.slice(index + 1);
+  }
   // Directory-stack operations and evaluated shell code cannot safely
   // preserve the old state, even when they eventually return a failure.
-  if (["pushd", "popd", "eval", "source", "."].includes(name ?? "")) {
-    return both([unknownDirectoryState(state.functions)]);
+  // Unhandled cd wrappers likewise cannot keep the old cwd.
+  if (
+    invoked === null ||
+    ["pushd", "popd", "eval", "source", ".", "cd"].includes(invoked ?? "") ||
+    state.functions.includes(invoked ?? "")
+  ) return both([unknownDirectoryState(state.functions)]);
+  // These builtins can change scalar values or their interpretation. Their
+  // options, arrays, namerefs, and input data are not evaluated here.
+  const printfOption = args[0] ? staticWord(args[0], state) : "";
+  const printfAssigns =
+    invoked === "printf" && (printfOption === null || printfOption.startsWith("-v"));
+  if (
+    printfAssigns ||
+    ["unset", "read", "readarray", "mapfile", "declare", "typeset",
+      "local", "export", "readonly", "let", "getopts"].includes(invoked ?? "")
+  ) {
+    return both([unknownVariables(state)]);
   }
+  if (hasVariableReference(node.name.parts ?? []) || staticWord(node.name, state) === null)
+    return both([unknownDirectoryState(state.functions)]);
   return both(states);
 }
 
@@ -366,8 +482,9 @@ function walkNodeAt(
       return walkCommand(node, command, state, targets);
     case "TestCommand": {
       const source = command.slice(node.pos, node.end);
+      state = expansionState(testWords(node.expression), state);
       walkTestExpr(node.expression, state, source, command, targets);
-      return both(states);
+      return both([state]);
     }
     case "Pipeline": {
       if (node.commands.length === 1) {
@@ -402,20 +519,28 @@ function walkNodeAt(
       return mergeFlows(yes, no, { ...condition, success: [], failure: [] });
     }
     case "For":
-    case "Select":
+    case "Select": {
+      state = expansionState(node.wordlist, state);
       for (const w of node.wordlist)
         scanWord(w, state, command.slice(node.pos, node.end), command, targets);
-      return walkLoop(node.body, undefined, command, states, targets);
+      const flow = walkLoop(
+        node.body, undefined, command,
+        [assignVariable(state, node.name.value, null)], targets,
+      );
+      return mergeFlows({ success: [state], failure: [] }, flow);
+    }
     case "While":
       return walkLoop(node.body, node, command, states, targets);
     case "Case": {
+      state = expansionState([node.word, ...node.items.flatMap((item) => item.pattern)], state);
+      const caseStates = [state];
       const source = command.slice(node.pos, node.end);
       scanWord(node.word, state, source, command, targets);
       let fallthrough: DirectoryState[] = [];
-      let result = both(states); // The patterns might not match any branch.
+      let result = both(caseStates); // The patterns might not match any branch.
       for (const item of node.items) {
         for (const p of item.pattern) scanWord(p, state, source, command, targets);
-        const branch = walkScript(item.body, command, joinStates(states, fallthrough), targets);
+        const branch = walkScript(item.body, command, joinStates(caseStates, fallthrough), targets);
         fallthrough =
           item.terminator === ";&" || item.terminator === ";;&" ? continuing(branch) : [];
         result = mergeFlows(result, branch);
@@ -445,9 +570,9 @@ function walkNodeAt(
     case "CompoundList":
       return walkScript(node, command, states, targets);
     case "ArithmeticFor":
-      return walkLoop(node.body, undefined, command, states, targets);
+      return walkLoop(node.body, undefined, command, [unknownVariables(state)], targets);
     case "ArithmeticCommand":
-      return both(states); // `(( … ))` — pure arithmetic, no path operands.
+      return both([unknownVariables(state)]); // Arithmetic may assign shell variables.
     case "Statement":
       return walkStatement(node, command, states, targets);
   }
@@ -487,13 +612,21 @@ function walkStatement(
   states: DirectoryState[],
   targets: Map<string, string>,
 ): DirectoryFlow {
+  const parent = states;
+  states = states.map((state) =>
+    expansionState(stmt.redirects.flatMap((redirect) => [redirect.target, redirect.body]), state),
+  );
   // Redirections are expanded before the command (and therefore before cd).
   const source = command.slice(stmt.pos, stmt.end);
   for (const state of states)
     for (const r of stmt.redirects) walkRedirect(r, state, source, command, targets);
-  const flow = walkNode(stmt.command, command, states, targets);
-  if (stmt.background) return { success: states, failure: [] };
-  return stmt.redirects.length ? { ...flow, failure: joinStates(states, flow.failure) } : flow;
+  let flow = walkNode(stmt.command, command, states, targets);
+  if (stmt.background) return { success: parent, failure: [] };
+  const isolated = stmt.command.type === "Subshell";
+  if (isolated) flow = childOutcome(flow, parent);
+  return stmt.redirects.length
+    ? { ...flow, failure: joinStates(isolated ? parent : states, flow.failure) }
+    : flow;
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────

@@ -4,8 +4,9 @@ import type { Command, Word, WordPart } from "unbash";
 import { resolveTarget } from "./paths.ts";
 
 const MAX_DIRECTORY_STATES = 32;
+const MAX_STATIC_WORD_LENGTH = 65_536;
 
-/** @internal Shell-local logical directories; null means not statically known. */
+/** @internal Shell-local directories and scalar values; null means not statically known. */
 export interface DirectoryState {
   cwd: string | null;
   /** OLDPWD, independent of any manual assignment to PWD. */
@@ -16,16 +17,52 @@ export interface DirectoryState {
   /** A nonempty or unknown CDPATH can redirect relative cd destinations. */
   cdpath: boolean;
   functions: string[];
+  variables: Record<string, string | null>;
+  /** False after IFS or unknown shell effects can change word splitting. */
+  defaultIFS: boolean;
 }
 
 /** @internal Initial shell assumptions, scoped to a single tool call. */
 export function initialDirectoryState(cwd: string): DirectoryState {
-  return { cwd, previous: null, home: os.homedir(), pwd: cwd, cdpath: false, functions: [] };
+  return {
+    cwd, previous: null, home: os.homedir(), pwd: cwd, cdpath: false,
+    functions: [], variables: {}, defaultIFS: true,
+  };
 }
 
 /** @internal Unknown shell effects must invalidate directory-related variables too. */
 export function unknownDirectoryState(functions: string[] = []): DirectoryState {
-  return { cwd: null, previous: null, home: null, pwd: null, cdpath: true, functions };
+  return {
+    cwd: null, previous: null, home: null, pwd: null, cdpath: true,
+    functions, variables: {}, defaultIFS: false,
+  };
+}
+
+/** @internal Forget variable mutations without inventing a directory change. */
+export function unknownVariables(state: DirectoryState): DirectoryState {
+  return { ...unknownDirectoryState(state.functions), cwd: state.cwd };
+}
+
+function variableValue(name: string, state: DirectoryState): string | null {
+  if (name === "HOME") return state.home;
+  if (name === "PWD") return state.pwd;
+  if (name === "OLDPWD") return state.previous;
+  return Object.hasOwn(state.variables, name) ? state.variables[name] : null;
+}
+
+/** @internal Copy on write keeps branch and child-shell variable environments isolated. */
+export function assignVariable(
+  state: DirectoryState,
+  name: string,
+  value: string | null,
+): DirectoryState {
+  const next = { ...state, variables: { ...state.variables, [name]: value } };
+  if (name === "HOME") next.home = value;
+  if (name === "PWD") next.pwd = value;
+  if (name === "OLDPWD") next.previous = value;
+  if (name === "CDPATH") next.cdpath = value !== "";
+  if (name === "IFS") next.defaultIFS = false;
+  return next;
 }
 
 /** @internal Possible directories partitioned by the last command's exit status. */
@@ -59,14 +96,19 @@ export function continuing(flow: DirectoryFlow): DirectoryState[] {
   return joinStates(flow.success, flow.failure);
 }
 
-function staticParts(parts: WordPart[], state: DirectoryState, quoted = false): string | null {
+function staticParts(
+  parts: WordPart[],
+  state: DirectoryState,
+  quoted = false,
+  patterns = false,
+): string | null {
   let result = "";
   for (const part of parts) {
     let value: string | null;
     switch (part.type) {
       case "Literal":
         // Unquoted glob patterns depend on the filesystem. Escaped metacharacters do not.
-        if (!quoted && /[*?[]/.test(part.text.replace(/\\./gs, ""))) return null;
+        if (!quoted && !patterns && /[*?[]/.test(part.text.replace(/\\./gs, ""))) return null;
         value = part.value;
         break;
       case "SingleQuoted":
@@ -81,33 +123,35 @@ function staticParts(parts: WordPart[], state: DirectoryState, quoted = false): 
         if (part.type === "ParameterExpansion" && part.text !== `\${${part.parameter}}`)
           return null;
         const name = part.type === "SimpleExpansion" ? part.text.slice(1) : part.parameter;
-        value =
-          name === "HOME"
-            ? state.home
-            : name === "PWD"
-              ? state.pwd
-              : name === "OLDPWD"
-                ? state.previous
-                : null;
+        value = variableValue(name, state);
         // Unquoted expansions can split into multiple arguments or expand globs.
-        if (!quoted && value !== null && /[\s*?[]/.test(value)) return null;
+        if (
+          !quoted &&
+          value !== null &&
+          (/[\s*?[]/.test(value) || !state.defaultIFS)
+        )
+          return null;
         break;
       }
       default:
         return null;
     }
-    if (value === null) return null;
+    if (value === null || result.length + value.length > MAX_STATIC_WORD_LENGTH) return null;
     result += value;
   }
   return result;
 }
 
-/** Decode a single static directory argument without executing expansions. */
-function directoryWord(word: Word, state: DirectoryState): string | null {
+/** @internal Decode a scalar word without executing shell expansions. */
+export function staticWord(
+  word: Word,
+  state: DirectoryState,
+  context: "argument" | "assignment" | "candidate" = "argument",
+): string | null {
   // Preserve the existing Git Bash handling of native Windows separators.
   if (process.platform === "win32" && /^[A-Za-z]:[\\/]/.test(word.text)) return word.text;
   const parts = word.parts ?? [{ type: "Literal", text: word.text, value: word.value }];
-  let value = staticParts(parts, state);
+  let value = staticParts(parts, state, context === "assignment", context === "candidate");
   if (value === null) return null;
   if (word.text === "~" || word.text.startsWith("~/")) {
     if (state.home === null) return null;
@@ -125,28 +169,16 @@ export function cdArguments(node: Command): Word[] | undefined {
   return undefined;
 }
 
-/** @internal Track assignments affecting cd without interpreting general shell variables. */
+/** @internal Follow plain scalar assignments in shell evaluation order. */
 export function directoryAssignments(node: Command, state: DirectoryState): DirectoryState {
-  const next = { ...state };
+  let next = state;
   for (const assignment of node.prefix) {
+    if (!assignment.name) continue;
     const value =
-      assignment.value && !assignment.append && !assignment.array
-        ? directoryWord(assignment.value, next)
+      assignment.value && !assignment.append && !assignment.array && assignment.index === undefined
+        ? staticWord(assignment.value, next, "assignment")
         : null;
-    switch (assignment.name) {
-      case "HOME":
-        next.home = value;
-        break;
-      case "PWD":
-        next.pwd = value;
-        break;
-      case "OLDPWD":
-        next.previous = value;
-        break;
-      case "CDPATH":
-        next.cdpath = value !== "";
-        break;
-    }
+    next = assignVariable(next, assignment.name, value);
   }
   return next;
 }
@@ -165,10 +197,19 @@ export function changeDirectory(
     target: null,
     success: [{ ...state, cwd: null, pwd: null, previous: state.pwd }],
   });
+  // An entirely empty unquoted expansion removes the argument. Explicit
+  // quotes preserve it, so `cd $empty` uses HOME while `cd "$empty"` fails.
+  args = args.filter((word) =>
+    staticWord(word, state) !== "" ||
+    (word.parts ?? []).some((part) =>
+      part.type === "SingleQuoted" || part.type === "DoubleQuoted" ||
+      part.type === "AnsiCQuoted" || part.type === "LocaleString",
+    ),
+  );
   let physical = false;
   let index = 0;
   for (; index < args.length; index++) {
-    const option = directoryWord(args[index], state);
+    const option = staticWord(args[index], state);
     if (option === "--") {
       index++;
       break;
@@ -184,7 +225,7 @@ export function changeDirectory(
   const argument = args[index];
   // Explicit operands expand before temporary prefix assignments take effect;
   // cd's implicit HOME/OLDPWD/CDPATH lookup uses the builtin's environment.
-  let value = argument ? directoryWord(argument, state) : effective.home;
+  let value = argument ? staticWord(argument, state) : effective.home;
   if (value === "-") value = effective.previous;
   if (value === "") return { target: null, success: [] };
   let target: string | null;

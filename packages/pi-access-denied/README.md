@@ -117,7 +117,7 @@ The extension recognizes absolute paths, `~` and `$HOME` prefixes, and parent-di
 
 References to another user's home, such as `~otheruser`, are kept in that form. You can use the same form in `allowedPaths` or `deniedPaths`.
 
-Quoted arguments are treated as data, so a path mentioned in a commit message does not trigger a prompt. `cd` is an exception: its argument is a directory, so `cd "shared files"` is checked too. Substitutions inside quotes still have their commands checked, as in `echo "$(cat /etc/config)"`.
+Quoted literal arguments are treated as data, so a path mentioned in a commit message does not trigger a prompt. Known variable references such as `"$file"` are checked after expansion. `cd` also checks quoted literal destinations such as `cd "shared files"`. Substitutions inside quotes still have their commands checked, as in `echo "$(cat /etc/config)"`.
 
 ### Commands that change directory
 
@@ -136,15 +136,30 @@ For an initial directory of `/project`:
 
 Consecutive directory changes, quoted paths, `cd --`, `cd -L`, home-directory forms, and `cd -` are supported. `cd -` needs a previous directory established within the same call. Directory changes inside parentheses, substitutions, pipelines, or background commands stay local to those commands; `{ ...; }` groups share their shell's directory.
 
+### Variables assigned within a command
+
+Plain scalar assignments are followed within one bash tool call. `$name`, `${name}`, and double-quoted references can supply path candidates:
+
+```bash
+f=../private/data && rm "$f"
+base=../private; f="$base/data"; cat "${f}.bak"
+dir=shared; cd "$dir" && cat ../notes.txt
+```
+
+Assignment values are data; the check happens when a command uses the value. Relative values are resolved from that command's directory. `rm f` uses the literal filename `f`, not the variable. Ordinary relative values such as `src/app.ts` remain subject to the same rules as literal arguments.
+
+Branches carry their own values and directories. Subshells, substitutions, pipelines, and background commands do not change the parent's variables; brace groups do. Values do not persist across tool calls. A temporary assignment in `f=../new rm "$f"` does not change the value expanded for that command's argument.
+
 ### Limits to keep in mind
 
 Some paths cannot be determined from the command text:
 
-- **Dynamic paths:** general variables such as `$FILE` are skipped. After `cd "$DEST"` or `cd "$(getdir)"`, relative paths are skipped until a known directory is established; absolute paths remain checked.
-- **Quoted file arguments:** `cat '/etc/config'` is skipped, even though the unquoted form is checked. The quoted-path exception applies to `cd` destinations.
+- **Dynamic paths:** variables without known values, command-output values, arrays, append assignments, and complex parameter expansions remain unresolved. Unquoted values requiring word splitting or glob expansion are skipped. After a `cd` to an unknown destination, relative paths are skipped until a known directory is established; absolute paths remain checked.
+- **Variable mutations:** builtins such as `read`, `unset`, `export`, and `declare`, arithmetic, and loop-variable assignments can invalidate tracked values. These operations are not interpreted as general shell code. Variable attributes, custom shell setup, and repeated loop iterations can limit analysis.
+- **Quoted file arguments:** `cat '/etc/config'` is skipped, even though the unquoted form is checked. Known variable references and `cd` destinations are exceptions.
 - **Scripts and shell setup:** evaluated code, function calls, directory-stack commands, repeated directory changes in loops, aliases, and shell options can limit what is detected. Symlinks are not resolved.
 
-Simple assignments to `HOME`, `PWD`, and `OLDPWD` are followed for directory changes. A nonempty `CDPATH` makes directory lookup uncertain; use an explicit `./`, `../`, or absolute destination when you want a predictable path check.
+Assignments to `HOME`, `PWD`, and `OLDPWD` also affect directory tracking. A nonempty `CDPATH` makes directory lookup uncertain; use an explicit `./`, `../`, or absolute destination when you want a predictable path check.
 
 These limits favor fewer interruptions during ordinary work. Approval is not a guarantee that every path a script might access has been checked.
 

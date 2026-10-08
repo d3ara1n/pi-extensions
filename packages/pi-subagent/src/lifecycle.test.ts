@@ -72,8 +72,8 @@ function setup(t: TestContext) {
     return {
       async start() { await hooks.get("session_start")({ reason: "reload" }, ctx); },
       async shutdown() { await hooks.get("session_shutdown")({ reason: "reload" }, ctx); },
-      async call(name: string, params: any, id = `call-${entries.length}`) {
-        const result = await tools.get(name).execute(id, params, undefined, undefined, ctx);
+      async call(name: string, params: any, id = `call-${entries.length}`, signal?: AbortSignal) {
+        const result = await tools.get(name).execute(id, params, signal, undefined, ctx);
         entries.push({ type: "message", message: { role: "toolResult", toolName: name, toolCallId: id, ...result } });
         return result;
       },
@@ -128,7 +128,89 @@ test("background check stays repeatable across reload, branches, and reopening t
   assert.deepEqual(h.warnings, []);
 });
 
-test("shutdown waits for running and queued cancellations to reach the ledger", async (t) => {
+test("parent-turn abort retains the aborted label and partial output in foreground tool text", async (t) => {
+  const h = setup(t);
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  h.setSpawn(async (_model, _task, opts) => {
+    opts.onProgress?.({ output: "partial findings", usage: { ...emptyUsage(), turns: 1 } });
+    entered();
+    await new Promise<void>((_resolve, reject) => {
+      opts.signal!.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+    });
+    throw new Error("unreachable");
+  });
+  const runtime = h.runtime();
+  await runtime.start();
+  const caller = new AbortController();
+  const delegated = runtime.call("subagent_delegate", { role: "explorer", task: "inspect" }, "foreground-call", caller.signal);
+  await started;
+  caller.abort();
+  const result = await delegated;
+  assert.equal(h.runs[0].state, "aborted");
+  assert.match(result.content[0].text, /^explorer: aborted — .*Partial output:\npartial findings/s);
+  assert.equal(result.details.results[0].stopReason, "aborted");
+  assert.equal(h.notices.length, 0);
+  await runtime.shutdown();
+});
+
+for (const source of ["child", "tool", "command"] as const) {
+  test(`${source} interruption retains its terminal state across notices, wait, check, and reload`, async (t) => {
+    const h = setup(t);
+    const expectedState = source === "child" ? "aborted" : "cancelled";
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    let release!: () => void;
+    const childSettlement = new Promise<void>((resolve) => { release = resolve; });
+    h.setSpawn(async (_model, _task, opts) => {
+      entered();
+      const partial = {
+        output: "partial findings", usage: { ...emptyUsage(), turns: 1 },
+        activityLog: [{ kind: "text" as const, id: "text-1", status: "done" as const, text: "partial findings" }],
+      };
+      opts.onProgress?.(partial);
+      if (source === "child") {
+        await childSettlement;
+        return {
+          role: "", task: "", exitCode: 0, stderr: "",
+          ...partial, stopReason: "aborted", errorMessage: "Subagent run was aborted",
+        };
+      }
+      await new Promise<void>((_resolve, reject) => {
+        opts.signal!.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+      throw new Error("unreachable");
+    });
+    let runtime = h.runtime();
+    await runtime.start();
+    await runtime.call("subagent_delegate", { role: "explorer", task: "inspect", background: true }, "delegate-1");
+    await started;
+    if (source === "child") release();
+    else if (source === "tool") await runtime.call("subagent_cancel", { id: "sub-1", reason: "no longer needed" });
+    else await runtime.commands.get("subagent:cancel").handler("sub-1 no longer needed", h.ctx);
+    await h.runs[0].promise;
+    assert.equal(h.runs[0].state, expectedState);
+    assert.equal(h.notices.length, 1);
+    assert.equal(h.notices[0].details.outcome, expectedState);
+    assert.match(JSON.stringify(await runtime.reminder()), new RegExp(`Ended.*${expectedState}`, "s"));
+    const waited = await runtime.call("subagent_wait", { ids: ["sub-1"] });
+    assert.match(waited.content[0].text, new RegExp(`: ${expectedState}`));
+    const checked = await runtime.call("subagent_check", { id: "sub-1" });
+    assert.match(checked.content[0].text, new RegExp(`: ${expectedState}.*Partial output:`, "s"));
+    assert.equal(checked.details.result.output, "partial findings");
+    const again = await runtime.call("subagent_cancel", { id: "sub-1" });
+    assert.match(again.content[0].text, new RegExp(`already ${expectedState}`));
+    await assert.rejects(runtime.call("subagent_steer", { id: "sub-1", message: "continue" }), /only running/);
+    await runtime.shutdown();
+    runtime = h.runtime();
+    await runtime.start();
+    assert.deepEqual(await runtime.call("subagent_check", { id: "sub-1" }), checked);
+    assert.match((await runtime.call("subagent_wait", { ids: ["sub-1"] })).content[0].text, new RegExp(`: ${expectedState}`));
+    assert.equal(h.notices.length, 1);
+  });
+}
+
+test("shutdown waits for running and queued aborts to reach the ledger", async (t) => {
   const h = setup(t);
   let entered!: () => void;
   const started = new Promise<void>((resolve) => { entered = resolve; });
@@ -149,7 +231,7 @@ test("shutdown waits for running and queued cancellations to reach the ledger", 
   await restored.start();
   for (const id of ["sub-1", "sub-2"]) {
     const checked = await restored.call("subagent_check", { id });
-    assert.equal(checked.details.result.stopReason, "cancelled");
+    assert.equal(checked.details.result.stopReason, "aborted");
     assert.match(checked.details.result.errorMessage, /session shutdown/);
     if (id === "sub-1") assert.equal(checked.details.result.output, "partial before reload");
   }

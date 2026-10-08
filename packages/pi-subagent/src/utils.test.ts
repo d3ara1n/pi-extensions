@@ -474,7 +474,7 @@ describe("terminalResultLine", () => {
         baseResult({ exitCode: 1, stopReason: "cancelled", errorMessage: "user: wrong direction" }),
         id,
       ),
-      "\u23F9 user: wrong direction",
+      "\u23F9 Cancelled — user: wrong direction",
     );
   });
   test("success chain: AI summary wins, then output first line, then placeholder", () => {
@@ -677,8 +677,12 @@ describe("background run helpers", () => {
     assert.equal(deriveRunState(baseResult()), "finished");
     assert.equal(deriveRunState(baseResult({ exitCode: 1 })), "failed");
     assert.equal(deriveRunState(baseResult({ stopReason: "timeout", exitCode: 124 })), "failed");
-    // cancelled stops are failures with partial output (same family as timeout)
-    assert.equal(deriveRunState(baseResult({ stopReason: "cancelled" })), "failed");
+    // Interrupted runs have terminal states independent of process exit codes.
+    assert.equal(deriveRunState(baseResult({ stopReason: "cancelled" })), "cancelled");
+    assert.equal(deriveRunState(baseResult({ stopReason: "aborted" })), "aborted");
+    assert.equal(deriveRunState(baseResult({ stopReason: "aborted", exitCode: 1 })), "aborted");
+    assert.equal(deriveRunState(baseResult({ stopReason: "cancelled", exitCode: 1 })), "cancelled");
+    assert.equal(deriveRunState(baseResult({ stopReason: "aborted", exitCode: -1 })), "running");
     // budget stops are intentional finishes
     assert.equal(deriveRunState(baseResult({ stopReason: "budget_exceeded" })), "finished");
   });
@@ -800,7 +804,7 @@ describe("background run helpers", () => {
         "worker",
         baseResult({ exitCode: 1, stopReason: "cancelled", errorMessage: "still queued (user: x)" }),
       ),
-      "sub-2 (worker): cancelled — never started",
+      "sub-2 (worker): cancelled — never started (still queued (user: x))",
     );
   });
 

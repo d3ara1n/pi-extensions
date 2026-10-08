@@ -115,7 +115,7 @@ describe("buildInboxReminder", () => {
       [
         entry({
           id: "sub-5",
-          state: "failed",
+          state: "cancelled",
           snapshot: frame({
             exitCode: 1,
             stopReason: "cancelled",
@@ -159,7 +159,7 @@ describe("buildInboxReminder", () => {
       entry({ id: "sub-2", state: "running" }),
       entry({ id: "sub-3", state: "failed", snapshot: frame({ exitCode: 1 }) }),
       entry({ id: "sub-4", state: "queued" }),
-      entry({ id: "sub-5", state: "failed", snapshot: frame({ exitCode: 1, stopReason: "cancelled" }) }),
+      entry({ id: "sub-5", state: "cancelled", snapshot: frame({ exitCode: 1, stopReason: "cancelled" }) }),
     ], new Set())!;
     const sections = text.split("\n\n");
     assert.equal(sections.length, 3);

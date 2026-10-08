@@ -64,6 +64,7 @@ import {
   formatToolCall,
   formatTokens,
   formatUsageStats,
+  isTerminalState,
   runIcon,
   shortenPath,
   statusStyle,
@@ -509,13 +510,15 @@ export class SubagentViewPanel implements Component, Focusable {
     lines.push(fg("dim", `  ${usage || "no usage yet"}`));
     const time = formatTimePart({ ...snap, exitCode: run.state === "queued" ? -1 : snap.exitCode });
     if (time) lines.push(fg("dim", `  ${time}`));
-    if (run.state === "finished" || run.state === "failed") {
+    if (isTerminalState(run.state)) {
       lines.push(fg("dim", `  exit ${snap.exitCode}${snap.stopReason ? ` · ${snap.stopReason}` : ""}`));
     }
     if (snap.fallbackFrom) {
       lines.push(fg("warning", `  ⚠ ${formatFallback(snap.fallbackFrom)}`));
     }
-    if (run.state === "failed") {
+    if (run.state === "aborted" || run.state === "cancelled") {
+      body(`${run.state} — ${snap.errorMessage || "no reason recorded"}`, "warning");
+    } else if (run.state === "failed") {
       if (snap.errorMessage) body(snap.errorMessage, "error");
       const tail = stripTerminalSequences(snap.stderr)
         .split("\n")

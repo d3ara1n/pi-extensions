@@ -33,9 +33,9 @@ import {
   MAX_OUTPUT_CHARS,
   AsyncSemaphore,
   buildFallbackFrom,
+  deriveRunState,
   effectiveTimeout,
   emptyUsage,
-  isFailedResult,
   isProviderError,
   truncateOutput,
 } from "./utils.ts";
@@ -58,14 +58,14 @@ export interface RunHandle {
   readonly snapshot: SubagentResult;
   /** Terminal result; undefined while queued/running. */
   readonly result: SubagentResult | undefined;
-  /** Set when the pipeline threw (abort, spawn crash). The terminal result still carries the partial frame — callers report it as an ordinary failed result; wait/check only see state "failed". */
+  /** Set when the pipeline threw (interruption, spawn crash). The terminal result preserves the stop reason and partial output. */
   readonly thrown: Error | undefined;
   /** Successfully persisted terminal record; absent when history is disabled or writing failed. */
   readonly historyFile?: string;
   /** Resolves with the terminal result once the run finishes (always succeeds). */
   readonly promise: Promise<SubagentResult>;
-  /** Abort the run — no-op after settle. Tool-cancellation and session-shutdown reaping both funnel here. */
-  abort(reason?: string): void;
+  /** Stop the run; explicit cancellation supplies "cancelled". The first request wins; no-op after settle. */
+  abort(reason?: string, stopReason?: "aborted" | "cancelled"): void;
   /** Queue a steering message into the running child (RPC stdin). No-op when queued/settled. */
   steer(message: string): void;
   /** Get notified on every frame change. Returns an unsubscribe function. */
@@ -161,6 +161,7 @@ export function startSubagentRun(opts: StartRunOptions): RunHandle {
   /** Live stdin channel of the current spawn attempt (replaced on fallback retry). */
   let control: SubagentControl | undefined;
   let abortReason: string | undefined;
+  let abortKind: "aborted" | "cancelled" = "aborted";
   const controller = new AbortController();
   const onCallerAbort = () => controller.abort();
   if (opts.signal) {
@@ -203,7 +204,7 @@ export function startSubagentRun(opts: StartRunOptions): RunHandle {
     result = terminal;
     snapshot = terminal;
     thrown = error;
-    currentState = isFailedResult(terminal) ? "failed" : "finished";
+    currentState = deriveRunState(terminal);
     notify();
     opts.signal?.removeEventListener("abort", onCallerAbort);
     resolvePromise(terminal);
@@ -237,9 +238,10 @@ export function startSubagentRun(opts: StartRunOptions): RunHandle {
         listeners.delete(fn);
       };
     },
-    abort(reason?: string) {
-      if (settled) return;
-      if (reason) abortReason = reason;
+    abort(reason, stopReason = "aborted") {
+      if (settled || controller.signal.aborted) return;
+      abortReason = reason;
+      abortKind = stopReason;
       controller.abort();
     },
     steer(message: string) {
@@ -256,7 +258,7 @@ export function startSubagentRun(opts: StartRunOptions): RunHandle {
     } catch {
       const msg = "still queued for a concurrency slot" + (abortReason ? ` (${abortReason})` : "");
       finish(
-        { ...inputFrame(1, false), stopReason: "cancelled", errorMessage: msg },
+        { ...inputFrame(1, false), stopReason: abortKind, errorMessage: msg },
         new Error(msg),
       );
       return;
@@ -354,6 +356,11 @@ export function startSubagentRun(opts: StartRunOptions): RunHandle {
 
       // Retry with fallback role on provider errors (quota, auth, timeout, etc.)
       if (
+        !controller.signal.aborted &&
+        runResult.stopReason !== "aborted" &&
+        runResult.stopReason !== "cancelled" &&
+        runResult.stopReason !== "timeout" &&
+        runResult.stopReason !== "budget_exceeded" &&
         (runResult.exitCode !== 0 || runResult.errorMessage) &&
         opts.roleDef.fallbackRole &&
         isProviderError(runResult)
@@ -436,12 +443,9 @@ export function startSubagentRun(opts: StartRunOptions): RunHandle {
       // A completed child may still be awaiting compression/summary; preserve
       // its full result when cancellation interrupts that post-processing.
       const partial = completedResult ?? snapshot;
-      // Aborts settle as their own stop reason ("cancelled", same family as
-      // timeout/budget: intentional stop with partial output) and the abort
-      // reason becomes the error message verbatim — no wrapper needed, every
-      // renderer already prefixes "cancelled". Non-abort crashes (spawn
-      // failure) keep the plain thrown message.
-      const wasCancelled = controller.signal.aborted;
+      // Preserve the first interruption source and the latest partial output.
+      // Non-abort crashes (spawn failure) keep the plain thrown message.
+      const wasInterrupted = controller.signal.aborted;
       const terminal: SubagentResult = {
         ...inputFrame(1, false),
         output: partial.output.length > MAX_OUTPUT_CHARS ? truncateOutput(partial.output) : partial.output,
@@ -450,11 +454,11 @@ export function startSubagentRun(opts: StartRunOptions): RunHandle {
         fallbackFrom: partial.fallbackFrom,
         usage: partial.usage,
         model: partial.model,
-        stopReason: wasCancelled ? "cancelled" : undefined,
+        stopReason: wasInterrupted ? abortKind : undefined,
         activityLog: partial.activityLog,
         budgetMs: partial.budgetMs,
         elapsedMs: partial.elapsedMs ?? (partial.startTime ? Date.now() - partial.startTime : undefined),
-        errorMessage: wasCancelled ? abortReason || "cancelled" : err?.message || String(err),
+        errorMessage: wasInterrupted ? abortReason || abortKind : err?.message || String(err),
       };
       finish(terminal, err instanceof Error ? err : new Error(String(err)), completedRawOutput ?? partial.output);
     } finally {

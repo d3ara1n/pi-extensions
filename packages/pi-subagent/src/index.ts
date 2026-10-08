@@ -27,6 +27,7 @@ import {
   collectDeliveredIds,
   createThrottler,
   describeCurrentActivity,
+  deriveRunState,
   formatBudgetNote,
   formatCancelText,
   formatCheckText,
@@ -37,6 +38,7 @@ import {
   freezeFrame,
   hasFailedSubagentResult,
   isFailedResult,
+  isTerminalState,
   isWaitTimedOut,
   taskPreview,
 } from "./utils.ts";
@@ -465,7 +467,7 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
       promptGuidelines: guidelines,
       // Model-only: subagent runs are heavyweight top-level orchestration. Nested inside a
       // codemode script, a foreground delegate blocks the script for the whole run, and any run
-      // still active when the script ends is cancelled. The whole subagent lifecycle
+      // still active when the script ends is aborted. The whole subagent lifecycle
       // (delegate/wait/check/steer/cancel) stays in the top-level agent loop.
       exposure: "model-only",
 
@@ -579,11 +581,8 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
             // results never suppress it (they are not LLM-visible either way).
             if (runGeneration !== sessionGeneration) return;
 
-            const outcome = isFailedResult(result)
-              ? "failed"
-              : result.stopReason === "cancelled"
-                ? "cancelled"
-                : "finished";
+            const outcome = deriveRunState(result);
+            if (!isTerminalState(outcome)) return;
             // Pure notification: id + outcome only. The result itself surfaces
             // through subagent_check (model) or /subagent:status (user) — the
             // notice never previews it.
@@ -655,13 +654,11 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
           const fallbackNote = formatFallbackNote(result);
           const budgetNote = formatBudgetNote(result);
 
-          // Aborts and spawn crashes arrive here too: the engine resolves them
-          // into failed results that keep the partial frame (task, activity,
-          // output, usage), so the TUI renders them like any failure instead
-          // of collapsing to a bare error line.
+          // Interruptions and crashes preserve their terminal state and partial
+          // frame (task, activity, output, usage) in both tool text and TUI.
           if (isFailedResult(result)) {
             const failedText =
-              `${params.role}: failed — ${result.errorMessage || result.stderr || "unknown error"}\n\nPartial output:\n${result.output}` +
+              `${params.role}: ${deriveRunState(result)} — ${result.errorMessage || result.stderr || "unknown error"}\n\nPartial output:\n${result.output}` +
               fallbackNote +
               formatUsageFooter(result);
             emit([result], failedText);
@@ -749,13 +746,15 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
         // ── Live mirror: forward combined snapshots into this tool row ──
         const entries = () => runs.map((r) => ({ id: r.id, role: r.role, result: r.snapshot }));
         const emit = () => {
-          const counts = { queued: 0, running: 0, finished: 0, failed: 0 };
+          const counts = { queued: 0, running: 0, finished: 0, failed: 0, aborted: 0, cancelled: 0 };
           for (const r of runs) counts[r.state]++;
           const parts: string[] = [];
           if (counts.running) parts.push(`${counts.running} running`);
           if (counts.queued) parts.push(`${counts.queued} queued`);
           parts.push(`${counts.finished} finished`);
           parts.push(`${counts.failed} failed`);
+          if (counts.aborted) parts.push(`${counts.aborted} aborted`);
+          if (counts.cancelled) parts.push(`${counts.cancelled} cancelled`);
           onUpdate?.({
             content: [{ type: "text", text: `waiting: ${parts.join(", ")}` }],
             details: { entries: entries() },
@@ -839,7 +838,7 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
       name: "subagent_check",
       label: "Check a background subagent",
       description:
-        "Get an instant snapshot of ONE background subagent run: queued / running (with current activity, elapsed/budget, and usage so far) / finished (with the full output and usage) / failed or cancelled (with reason, partial output, and usage). Does not wait — use subagent_wait for that. Idempotent: checking a terminal run again re-delivers its result, including after branch navigation or compaction; with history enabled, results also survive reload and reopening the same session. One id per call because results can be large. Direct tool call only — not callable from codemode scripts: it is absent from the script's `tools` object.",
+        "Get an instant snapshot of ONE background subagent run: queued / running (with current activity, elapsed/budget, and usage so far) / finished (with the full output and usage) / failed, aborted, or cancelled (with reason, partial output, and usage). Does not wait — use subagent_wait for that. Idempotent: checking a terminal run again re-delivers its result, including after branch navigation or compaction; with history enabled, results also survive reload and reopening the same session. One id per call because results can be large. Direct tool call only — not callable from codemode scripts: it is absent from the script's `tools` object.",
       promptSnippet: "Inspect a background subagent run",
       exposure: "model-only",
       parameters: Type.Object({
@@ -923,7 +922,7 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
       name: "subagent_cancel",
       label: "Cancel a background subagent",
       description:
-        "Cancel ONE background subagent run (queued or running): the child process is killed and the run settles as cancelled (its own stop reason, same family as timeout — partial output kept), NOT as a plain failure. The reason is recorded with the run: whoever reads the partial output later via subagent_check sees why it was stopped. Cancelling does not remove the run — check still returns the partial output. A finished/failed run cannot be cancelled; check it instead. Direct tool call only — not callable from codemode scripts: it is absent from the script's `tools` object.",
+        "Cancel ONE background subagent run (queued or running): the child process is killed and the run settles as cancelled (its own stop reason, same family as timeout — partial output kept), NOT as a plain failure. The reason is recorded with the run: whoever reads the partial output later via subagent_check sees why it was stopped. Cancelling does not remove the run — check still returns the partial output. A terminal run cannot be cancelled; check it instead. Direct tool call only — not callable from codemode scripts: it is absent from the script's `tools` object.",
       promptSnippet: "Cancel a background subagent run",
       exposure: "model-only",
       parameters: Type.Object({
@@ -946,9 +945,9 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
         }
 
         // Terminal runs cannot be cancelled — point at check instead.
-        if (run.state === "finished" || run.state === "failed") {
+        if (isTerminalState(run.state)) {
           const what =
-            run.state === "finished" ? "its result" : "the failure reason and partial output";
+            run.state === "finished" ? "its result" : "the stop reason and partial output";
           const text =
             `${params.id} (${run.role}) already ${run.state} — nothing to cancel. ` +
             `subagent_check(${params.id}) returns ${what}.`;
@@ -963,7 +962,7 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
         // escalation grace (SIGKILL after 5s), so this await cannot hang.
         // The reason becomes the terminal errorMessage verbatim — check and
         // history readers see it prefixed "cancelled — ...".
-        run.abort(params.reason?.trim() || "no longer needed");
+        run.abort(params.reason?.trim() || "no longer needed", "cancelled");
         const result = await run.promise;
         return {
           content: [{ type: "text", text: formatCancelText(run.id, run.role, result) }],
@@ -1126,7 +1125,10 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
         const snap = run.result ? run.snapshot : freezeFrame(run.snapshot);
         let icon: string;
         let detail: string;
-        if (run.state === "failed") {
+        if (run.state === "aborted" || run.state === "cancelled") {
+          icon = "\u23F9";
+          detail = `${run.state} — ${snap.errorMessage || "no reason recorded"}`;
+        } else if (run.state === "failed") {
           icon = "\u2717";
           detail = snap.errorMessage || "unknown error";
         } else if (run.state === "finished") {
@@ -1206,11 +1208,11 @@ export default function subagentExtension(pi: ExtensionAPI, dependencies: Subage
       const abortReason = reason.trim() ? `user: ${reason.trim()}` : "user";
       const lines: string[] = [];
       for (const run of targets) {
-        if (run.state === "finished" || run.state === "failed") {
+        if (isTerminalState(run.state)) {
           lines.push(`\u2022 ${run.id} (${run.role}) already ${run.state} — nothing to cancel`);
           continue;
         }
-        run.abort(abortReason);
+        run.abort(abortReason, "cancelled");
         const result = await run.promise;
         lines.push(
           result.usage.turns > 0 || result.output

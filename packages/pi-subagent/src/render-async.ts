@@ -46,6 +46,7 @@ import {
   contentText,
   deriveRunState,
   ensureElapsedTimer,
+  isTerminalState,
   formatFallback,
   formatInheritedConversationInput,
   formatDisplayItem,
@@ -143,7 +144,7 @@ function waitEntryExpandedContainer(entry: RunViewEntry, fg: Fg): Container {
   container.addChild(new Text(waitStatusLine(entry, fg), 0, 0));
   addFallbackRow(container, r, fg);
   container.addChild(new Spacer(1));
-  if (state === "finished" || state === "failed") {
+  if (isTerminalState(state)) {
     container.addChild(new Text(terminalResultLine(r, fg, "finished"), 0, 0));
     container.addChild(new Spacer(1));
   }
@@ -203,7 +204,7 @@ function checkEntryExpandedContainer(role: string, r: SubagentResult, fg: Fg): C
   addFallbackRow(container, r, fg);
   container.addChild(new Spacer(1));
 
-  if (state === "finished" || state === "failed") {
+  if (isTerminalState(state)) {
     container.addChild(new Text(terminalResultLine(r, fg), 0, 0));
     container.addChild(new Spacer(1));
     addActivityRows(container, r, fg);

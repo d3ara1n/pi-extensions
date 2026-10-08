@@ -218,7 +218,9 @@ export interface SubagentDetails {
 // ── Background delegation (delegate background:true / wait / check) ──────
 
 /** Lifecycle state of a delegation run, derived from the latest snapshot frame. */
-export type RunState = "queued" | "running" | "finished" | "failed";
+export type RunState = "queued" | "running" | "finished" | "failed" | "aborted" | "cancelled";
+
+export type TerminalRunState = Exclude<RunState, "queued" | "running">;
 
 /** Details for a background delegate result — the input snapshot for the TUI's static input block. */
 export interface BackgroundDelegateDetails {
@@ -284,7 +286,7 @@ export interface CompletionNoticeDetails {
   /** Registry id (sub-N). */
   id: string;
   role: string;
-  outcome: "finished" | "failed" | "cancelled";
+  outcome: TerminalRunState;
   /** Full task text; the renderer flattens and truncates it. */
   task?: string;
 }

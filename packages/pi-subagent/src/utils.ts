@@ -16,6 +16,7 @@ import type {
   SubagentRole,
   SubagentResult,
   SubagentUsage,
+  TerminalRunState,
   ToolStatus,
   WaitDetails,
 } from "./types.ts";
@@ -411,9 +412,13 @@ export function completionNoticeLines(
   bold: (text: string) => string,
 ): string[] {
   // Intentional stops keep the plain text color; only real failures go red
-  // (cancelled keeps warning yellow, mirroring result-line semantics).
+  // (aborted/cancelled keep warning yellow, mirroring result-line semantics).
   const outcomeColor =
-    details.outcome === "failed" ? "error" : details.outcome === "cancelled" ? "warning" : "customMessageText";
+    details.outcome === "failed"
+      ? "error"
+      : details.outcome === "cancelled" || details.outcome === "aborted"
+        ? "warning"
+        : "customMessageText";
   const header =
     fg("customMessageLabel", bold("[subagent]")) +
     ` ${fg("customMessageText", `${details.id} (${details.role})`)} ` +
@@ -452,7 +457,7 @@ export function runIcon(
   if (state === "running") return fg("warning", "\u23F3");
   if (r.stopReason === "timeout") return fg("warning", "\u23F1");
   if (r.stopReason === "budget_exceeded") return fg("warning", "\u23F2");
-  if (r.stopReason === "cancelled") return fg("warning", "\u23F9");
+  if (state === "cancelled" || state === "aborted") return fg("warning", "\u23F9");
   if (state === "failed") return fg("error", "\u2717");
   return fg("success", "\u2713");
 }
@@ -465,13 +470,22 @@ function failureResultText(r: {
   const isTimeout = r.stopReason === "timeout";
   const isBudget = r.stopReason === "budget_exceeded";
   const isCancelled = r.stopReason === "cancelled";
+  const isAborted = r.stopReason === "aborted";
+  if (isCancelled || isAborted) {
+    const label = isCancelled ? "Cancelled" : "Aborted";
+    const reason = oneLine(r.errorMessage || "");
+    return {
+      content: reason && reason.toLowerCase() !== r.stopReason ? `${label} — ${reason}` : label,
+      col: "warning",
+    };
+  }
   return {
     content:
       oneLine(r.errorMessage || "") ||
-      (isTimeout ? "Timed out" : isBudget ? "Budget exceeded" : isCancelled ? "Cancelled" : "failed"),
-    // Timeout/budget/cancel are intentional stops with partial output —
+      (isTimeout ? "Timed out" : isBudget ? "Budget exceeded" : "failed"),
+    // Timeout/budget are intentional stops with partial output —
     // warning, not the error red reserved for real failures.
-    col: isTimeout || isBudget || isCancelled ? "warning" : "error",
+    col: isTimeout || isBudget ? "warning" : "error",
   };
 }
 
@@ -658,7 +672,13 @@ export function formatFallback(f: FallbackFrom): string {
 /** Derive the lifecycle state of a run from one of its frames (live or terminal). */
 export function deriveRunState(r: { exitCode: number; queued?: boolean; stopReason?: string }): RunState {
   if (r.exitCode === -1) return r.queued ? "queued" : "running";
+  if (r.stopReason === "aborted" || r.stopReason === "cancelled") return r.stopReason;
   return isFailedResult(r) ? "failed" : "finished";
+}
+
+/** True for every settled run, including interruptions with partial output. */
+export function isTerminalState(state: RunState): state is TerminalRunState {
+  return state !== "queued" && state !== "running";
 }
 
 /** True when wait tool result details carries the timeout flag. */
@@ -692,10 +712,10 @@ export function formatUsageFooter(r: SubagentResult): string {
  * check is the complete view.
  */
 export function formatRunLine(id: string, role: string, r: SubagentResult): string {
-  const state = r.stopReason === "cancelled" ? "cancelled" : deriveRunState(r);
+  const state = deriveRunState(r);
   const head = `${id} (${role}): ${state}`;
-  // Queue-time cancels never spawned: nothing measurable ran.
-  if (state === "cancelled" && r.elapsedMs == null && !r.usage.turns) {
+  // Queue-time interruptions never spawned: nothing measurable ran.
+  if ((state === "cancelled" || state === "aborted") && r.elapsedMs == null && !r.usage.turns) {
     return `${head} — never started`;
   }
   const parts = statsParts(r, { withElapsed: true });
@@ -735,12 +755,11 @@ export function formatCheckText(id: string, role: string, r: SubagentResult): st
       (parts.length > 0 ? `\n\n--- ${parts.join(" ")} ---` : "")
     );
   }
-  if (r.stopReason === "cancelled") {
-    // errorMessage is the bare abort reason ("user: ..." / "session shutdown")
-    // — the "cancelled" prefix here is the only wrapper it gets.
-    if (r.elapsedMs == null && !r.usage.turns) return `${head}: cancelled — never started`;
+  if (state === "cancelled" || state === "aborted") {
+    const reason = r.errorMessage || "no reason recorded";
+    if (r.elapsedMs == null && !r.usage.turns) return `${head}: ${state} — never started (${reason})`;
     return (
-      `${head}: cancelled — ${r.errorMessage || "no reason recorded"}\n\nPartial output:\n${r.output}` +
+      `${head}: ${state} — ${reason}\n\nPartial output:\n${r.output}` +
       formatFallbackNote(r) +
       formatUsageFooter(r)
     );

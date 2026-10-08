@@ -9,7 +9,25 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { buildChildArgs, composeInitialMessage } from "./spawn.ts";
+import { applyChildSettlement, buildChildArgs, composeInitialMessage } from "./spawn.ts";
+
+test("aborted settlement replaces a stale provider failure from the last assistant attempt", () => {
+  const result = { stopReason: "error", errorMessage: "429 during retry" };
+  applyChildSettlement(result, true, false);
+  assert.equal(result.stopReason, "aborted");
+  assert.doesNotMatch(result.errorMessage, /429/);
+});
+
+test("settlement preserves parent-requested stops and non-aborted failures", () => {
+  for (const stopReason of ["timeout", "budget_exceeded", "cancelled"]) {
+    const result = { stopReason, errorMessage: "original cause" };
+    applyChildSettlement(result, true, true);
+    assert.deepEqual(result, { stopReason, errorMessage: "original cause" });
+  }
+  const failure = { stopReason: "error", errorMessage: "429" };
+  applyChildSettlement(failure, false, false);
+  assert.deepEqual(failure, { stopReason: "error", errorMessage: "429" });
+});
 
 describe("composeInitialMessage", () => {
   test("wraps reference files in <file> blocks ahead of context and task", async () => {

@@ -1,7 +1,7 @@
 /** Session-scoped run index with live controls and a single terminal-result cache. */
 import type { RunHandle } from "./run.ts";
 import type { SubagentResult } from "./types.ts";
-import { isFailedResult } from "./utils.ts";
+import { deriveRunState } from "./utils.ts";
 import { loadHistoryIndex, readHistoryResult, reserveHistoryId, summarizeResult, type HistoryEntry } from "./history.ts";
 
 class StoredRun implements RunHandle {
@@ -27,13 +27,13 @@ class StoredRun implements RunHandle {
 
   get role() { return this.snapshot.role; }
   get task() { return this.snapshot.task; }
-  get state() { return this.live?.state ?? (isFailedResult(this.snapshot) ? "failed" : "finished"); }
+  get state() { return this.live?.state ?? deriveRunState(this.snapshot); }
   get snapshot(): SubagentResult { return this.live?.snapshot ?? this.terminal!; }
   get result() { return this.live ? this.live.result : this.terminal; }
   get thrown() { return this.live?.thrown; }
   // Waiters need terminal status, not the archived body.
   get promise() { return this.live?.promise ?? Promise.resolve(this.terminal!); }
-  abort(reason?: string) { this.live?.abort(reason); }
+  abort(reason?: string, stopReason?: "aborted" | "cancelled") { this.live?.abort(reason, stopReason); }
   steer(message: string) { this.live?.steer(message); }
   subscribe(fn: () => void) { return this.live?.subscribe(fn) ?? (() => {}); }
 }
@@ -115,7 +115,7 @@ export class RunStore {
       thrown: run.thrown,
       // No eagerly resolved promise retaining the loaded body.
       get promise() { return run.promise; },
-      abort: (reason) => run.abort(reason),
+      abort: (reason, stopReason) => run.abort(reason, stopReason),
       steer: (message) => run.steer(message),
       subscribe: (fn) => run.subscribe(fn),
     };

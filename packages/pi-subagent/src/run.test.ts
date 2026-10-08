@@ -138,7 +138,7 @@ test("a throwing spawn resolves the promise with a failed result carrying the er
   assert.ok(run.thrown instanceof Error);
   assert.strictEqual(run.thrown.message, "Subagent was aborted");
   // Non-abort crashes (spawn failure) keep the plain thrown message — the
-  // cancelled stop reason is reserved for real aborts.
+  // Interruption stop reasons are reserved for actual stop requests.
   assert.strictEqual(result.stopReason, undefined);
   assert.strictEqual(result.errorMessage, "Subagent was aborted");
   // The partial frame survives — the foreground path renders aborts like any
@@ -294,7 +294,7 @@ test("prerun failure (roles api unavailable) becomes a failed run, not a throw",
   assert.match(result.errorMessage!, /pi-model-roles is not initialized/);
 });
 
-test("abort while queued fails the run and exposes thrown for the foreground path", async () => {
+test("abort while queued settles as aborted and exposes thrown for the foreground path", async () => {
   const gate = new AsyncSemaphore(1);
   await gate.acquire();
   const controller = new AbortController();
@@ -303,9 +303,9 @@ test("abort while queued fails the run and exposes thrown for the foreground pat
   const run = startSubagentRun(makeDeps({ gate, signal: controller.signal }));
   const result = await run.promise;
 
-  assert.strictEqual(run.state, "failed");
+  assert.strictEqual(run.state, "aborted");
   assert.ok(run.thrown instanceof Error);
-  assert.strictEqual(result.stopReason, "cancelled");
+  assert.strictEqual(result.stopReason, "aborted");
   assert.match(result.errorMessage!, /still queued for a concurrency slot/);
   gate.release();
 });
@@ -319,14 +319,62 @@ test("handle.abort() reaps a queued background run (no caller signal)", async ()
   run.abort("session shutdown");
   const result = await run.promise;
 
-  assert.strictEqual(run.state, "failed");
+  assert.strictEqual(run.state, "aborted");
   assert.ok(run.thrown instanceof Error);
-  assert.strictEqual(result.stopReason, "cancelled");
+  assert.strictEqual(result.stopReason, "aborted");
   assert.strictEqual(result.errorMessage, "still queued for a concurrency slot (session shutdown)");
   gate.release();
 });
 
-test("handle.abort(reason) fails a running run with the reason in the error message", async () => {
+test("explicit cancellation keeps its source when shutdown and caller abort follow", async () => {
+  const gate = new AsyncSemaphore(1);
+  await gate.acquire();
+  const caller = new AbortController();
+  const run = startSubagentRun(makeDeps({ gate, signal: caller.signal }));
+  run.abort("no longer needed", "cancelled");
+  run.abort("session shutdown");
+  caller.abort();
+  const result = await run.promise;
+  assert.equal(run.state, "cancelled");
+  assert.equal(result.stopReason, "cancelled");
+  assert.match(result.errorMessage!, /no longer needed/);
+  assert.doesNotMatch(result.errorMessage!, /session shutdown/);
+  gate.release();
+});
+
+test("caller abort cannot be relabelled as cancellation before settlement", async () => {
+  const gate = new AsyncSemaphore(1);
+  await gate.acquire();
+  const caller = new AbortController();
+  const run = startSubagentRun(makeDeps({ gate, signal: caller.signal }));
+  caller.abort();
+  run.abort("no longer needed", "cancelled");
+  await run.promise;
+  assert.equal(run.state, "aborted");
+  gate.release();
+});
+
+test("intentional child stops never retry a provider error left in stderr", async () => {
+  for (const stopReason of ["aborted", "cancelled", "timeout", "budget_exceeded"]) {
+    let attempts = 0;
+    const run = startSubagentRun(makeDeps({
+      roleDef: { ...roleDef, fallbackRole: "backup" },
+      spawnImpl: async () => {
+        attempts++;
+        return makeResult({
+          stopReason, exitCode: stopReason === "budget_exceeded" ? 0 : 1,
+          output: "partial answer", stderr: "429 during a previous attempt",
+        });
+      },
+    }));
+    const result = await run.promise;
+    assert.equal(attempts, 1, stopReason);
+    assert.equal(result.output, "partial answer");
+    assert.equal(result.fallbackFrom, undefined);
+  }
+});
+
+test("handle.abort(reason) interrupts a running run with the reason in the error message", async () => {
   const signals: AbortSignal[] = [];
   let entered!: () => void;
   const running = new Promise<void>((resolve) => { entered = resolve; });
@@ -346,10 +394,10 @@ test("handle.abort(reason) fails a running run with the reason in the error mess
   run.abort("session shutdown");
   const result = await run.promise;
 
-  assert.strictEqual(run.state, "failed");
-  assert.strictEqual(result.stopReason, "cancelled");
+  assert.strictEqual(run.state, "aborted");
+  assert.strictEqual(result.stopReason, "aborted");
   // The abort reason becomes the errorMessage verbatim — renderers add the
-  // "cancelled" framing, so the message itself must not repeat it.
+  // "aborted" framing, so the message itself must not repeat it.
   assert.strictEqual(result.errorMessage, "session shutdown");
   assert.ok(run.thrown instanceof Error);
   // The internal controller the spawn honored is the same channel abort() used.
@@ -367,14 +415,14 @@ test("a pre-aborted caller signal chains into the run before spawn", async () =>
   const run = startSubagentRun(makeDeps({ signal: controller.signal, spawnImpl }));
   const result = await run.promise;
 
-  assert.strictEqual(run.state, "failed");
+  assert.strictEqual(run.state, "aborted");
   // Caller-signal abort (foreground Esc): no explicit reason was given, so
-  // the cancelled frame falls back to the bare "cancelled" message.
-  assert.strictEqual(result.stopReason, "cancelled");
-  assert.strictEqual(result.errorMessage, "cancelled");
+  // the aborted frame falls back to the bare "aborted" message.
+  assert.strictEqual(result.stopReason, "aborted");
+  assert.strictEqual(result.errorMessage, "aborted");
   // abort() after settle is a no-op — the terminal state never flips.
   run.abort("session shutdown");
-  assert.strictEqual(run.state, "failed");
+  assert.strictEqual(run.state, "aborted");
 });
 
 test("subscribers are notified on progress and terminal frames", async () => {
@@ -413,7 +461,7 @@ test("history retains the session identity captured before asynchronous work", a
   assert.deepEqual(recorded, ["original-session"]);
 });
 
-test("shutdown cancellation reaches pending summary and compression requests", async () => {
+test("shutdown abort reaches pending summary and compression requests", async () => {
   for (const outputSize of [200, 60_000]) {
     let entered!: () => void;
     const processing = new Promise<void>((resolve) => { entered = resolve; });
@@ -438,7 +486,7 @@ test("shutdown cancellation reaches pending summary and compression requests", a
     run.abort("session shutdown");
     const result = await run.promise;
     assert.equal(requestSignal?.aborted, true);
-    assert.equal(result.stopReason, "cancelled");
+    assert.equal(result.stopReason, "aborted");
     assert.equal(result.errorMessage, "session shutdown");
     assert.ok(result.output.length > 0, "the completed child output survives cancellation of post-processing");
     if (outputSize > 50_000) assert.equal(result.outputMethod, "truncated");
@@ -468,7 +516,7 @@ test("abort settles stalled initial and fallback role resolution without spawnin
     await resolving;
     run.abort("session shutdown");
     const result = await run.promise;
-    assert.equal(result.stopReason, "cancelled");
+    assert.equal(result.stopReason, "aborted");
     assert.equal(spawnCount, fallback ? 1 : 0);
     assert.equal(result.output, fallback ? "first attempt output" : "");
   }
@@ -489,5 +537,5 @@ test("abort settles post-processing even if the request ignores its signal", asy
   }));
   await processing;
   run.abort("session shutdown");
-  assert.equal((await run.promise).stopReason, "cancelled");
+  assert.equal((await run.promise).stopReason, "aborted");
 });

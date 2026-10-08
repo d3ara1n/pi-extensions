@@ -19,6 +19,20 @@ import type { SubagentControl, SubagentMessage, SubagentResult } from "./types.t
 
 const PI_CODING_AGENT_PACKAGE = "@earendil-works/pi-coding-agent";
 
+/**
+ * @internal — reconcile final run settlement with possibly stale assistant errors.
+ * Parent-requested stops retain their independently recorded cause.
+ */
+export function applyChildSettlement(
+  result: Pick<SubagentResult, "stopReason" | "errorMessage">,
+  aborted: boolean,
+  terminationRequested: boolean,
+): void {
+  if (!aborted || terminationRequested) return;
+  result.stopReason = "aborted";
+  result.errorMessage = "Subagent run was aborted";
+}
+
 // ── Parent-exit safety net ─────────────────────────────────────
 // process.on("exit") fires synchronously on every terminal path that goes
 // through process.exit — normal quit, signal-triggered graceful shutdown,
@@ -458,6 +472,8 @@ export async function spawnSubagent(
       // one prompt per child, so ending stdin there triggers graceful shutdown
       // (onInputEnd → runtime dispose → exit).
       if (event.type === "agent_settled") {
+        applyChildSettlement(result, event.aborted === true, terminationRequested);
+        emitProgress();
         try {
           proc?.stdin?.end();
         } catch {
@@ -496,8 +512,10 @@ export async function spawnSubagent(
           // message_end is authoritative for the latest assistant attempt. A
           // successful native retry must clear the transient error left by the
           // failed attempt instead of triggering a redundant whole-run fallback.
-          result.stopReason = msg.stopReason;
-          result.errorMessage = msg.errorMessage;
+          if (!terminationRequested) {
+            result.stopReason = msg.stopReason;
+            result.errorMessage = msg.errorMessage;
+          }
 
           // Track last assistant text
           for (const part of msg.content) {

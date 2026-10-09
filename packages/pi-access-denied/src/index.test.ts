@@ -138,6 +138,7 @@ test("prompt mode outside TUI falls back to select() dialogs — allow passes th
 
   let customCalled = false;
   const selections: string[][] = [];
+  const titles: string[] = [];
   const ctx = {
     cwd: project,
     mode: "rpc",
@@ -152,8 +153,8 @@ test("prompt mode outside TUI falls back to select() dialogs — allow passes th
       // ACP hosts answer extension_ui_request via this path.
       select: async (title: string, options: string[]) => {
         selections.push(options);
-        assert.ok(title.includes("/etc/passwd"));
-        return "Allow";
+        titles.push(title);
+        return titles.length === 1 ? "Allow" : "Always allow";
       },
     },
   };
@@ -172,6 +173,28 @@ test("prompt mode outside TUI falls back to select() dialogs — allow passes th
   assert.equal(customCalled, false);
   assert.equal(result, undefined); // allowed through after user picked Allow
   assert.deepEqual(selections, [["Allow", "Always allow", "Deny", "Always deny"]]);
+  assert.ok(titles[0].includes("/etc/passwd"));
+  assert.ok(!titles[0].includes("[estimate]"));
+
+  const estimated = await toolCall(
+    {
+      type: "tool_call",
+      toolCallId: "rpc-estimate",
+      toolName: "bash",
+      input: { command: 'if check; then f=/etc/shadow; else f=src/file; fi; cat "$f"' },
+    },
+    ctx,
+  );
+  assert.equal(estimated, undefined);
+  assert.ok(titles[1].includes("/etc/shadow [estimate]\n"));
+
+  // The label is display metadata; session rules still use the original path.
+  const remembered = await toolCall(
+    { type: "tool_call", toolCallId: "rpc-estimate-remembered", toolName: "write", input: { path: "/etc/shadow" } },
+    ctx,
+  );
+  assert.equal(remembered, undefined);
+  assert.equal(titles.length, 2);
 });
 
 test("prompt mode outside TUI: dismissing the dialog soft-denies", async () => {

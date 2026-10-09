@@ -313,8 +313,8 @@ export class AuthPanel implements Component, Focusable {
 
   /**
    * One path row: leading cursor indicator + path (truncated) + right-aligned
-   * status tag. The tag is empty for the default (`allow`); a deny-class tag
-   * is red, an always-allow tag is green.
+   * action tags followed by a warning-colored estimate tag at the far right.
+   * The action tag is empty for `allow`; deny tags are red, always-allow is green.
    */
   private renderPathRow(i: number, innerW: number, th: Theme): string {
     const p = this.paths[i]!;
@@ -326,17 +326,20 @@ export class AuthPanel implements Component, Focusable {
     // 1 leading space + 2-col cursor indicator
     const prefix = isCursor ? `${th.fg("accent", "▸")} ` : "  ";
     const tag = CHOICE_TAGS[choice];
-    const reserved = tag ? tag.length + 1 : 0; // +1 gap before tag
-    const pathMaxW = Math.max(8, innerW - 3 - reserved); // 3 = 1 leading + 2 indicator
-
-    const pathColor = isCursor ? th.fg("accent", th.bold(p)) : th.fg("dim", p);
-    const pathStr = padRight(truncateToWidth(pathColor, pathMaxW, ""), pathMaxW);
-
+    const estimate = this.violations[i]?.estimate ? "[estimate]" : "";
     let tagPart = "";
     if (tag) {
       const isDeny = choice === "deny" || choice === "always-deny";
-      tagPart = " " + (isDeny ? th.fg("error", tag) : th.fg("success", tag));
+      // Keep the estimate intact on narrow terminals; shorten the action first.
+      const tagMaxW = Math.max(0, innerW - 5 - (estimate ? estimate.length + 1 : 0));
+      const action = truncateToWidth(tag, tagMaxW, "…");
+      if (action) tagPart = " " + th.fg(isDeny ? "error" : "success", action);
     }
+    if (estimate) tagPart += " " + th.fg("warning", estimate);
+
+    const pathMaxW = Math.max(0, innerW - 3 - visibleWidth(tagPart));
+    const pathColor = isCursor ? th.fg("accent", th.bold(p)) : th.fg("dim", p);
+    const pathStr = padRight(truncateToWidth(pathColor, pathMaxW, ""), pathMaxW);
     return row(` ${prefix}${pathStr}${tagPart}`);
   }
 

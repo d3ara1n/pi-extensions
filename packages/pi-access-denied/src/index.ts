@@ -146,9 +146,10 @@ async function dialogDecision(
   const choices = new Map<string, Choice>();
   for (const v of violations) {
     const action = toolName === "bash" ? "may access" : "wants";
+    const displayPath = `${v.path}${v.estimate ? " [estimate]" : ""}`;
     const title = v.source
-      ? `access-denied · ${header} ${action} ${v.path}\nsource: ${v.source}${v.condition ? `\n    ${v.condition}` : ""}`
-      : `access-denied · ${header} ${action} ${v.path}`;
+      ? `access-denied · ${header} ${action} ${displayPath}\nsource: ${v.source}${v.condition ? `\n    ${v.condition}` : ""}`
+      : `access-denied · ${header} ${action} ${displayPath}`;
     const picked = await ctx.ui.select(title, options);
     if (picked === undefined) return { cancelled: true, choices };
     choices.set(v.path, byLabel.get(picked) ?? "allow");

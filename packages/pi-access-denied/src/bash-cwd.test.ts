@@ -42,11 +42,13 @@ describe("bash directory tracking", () => {
       {
         path: local("src/modules/*/renderer.tsx"),
         source: "ls ../../../modules/*/renderer.tsx",
+        estimate: true,
         condition: "if `cd src/renderer/features/workbench` succeeds",
       },
       {
         path: local("../../../modules/*/renderer.tsx"),
         source: "ls ../../../modules/*/renderer.tsx",
+        estimate: true,
         condition: "if `cd src/renderer/features/workbench` fails",
       },
     ]);
@@ -325,5 +327,81 @@ describe("bash directory tracking", () => {
   test("directory state does not persist across tool calls", () => {
     extractBashTargetsDetailed("cd aaa", CWD);
     assert.deepEqual(targets("rm ../bbb", "rm ../bbb"), [local("../bbb")]);
+  });
+});
+
+describe("bash path estimates", () => {
+  test("unguarded cd marks both locations of the same operand", () => {
+    const found = extractBashTargetsDetailed("cd aaa; cat ../bbb", CWD)
+      .filter((target) => target.source === "cat ../bbb");
+    assert.deepEqual(found.map((target) => target.path).sort(), [local("bbb"), local("../bbb")].sort());
+    assert.ok(found.every((target) => target.estimate === true));
+  });
+
+  test("execution conditions alone do not make a definite path an estimate", () => {
+    for (const command of [
+      "cd aaa && cat ../bbb",
+      "cd aaa || cat ../bbb",
+      "cd aaa || exit 1; cat ../bbb",
+      "cd .; cat ../bbb",
+      "cd aaa; cat /outside/file",
+    ]) {
+      const found = extractBashTargetsDetailed(command, CWD).filter((target) => target.source?.startsWith("cat "));
+      assert.equal(found.length, 1, command);
+      assert.equal(found[0].estimate, undefined, command);
+    }
+  });
+
+  test("different arguments in one command are independent definite locations", () => {
+    const found = extractBashTargetsDetailed("cat /outside/one /outside/two", CWD);
+    assert.equal(found.length, 2);
+    assert.ok(found.every((target) => target.estimate === undefined));
+  });
+
+  test("variable alternatives include ordinary relative and unresolved values", () => {
+    for (const alternate of ["src/file", "$unknown", "/outside/two"]) {
+      const command = `if check; then f=/outside/one; else f=${alternate}; fi; cat "$f"`;
+      const found = extractBashTargetsDetailed(command, CWD).filter((target) => target.source === 'cat "$f"');
+      assert.ok(found.some((target) => target.path === path.normalize("/outside/one")));
+      assert.ok(found.every((target) => target.estimate === true), command);
+    }
+  });
+
+  test("an unknown directory alternative marks the retained relative candidate", () => {
+    const found = extractBashTargetsDetailed('cd "$unknown"; cat ../bbb', CWD)
+      .filter((target) => target.source === "cat ../bbb");
+    assert.equal(found.length, 1);
+    assert.equal(found[0].path, local("../bbb"));
+    assert.equal(found[0].estimate, true);
+  });
+
+  test("cd destinations retain uncertainty across variable alternatives", () => {
+    const found = extractBashTargetsDetailed('if check; then d=/outside/one; else d=$unknown; fi; cd "$d"', CWD);
+    assert.equal(found.length, 1);
+    assert.equal(found[0].path, path.normalize("/outside/one"));
+    assert.equal(found[0].estimate, true);
+  });
+
+  test("unexpanded patterns are estimates while escaped and quoted stars are literal", () => {
+    for (const command of ["cat /outside/*.txt", "cat $HOME/*.txt", "cat ~otheruser/file"]) {
+      const found = extractBashTargetsDetailed(command, CWD);
+      assert.equal(found.length, 1, command);
+      assert.equal(found[0].estimate, true, command);
+    }
+    for (const command of ['cat /outside/\\*.txt', 'f="/outside/*.txt"; cat "$f"']) {
+      const found = extractBashTargetsDetailed(command, CWD);
+      assert.equal(found.length, 1, command);
+      assert.equal(found[0].estimate, undefined, command);
+    }
+  });
+
+  test("a definite occurrence overrides an estimate and supplies the displayed source", () => {
+    const absolutePath = local("../bbb");
+    for (const command of [`cd aaa; cat ../bbb; cat ${absolutePath}`, `cat ${absolutePath}; cd aaa; cat ../bbb`]) {
+      const found = extractBashTargetsDetailed(command, CWD).find((target) => target.path === absolutePath);
+      assert.ok(found);
+      assert.equal(found.estimate, undefined);
+      assert.equal(found.source, `cat ${absolutePath}`);
+    }
   });
 });

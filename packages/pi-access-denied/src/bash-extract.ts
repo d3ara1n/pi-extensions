@@ -53,15 +53,47 @@ export interface ExtractedTarget {
   source?: string;
   /** Known cd outcomes shared by this path's detected branches; not an exhaustive execution predicate. */
   condition?: string;
+  /** True when the operand has multiple possible locations or remains partly unresolved. */
+  estimate?: boolean;
 }
 
-type TargetMap = Map<string, { source: string; conditions: DirectoryCondition[] }>;
+type TargetOrigin = Word | Command;
+type RecordedTarget = {
+  source: string;
+  conditions: DirectoryCondition[];
+  origins: Map<TargetOrigin, string>;
+};
 
-function recordTarget(targets: TargetMap, target: string, source: string, state: DirectoryState): void {
+class TargetMap extends Map<string, RecordedTarget> {
+  // Operand identity keeps separate arguments and identical command text independent.
+  readonly resolutions = new Map<TargetOrigin, { paths: Set<string | null>; estimate: boolean }>();
+
+  observe(origin: TargetOrigin, target: string | null, estimate = false): void {
+    const resolution = this.resolutions.get(origin) ?? { paths: new Set<string | null>(), estimate: false };
+    resolution.paths.add(target);
+    resolution.estimate ||= estimate;
+    this.resolutions.set(origin, resolution);
+  }
+
+  exactSource(target: RecordedTarget): string | undefined {
+    for (const [origin, source] of target.origins) {
+      const resolution = this.resolutions.get(origin)!;
+      if (!resolution.estimate && resolution.paths.size === 1 && !resolution.paths.has(null)) return source;
+    }
+    return undefined;
+  }
+}
+
+function recordTarget(
+  targets: TargetMap, target: string, source: string, state: DirectoryState, origin: TargetOrigin,
+): void {
   const existing = targets.get(target);
+  const origins = existing?.origins ?? new Map<TargetOrigin, string>();
+  origins.set(origin, source);
   targets.set(target, {
     source: existing?.source ?? source,
     conditions: existing ? commonConditions(existing.conditions, state.conditions) : state.conditions,
+    origins,
   });
 }
 
@@ -98,23 +130,32 @@ function normalizeHome(token: string): string {
 
 /**
  * Record `token` (resolved absolute) into `targets` if it is an escaping
- * candidate. The first leaf command remains the representative display source;
- * conditions are intersected across every branch and command reaching the path.
+ * candidate. A definite occurrence supplies the display source when available;
+ * otherwise the first leaf command is used. Conditions are intersected across
+ * every branch and command reaching the path.
  */
 function consider(
   token: string,
   state: DirectoryState,
   source: string,
   targets: TargetMap,
+  origin: TargetOrigin,
   expanded = false,
+  estimate = false,
 ): void {
-  if (token.startsWith("-")) return; // option flag (--foo, -rf)
-  if (!isEscapingCandidate(token)) return;
+  if (!token || token.startsWith("-")) {
+    targets.observe(origin, null);
+    return; // Empty operand or option flag (--foo, -rf).
+  }
+  const escaping = isEscapingCandidate(token);
   if (
     !expanded &&
     (token === "~" || token.startsWith("~/") || token === "$HOME" || token.startsWith("$HOME/"))
   ) {
-    if (state.home === null) return;
+    if (state.home === null) {
+      targets.observe(origin, null);
+      return;
+    }
     token = state.home + token.slice(token.startsWith("~") ? 1 : 5);
     if (!token) return;
   }
@@ -123,15 +164,19 @@ function consider(
     state.cwd === null &&
     !path.isAbsolute(token) &&
     (expanded || (!token.startsWith("~") && !token.startsWith("$HOME")))
-  )
+  ) {
+    targets.observe(origin, null);
     return;
+  }
   // Expansion results are literal strings: a stored "~" or "$HOME" is not
   // expanded a second time by Bash, even when the reference is unquoted.
   const resolved =
     expanded && !path.isAbsolute(token)
       ? path.resolve(state.cwd!, token)
       : resolveTarget(token, state.cwd ?? (path.parse(token).root || "/"));
-  recordTarget(targets, resolved, source, state);
+  // Observe ordinary relative alternatives too, even though they are not gated.
+  targets.observe(origin, resolved, estimate);
+  if (escaping) recordTarget(targets, resolved, source, state, origin);
 }
 
 // ── Word inspection ─────────────────────────────────────────────────────────
@@ -242,19 +287,21 @@ function scanWord(
   // Windows-native path: backslashes are separators — use raw `text`, not the
   // dequoted `value` (which collapses `C:\Users` → `C:Users`).
   if (isWindowsNativePath(word.text)) {
-    consider(word.text, state, source, targets);
+    consider(word.text, state, source, targets, word, false, /[*?[]/.test(word.text));
     return;
   }
   if (hasVariableReference(parts)) {
     const value = staticWord(word, state, "candidate");
-    if (value !== null) consider(value, state, source, targets, true);
+    if (value !== null)
+      consider(value, state, source, targets, word, true, staticWord(word, state) === null);
+    else targets.observe(word, null);
     return;
   }
   // Quoted data literal, or unresolvable variable — not a static path. Nested
   // commands inside it were already collected above.
   if (parts.some(isUnanalyzable)) return;
 
-  consider(normalizeHome(word.value), state, source, targets);
+  consider(normalizeHome(word.value), state, source, targets, word, false, staticWord(word, state) === null);
 }
 
 // ── AST traversal ───────────────────────────────────────────────────────────
@@ -401,7 +448,8 @@ function walkCommand(
     assigned = directoryAssignments({ ...node, prefix: [a] }, assigned);
   }
   if (changed) {
-    if (changed.target !== null) recordTarget(targets, changed.target, source, state);
+    targets.observe(node, changed.target);
+    if (changed.target !== null) recordTarget(targets, changed.target, source, state, node);
     if (!changed.success.length) return { success: [], failure: states };
     const id = JSON.stringify([command, node.pos]);
     const withOutcome = (next: DirectoryState, outcome: DirectoryCondition["outcome"]): DirectoryState => ({
@@ -660,7 +708,7 @@ function walkStatement(
  * PathManager's job). Heuristic — see module doc for blind spots.
  */
 export function extractBashTargetsDetailed(command: string, cwd: string): ExtractedTarget[] {
-  const targets: TargetMap = new Map();
+  const targets = new TargetMap();
   let ast: Script;
   try {
     ast = parse(command);
@@ -668,15 +716,19 @@ export function extractBashTargetsDetailed(command: string, cwd: string): Extrac
     return []; // unbash is best-effort and should not throw, but guard anyway.
   }
   walkScript(ast, command, [initialDirectoryState(cwd)], targets);
-  return [...targets.entries()].map(([path, { source, conditions }]) => ({
-    path,
-    source: source || undefined,
-    ...(conditions.length ? {
-      condition: "if " + conditions.map((condition) =>
-        `\`${condition.source.replace(/[\s\x00-\x1f\x7f-\x9f]+/g, " ").trim()}\` ${condition.outcome}`,
-      ).join(" and "),
-    } : {}),
-  }));
+  return [...targets.entries()].map(([path, target]) => {
+    const exactSource = targets.exactSource(target);
+    return {
+      path,
+      source: (exactSource ?? target.source) || undefined,
+      ...(exactSource === undefined ? { estimate: true } : {}),
+      ...(target.conditions.length ? {
+        condition: "if " + target.conditions.map((condition) =>
+          `\`${condition.source.replace(/[\s\x00-\x1f\x7f-\x9f]+/g, " ").trim()}\` ${condition.outcome}`,
+        ).join(" and "),
+      } : {}),
+    };
+  });
 }
 
 /** Path-only view of {@link extractBashTargetsDetailed} (for callers that only classify). */

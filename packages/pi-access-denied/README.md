@@ -54,7 +54,9 @@ Explicit deny rules still apply in every mode, including `allow`.
 
 The terminal panel shows each path that needs a decision and the command that uses it.
 
-Bash paths are possible accesses detected before execution. When a path depends on a tracked `cd` outcome, an indented, dim line below `source` explains it, such as ``if `cd src` fails``. Conditions shared by all detected routes to that path are shown; the line is omitted when none are known.
+Bash paths are possible accesses detected before execution. A warning-colored `[estimate]` tag at the far right of a path row marks an operand with multiple possible locations, an unresolved alternative, or an unexpanded pattern. Action tags appear to its left. Paths without the tag have a definite location within the analysis, even if the command only runs under a condition. An explicit, definite occurrence of the same path takes precedence over estimates.
+
+When a path depends on a tracked `cd` outcome, an indented, dim line below `source` explains it, such as ``if `cd src` fails``. Conditions shared by all detected routes to that path are shown; the line is omitted when none are known. RPC dialogs append `[estimate]` to the path as well.
 
 Choose an action for each path:
 

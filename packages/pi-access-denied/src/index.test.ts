@@ -173,7 +173,7 @@ test("prompt mode outside TUI falls back to select() dialogs — allow passes th
   assert.equal(customCalled, false);
   assert.equal(result, undefined); // allowed through after user picked Allow
   assert.deepEqual(selections, [["Allow", "Always allow", "Deny", "Always deny"]]);
-  assert.ok(titles[0].includes("/etc/passwd"));
+  assert.ok(titles[0].includes(path.normalize("/etc/passwd")));
   assert.ok(!titles[0].includes("[estimate]"));
 
   const estimated = await toolCall(
@@ -186,7 +186,8 @@ test("prompt mode outside TUI falls back to select() dialogs — allow passes th
     ctx,
   );
   assert.equal(estimated, undefined);
-  assert.ok(titles[1].includes("/etc/shadow [estimate]\n"));
+  assert.ok(titles[1].includes(path.normalize("/etc/shadow")));
+  assert.ok(titles[1].includes("[estimate]"));
 
   // The label is display metadata; session rules still use the original path.
   const remembered = await toolCall(

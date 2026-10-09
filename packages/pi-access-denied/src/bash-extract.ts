@@ -33,15 +33,17 @@ import {
   assignVariable,
   cdArguments,
   changeDirectory,
+  commonConditions,
   continuing,
   directoryAssignments,
+  directoryStateKey,
   initialDirectoryState,
   joinStates,
   staticWord,
   unknownDirectoryState,
   unknownVariables,
 } from "./bash-cwd.ts";
-import type { DirectoryFlow, DirectoryState } from "./bash-cwd.ts";
+import type { DirectoryCondition, DirectoryFlow, DirectoryState } from "./bash-cwd.ts";
 
 /** A path the command appears to reach, plus the leaf command that produced it. */
 export interface ExtractedTarget {
@@ -49,6 +51,18 @@ export interface ExtractedTarget {
   path: string;
   /** Text of the leaf command (e.g. `find / -name *.log`) that produced `path`. Absent when meaningless. */
   source?: string;
+  /** Known cd outcomes shared by this path's detected branches; not an exhaustive execution predicate. */
+  condition?: string;
+}
+
+type TargetMap = Map<string, { source: string; conditions: DirectoryCondition[] }>;
+
+function recordTarget(targets: TargetMap, target: string, source: string, state: DirectoryState): void {
+  const existing = targets.get(target);
+  targets.set(target, {
+    source: existing?.source ?? source,
+    conditions: existing ? commonConditions(existing.conditions, state.conditions) : state.conditions,
+  });
 }
 
 // ── Windows-native path detection ───────────────────────────────────────────
@@ -84,15 +98,14 @@ function normalizeHome(token: string): string {
 
 /**
  * Record `token` (resolved absolute) into `targets` if it is an escaping
- * candidate. `path → source` is first-write-wins: the first leaf command that
- * surfaces a path owns its display source (later commands hitting the same path
- * add nothing — the user already sees a representative command for it).
+ * candidate. The first leaf command remains the representative display source;
+ * conditions are intersected across every branch and command reaching the path.
  */
 function consider(
   token: string,
   state: DirectoryState,
   source: string,
-  targets: Map<string, string>,
+  targets: TargetMap,
   expanded = false,
 ): void {
   if (token.startsWith("-")) return; // option flag (--foo, -rf)
@@ -118,7 +131,7 @@ function consider(
     expanded && !path.isAbsolute(token)
       ? path.resolve(state.cwd!, token)
       : resolveTarget(token, state.cwd ?? (path.parse(token).root || "/"));
-  if (!targets.has(resolved)) targets.set(resolved, source);
+  recordTarget(targets, resolved, source, state);
 }
 
 // ── Word inspection ─────────────────────────────────────────────────────────
@@ -180,7 +193,7 @@ function collectNested(
   parts: WordPart[] | undefined,
   command: string,
   state: DirectoryState,
-  targets: Map<string, string>,
+  targets: TargetMap,
 ): void {
   if (!parts) return;
   for (const p of parts) {
@@ -217,7 +230,7 @@ function scanWord(
   state: DirectoryState,
   source: string,
   command: string,
-  targets: Map<string, string>,
+  targets: TargetMap,
 ): void {
   if (!word) return;
   // `parts` is a lazy getter (NOT an own enumerable property) — access it
@@ -250,7 +263,7 @@ function walkScript(
   script: Script | CompoundList,
   command: string,
   states: DirectoryState[],
-  targets: Map<string, string>,
+  targets: TargetMap,
 ): DirectoryFlow {
   let flow: DirectoryFlow = { success: states, failure: [] };
   for (const stmt of script.commands) {
@@ -289,7 +302,7 @@ function walkRedirect(
   state: DirectoryState,
   source: string,
   command: string,
-  targets: Map<string, string>,
+  targets: TargetMap,
 ): void {
   if (r.target) scanWord(r.target, state, source, command, targets); // redirect target IS a file path
   // Heredoc body: quoted (`<<'EOF'`) is literal text the shell never executes
@@ -303,7 +316,7 @@ function walkTestExpr(
   state: DirectoryState,
   source: string,
   command: string,
-  targets: Map<string, string>,
+  targets: TargetMap,
 ): void {
   switch (e.type) {
     case "TestUnary":
@@ -345,7 +358,7 @@ function walkNode(
   node: Node,
   command: string,
   states: DirectoryState[],
-  targets: Map<string, string>,
+  targets: TargetMap,
 ): DirectoryFlow {
   return mergeFlows(...states.map((state) => walkNodeAt(node, command, state, targets)));
 }
@@ -354,7 +367,7 @@ function walkCommand(
   node: Command,
   command: string,
   state: DirectoryState,
-  targets: Map<string, string>,
+  targets: TargetMap,
 ): DirectoryFlow {
   const words = [
     node.name, ...node.suffix,
@@ -388,9 +401,17 @@ function walkCommand(
     assigned = directoryAssignments({ ...node, prefix: [a] }, assigned);
   }
   if (changed) {
-    if (changed.target !== null && !targets.has(changed.target))
-      targets.set(changed.target, source);
-    return { success: changed.success, failure: states };
+    if (changed.target !== null) recordTarget(targets, changed.target, source, state);
+    if (!changed.success.length) return { success: [], failure: states };
+    const id = JSON.stringify([command, node.pos]);
+    const withOutcome = (next: DirectoryState, outcome: DirectoryCondition["outcome"]): DirectoryState => ({
+      ...next,
+      conditions: [...next.conditions.filter((condition) => condition.id !== id), { id, source, outcome }],
+    });
+    return {
+      success: changed.success.map((next) => withOutcome(next, "succeeds")),
+      failure: [withOutcome(state, "fails")],
+    };
   }
   if (!node.name) {
     const staticAssignments = node.prefix.every((assignment) =>
@@ -474,7 +495,7 @@ function walkNodeAt(
   node: Node,
   command: string,
   state: DirectoryState,
-  targets: Map<string, string>,
+  targets: TargetMap,
 ): DirectoryFlow {
   const states = [state];
   switch (node.type) {
@@ -583,7 +604,7 @@ function walkLoop(
   loop: Extract<Node, { type: "While" }> | undefined,
   command: string,
   states: DirectoryState[],
-  targets: Map<string, string>,
+  targets: TargetMap,
 ): DirectoryFlow {
   const iteration = (input: DirectoryState[]): DirectoryState[] => {
     if (!loop) return continuing(walkScript(body, command, input, targets));
@@ -593,8 +614,8 @@ function walkLoop(
     return joinStates(leave, continuing(walkScript(body, command, enter, targets)));
   };
   const first = iteration(states);
-  const before = new Set(states.map((state) => JSON.stringify(state)));
-  if (first.some((state) => !before.has(JSON.stringify(state)))) {
+  const before = new Set(states.map(directoryStateKey));
+  if (first.some((state) => !before.has(directoryStateKey(state)))) {
     // Repeated relative cd can produce unbounded directories. Widen to unknown
     // instead of reusing the first iteration's state for later executions.
     const unknown = unknownDirectoryState([
@@ -610,7 +631,7 @@ function walkStatement(
   stmt: Statement,
   command: string,
   states: DirectoryState[],
-  targets: Map<string, string>,
+  targets: TargetMap,
 ): DirectoryFlow {
   const parent = states;
   states = states.map((state) =>
@@ -639,7 +660,7 @@ function walkStatement(
  * PathManager's job). Heuristic — see module doc for blind spots.
  */
 export function extractBashTargetsDetailed(command: string, cwd: string): ExtractedTarget[] {
-  const targets = new Map<string, string>(); // path → source (first-write-wins)
+  const targets: TargetMap = new Map();
   let ast: Script;
   try {
     ast = parse(command);
@@ -647,7 +668,15 @@ export function extractBashTargetsDetailed(command: string, cwd: string): Extrac
     return []; // unbash is best-effort and should not throw, but guard anyway.
   }
   walkScript(ast, command, [initialDirectoryState(cwd)], targets);
-  return [...targets.entries()].map(([path, source]) => ({ path, source: source || undefined }));
+  return [...targets.entries()].map(([path, { source, conditions }]) => ({
+    path,
+    source: source || undefined,
+    ...(conditions.length ? {
+      condition: "if " + conditions.map((condition) =>
+        `\`${condition.source.replace(/[\s\x00-\x1f\x7f-\x9f]+/g, " ").trim()}\` ${condition.outcome}`,
+      ).join(" and "),
+    } : {}),
+  }));
 }
 
 /** Path-only view of {@link extractBashTargetsDetailed} (for callers that only classify). */

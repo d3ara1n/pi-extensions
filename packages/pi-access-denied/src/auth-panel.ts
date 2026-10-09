@@ -266,8 +266,9 @@ export class AuthPanel implements Component, Focusable {
     lines.push(th.fg("border", `╭${"─".repeat(innerW)}╮`));
 
     // Header
+    const action = this.header === "bash command" ? "may access paths" : "wants to reach";
     lines.push(
-      row(` ${th.fg("text", `${this.header} wants to reach outside the project allowlist:`)}`),
+      row(` ${th.fg("text", `${this.header} ${action} outside the project allowlist:`)}`),
     );
     lines.push(row(""));
 
@@ -291,6 +292,10 @@ export class AuthPanel implements Component, Focusable {
       const src = truncateToWidth(focused.source, Math.max(10, innerW - 10), "…");
       lines.push(row("")); // blank line: separate from the (dim) path list
       lines.push(row(` ${th.fg("accent", "source:")} ${th.fg("text", src)}`));
+      if (focused.condition) {
+        const condition = truncateToWidth(focused.condition, Math.max(1, innerW - 4), "…");
+        lines.push(row(`    ${th.fg("dim", condition)}`));
+      }
     }
 
     lines.push(th.fg("border", `├${"─".repeat(innerW)}┤`));

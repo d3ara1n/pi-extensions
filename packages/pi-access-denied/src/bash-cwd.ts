@@ -6,6 +6,13 @@ import { resolveTarget } from "./paths.ts";
 const MAX_DIRECTORY_STATES = 32;
 const MAX_STATIC_WORD_LENGTH = 65_536;
 
+/** @internal A cd outcome required by a tracked execution branch. */
+export interface DirectoryCondition {
+  id: string;
+  source: string;
+  outcome: "succeeds" | "fails";
+}
+
 /** @internal Shell-local directories and scalar values; null means not statically known. */
 export interface DirectoryState {
   cwd: string | null;
@@ -20,13 +27,15 @@ export interface DirectoryState {
   variables: Record<string, string | null>;
   /** False after IFS or unknown shell effects can change word splitting. */
   defaultIFS: boolean;
+  /** Explanatory metadata; never part of shell-state identity. */
+  conditions: DirectoryCondition[];
 }
 
 /** @internal Initial shell assumptions, scoped to a single tool call. */
 export function initialDirectoryState(cwd: string): DirectoryState {
   return {
     cwd, previous: null, home: os.homedir(), pwd: cwd, cdpath: false,
-    functions: [], variables: {}, defaultIFS: true,
+    functions: [], variables: {}, defaultIFS: true, conditions: [],
   };
 }
 
@@ -34,13 +43,13 @@ export function initialDirectoryState(cwd: string): DirectoryState {
 export function unknownDirectoryState(functions: string[] = []): DirectoryState {
   return {
     cwd: null, previous: null, home: null, pwd: null, cdpath: true,
-    functions, variables: {}, defaultIFS: false,
+    functions, variables: {}, defaultIFS: false, conditions: [],
   };
 }
 
 /** @internal Forget variable mutations without inventing a directory change. */
 export function unknownVariables(state: DirectoryState): DirectoryState {
-  return { ...unknownDirectoryState(state.functions), cwd: state.cwd };
+  return { ...unknownDirectoryState(state.functions), cwd: state.cwd, conditions: state.conditions };
 }
 
 function variableValue(name: string, state: DirectoryState): string | null {
@@ -74,13 +83,32 @@ export interface DirectoryFlow {
   exitFailure?: boolean;
 }
 
+/** @internal Compare shell values independently of authorization explanations. */
+export function directoryStateKey({ conditions: _conditions, ...state }: DirectoryState): string {
+  return JSON.stringify(state);
+}
+
+/** @internal Only shared conditions remain valid when execution branches merge. */
+export function commonConditions(
+  left: DirectoryCondition[],
+  right: DirectoryCondition[],
+): DirectoryCondition[] {
+  return left.filter((condition) =>
+    right.some((other) => other.id === condition.id && other.outcome === condition.outcome),
+  );
+}
+
 /** @internal Bound branch growth without assigning an invented cwd to overflow. */
 export function joinStates(...groups: DirectoryState[][]): DirectoryState[] {
   const states = new Map<string, DirectoryState>();
   for (const group of groups) {
     for (const state of group) {
-      const key = JSON.stringify(state);
-      if (states.has(key)) continue;
+      const key = directoryStateKey(state);
+      const existing = states.get(key);
+      if (existing) {
+        states.set(key, { ...existing, conditions: commonConditions(existing.conditions, state.conditions) });
+        continue;
+      }
       if (states.size === MAX_DIRECTORY_STATES) {
         const functions = [...new Set(groups.flat().flatMap((item) => item.functions))];
         return [...states.values(), unknownDirectoryState(functions)];

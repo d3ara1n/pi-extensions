@@ -52,7 +52,11 @@ Explicit deny rules still apply in every mode, including `allow`.
 
 ### Review a request
 
-The terminal panel shows each path that needs a decision and the command that uses it. Choose an action for each path:
+The terminal panel shows each path that needs a decision and the command that uses it.
+
+Bash paths are possible accesses detected before execution. When a path depends on a tracked `cd` outcome, an indented, dim line below `source` explains it, such as ``if `cd src` fails``. Conditions shared by all detected routes to that path are shown; the line is omitted when none are known.
+
+Choose an action for each path:
 
 | Action | Effect |
 |--------|--------|

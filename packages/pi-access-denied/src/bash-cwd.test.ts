@@ -34,6 +34,63 @@ describe("bash directory tracking", () => {
     }
   });
 
+  test("a loop followed by a semicolon explains both cd outcomes", () => {
+    const command = 'cd src/renderer/features/workbench && for f in *.tsx *.ts; do cat -n "$f"; done; ls ../../../modules/*/renderer.tsx';
+    const found = extractBashTargetsDetailed(command, CWD);
+    const listing = found.filter((target) => target.source === "ls ../../../modules/*/renderer.tsx");
+    assert.deepEqual(listing, [
+      {
+        path: local("src/modules/*/renderer.tsx"),
+        source: "ls ../../../modules/*/renderer.tsx",
+        condition: "if `cd src/renderer/features/workbench` succeeds",
+      },
+      {
+        path: local("../../../modules/*/renderer.tsx"),
+        source: "ls ../../../modules/*/renderer.tsx",
+        condition: "if `cd src/renderer/features/workbench` fails",
+      },
+    ]);
+    assert.equal(found[0].condition, undefined); // The cd attempt does not depend on its own result.
+  });
+
+  test("guarded commands and terminating failure branches retain the success condition", () => {
+    for (const command of ["cd aaa && cat ../bbb", "cd aaa || exit 1; cat ../bbb"]) {
+      const found = extractBashTargetsDetailed(command, CWD).find((target) => target.source === "cat ../bbb");
+      assert.equal(found?.path, local("bbb"));
+      assert.equal(found?.condition, "if `cd aaa` succeeds");
+    }
+  });
+
+  test("conditions are intersected across paths reached through multiple outcomes or commands", () => {
+    for (const command of [
+      "cd aaa; cat /outside/file",
+      "cd aaa && cat /outside/file; cat /outside/file",
+      "cd .; cat ../bbb",
+    ]) {
+      const found = extractBashTargetsDetailed(command, CWD).filter((target) => target.source?.startsWith("cat "));
+      assert.equal(found.length, 1);
+      assert.equal(found[0].condition, undefined);
+    }
+    const shared = extractBashTargetsDetailed("cd aaa && { cd nested; cat /outside/file; }", CWD);
+    assert.equal(shared.find((target) => target.path === path.normalize("/outside/file"))?.condition,
+      "if `cd aaa` succeeds");
+  });
+
+  test("consecutive cd commands preserve the prerequisites for each candidate", () => {
+    const found = extractBashTargetsDetailed("cd aaa && cd nested; cat ../bbb", CWD);
+    const conditions = new Map(found.filter((target) => target.source === "cat ../bbb")
+      .map((target) => [target.path, target.condition]));
+    assert.equal(conditions.get(local("aaa/bbb")), "if `cd aaa` succeeds and `cd nested` succeeds");
+    assert.equal(conditions.get(local("bbb")), "if `cd aaa` succeeds and `cd nested` fails");
+    assert.equal(conditions.get(local("../bbb")), "if `cd aaa` fails");
+  });
+
+  test("child shell conditions do not leak into the parent", () => {
+    const found = extractBashTargetsDetailed("(cd aaa && cat ../inner); cat ../outer", CWD);
+    assert.equal(found.find((target) => target.source === "cat ../inner")?.condition, "if `cd aaa` succeeds");
+    assert.equal(found.find((target) => target.source === "cat ../outer")?.condition, undefined);
+  });
+
   test("OR runs in the directory where cd failed", () => {
     assert.deepEqual(targets("cd aaa || rm ../bbb", "rm ../bbb"), [local("../bbb")]);
   });

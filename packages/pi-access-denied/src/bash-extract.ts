@@ -15,7 +15,6 @@
  * Nested scripts normally share source offsets; decoded backticks can provide
  * a separate source string. Malformed input is inspected on a best-effort basis.
  */
-import * as path from "node:path";
 import { parse } from "unbash";
 import type {
   Command,
@@ -28,7 +27,7 @@ import type {
   Word,
   WordPart,
 } from "unbash";
-import { resolveTarget } from "./paths.ts";
+import { paths, type PathAPI, UnresolvedPathError } from "./paths.ts";
 import {
   assignVariable,
   cdArguments,
@@ -47,7 +46,7 @@ import type { DirectoryCondition, DirectoryFlow, DirectoryState } from "./bash-c
 
 /** A path the command appears to reach, plus the leaf command that produced it. */
 export interface ExtractedTarget {
-  /** Resolved absolute path. */
+  /** Canonical absolute path or symbolic named home. */
   path: string;
   /** Text of the leaf command (e.g. `find / -name *.log`) that produced `path`. Absent when meaningless. */
   source?: string;
@@ -59,18 +58,27 @@ export interface ExtractedTarget {
 
 type TargetOrigin = Word | Command;
 type RecordedTarget = {
+  path: string;
   source: string;
   conditions: DirectoryCondition[];
   origins: Map<TargetOrigin, string>;
 };
 
 class TargetMap extends Map<string, RecordedTarget> {
+  readonly paths: PathAPI;
+  constructor(paths: PathAPI) {
+    super();
+    this.paths = paths;
+  }
   // Operand identity keeps separate arguments and identical command text independent.
   readonly resolutions = new Map<TargetOrigin, { paths: Set<string | null>; estimate: boolean }>();
 
   observe(origin: TargetOrigin, target: string | null, estimate = false): void {
-    const resolution = this.resolutions.get(origin) ?? { paths: new Set<string | null>(), estimate: false };
-    resolution.paths.add(target);
+    const resolution = this.resolutions.get(origin) ?? {
+      paths: new Set<string | null>(),
+      estimate: false,
+    };
+    resolution.paths.add(target === null ? null : this.paths.key(target));
     resolution.estimate ||= estimate;
     this.resolutions.set(origin, resolution);
   }
@@ -78,42 +86,38 @@ class TargetMap extends Map<string, RecordedTarget> {
   exactSource(target: RecordedTarget): string | undefined {
     for (const [origin, source] of target.origins) {
       const resolution = this.resolutions.get(origin)!;
-      if (!resolution.estimate && resolution.paths.size === 1 && !resolution.paths.has(null)) return source;
+      if (!resolution.estimate && resolution.paths.size === 1 && !resolution.paths.has(null))
+        return source;
     }
     return undefined;
   }
 }
 
 function recordTarget(
-  targets: TargetMap, target: string, source: string, state: DirectoryState, origin: TargetOrigin,
+  targets: TargetMap,
+  target: string,
+  source: string,
+  state: DirectoryState,
+  origin: TargetOrigin,
 ): void {
-  const existing = targets.get(target);
+  const key = targets.paths.key(target);
+  const existing = targets.get(key);
   const origins = existing?.origins ?? new Map<TargetOrigin, string>();
   origins.set(origin, source);
-  targets.set(target, {
+  targets.set(key, {
+    path: existing?.path ?? target,
     source: existing?.source ?? source,
-    conditions: existing ? commonConditions(existing.conditions, state.conditions) : state.conditions,
+    conditions: existing
+      ? commonConditions(existing.conditions, state.conditions)
+      : state.conditions,
     origins,
   });
-}
-
-// ── Windows-native path detection ───────────────────────────────────────────
-// A drive-letter prefix (`C:\…`, `D:/…`) uses backslash (or, under Git Bash,
-// forward slash) as a path *separator*, not a shell escape. Such tokens must
-// reach resolveTarget with separators intact — using the parser's dequoted
-// `value` would collapse `C:\Users\me` to `C:Usersme`. Pure of platform so it
-// is unit-testable anywhere.
-const WIN_NATIVE_RE = /^[A-Za-z]:[\\/]/;
-
-/** True if `token` is a Windows-native absolute path with a drive letter. */
-export function isWindowsNativePath(token: string): boolean {
-  return WIN_NATIVE_RE.test(token);
 }
 
 // ── Path candidate classification (pure) ────────────────────────────────────
 
 /** Does this token look like it could escape cwd? */
-function isEscapingCandidate(token: string): boolean {
+function isEscapingCandidate(token: string, path: PathAPI): boolean {
   if (token.startsWith("/") || path.isAbsolute(token)) return true; // absolute (posix + windows native)
   if (token === "~" || token.startsWith("~/")) return true; // home
   if (token === "$HOME" || token.startsWith("$HOME/")) return true; // home
@@ -143,11 +147,12 @@ function consider(
   expanded = false,
   estimate = false,
 ): void {
+  const path = targets.paths;
   if (!token || token.startsWith("-")) {
     targets.observe(origin, null);
     return; // Empty operand or option flag (--foo, -rf).
   }
-  const escaping = isEscapingCandidate(token);
+  const escaping = isEscapingCandidate(token, path);
   if (
     !expanded &&
     (token === "~" || token.startsWith("~/") || token === "$HOME" || token.startsWith("$HOME/"))
@@ -170,10 +175,17 @@ function consider(
   }
   // Expansion results are literal strings: a stored "~" or "$HOME" is not
   // expanded a second time by Bash, even when the reference is unquoted.
-  const resolved =
-    expanded && !path.isAbsolute(token)
-      ? path.resolve(state.cwd!, token)
-      : resolveTarget(token, state.cwd ?? (path.parse(token).root || "/"));
+  let resolved: string;
+  try {
+    resolved =
+      expanded && !path.isAbsolute(token)
+        ? path.resolve(state.cwd!, token)
+        : path.target(token, state.cwd ?? (path.root(token) || "/"));
+  } catch (error) {
+    if (!(error instanceof UnresolvedPathError)) throw error;
+    targets.observe(origin, null);
+    return;
+  }
   // Observe ordinary relative alternatives too, even though they are not gated.
   targets.observe(origin, resolved, estimate);
   if (escaping) recordTarget(targets, resolved, source, state, origin);
@@ -197,18 +209,17 @@ function hasVariableEffects(parts: WordPart[]): boolean {
     if (part.type === "DoubleQuoted" || part.type === "LocaleString")
       return hasVariableEffects(part.parts);
     if (part.type === "ParameterExpansion")
-      return part.operator === "=" ||
+      return (
+        part.operator === "=" ||
         part.operator === ":=" ||
         part.index !== undefined ||
-        hasVariableEffects(part.operand?.parts ?? []);
+        hasVariableEffects(part.operand?.parts ?? [])
+      );
     return false;
   });
 }
 
-function expansionState(
-  words: (Word | undefined)[],
-  state: DirectoryState,
-): DirectoryState {
+function expansionState(words: (Word | undefined)[], state: DirectoryState): DirectoryState {
   return words.some((word) => hasVariableEffects(word?.parts ?? []))
     ? unknownVariables(state)
     : state;
@@ -286,7 +297,7 @@ function scanWord(
 
   // Windows-native path: backslashes are separators — use raw `text`, not the
   // dequoted `value` (which collapses `C:\Users` → `C:Users`).
-  if (isWindowsNativePath(word.text)) {
+  if (targets.paths.isWindowsNativePath(word.text)) {
     consider(word.text, state, source, targets, word, false, /[*?[]/.test(word.text));
     return;
   }
@@ -301,7 +312,15 @@ function scanWord(
   // commands inside it were already collected above.
   if (parts.some(isUnanalyzable)) return;
 
-  consider(normalizeHome(word.value), state, source, targets, word, false, staticWord(word, state) === null);
+  consider(
+    normalizeHome(word.value),
+    state,
+    source,
+    targets,
+    word,
+    false,
+    staticWord(word, state) === null,
+  );
 }
 
 // ── AST traversal ───────────────────────────────────────────────────────────
@@ -417,7 +436,8 @@ function walkCommand(
   targets: TargetMap,
 ): DirectoryFlow {
   const words = [
-    node.name, ...node.suffix,
+    node.name,
+    ...node.suffix,
     ...node.prefix.flatMap((assignment) => [assignment.value, ...(assignment.array ?? [])]),
     ...node.redirects.flatMap((redirect) => [redirect.target, redirect.body]),
   ];
@@ -452,9 +472,15 @@ function walkCommand(
     if (changed.target !== null) recordTarget(targets, changed.target, source, state, node);
     if (!changed.success.length) return { success: [], failure: states };
     const id = JSON.stringify([command, node.pos]);
-    const withOutcome = (next: DirectoryState, outcome: DirectoryCondition["outcome"]): DirectoryState => ({
+    const withOutcome = (
+      next: DirectoryState,
+      outcome: DirectoryCondition["outcome"],
+    ): DirectoryState => ({
       ...next,
-      conditions: [...next.conditions.filter((condition) => condition.id !== id), { id, source, outcome }],
+      conditions: [
+        ...next.conditions.filter((condition) => condition.id !== id),
+        { id, source, outcome },
+      ],
     });
     return {
       success: changed.success.map((next) => withOutcome(next, "succeeds")),
@@ -462,8 +488,9 @@ function walkCommand(
     };
   }
   if (!node.name) {
-    const staticAssignments = node.prefix.every((assignment) =>
-      assignment.value && staticWord(assignment.value, assigned, "assignment") !== null,
+    const staticAssignments = node.prefix.every(
+      (assignment) =>
+        assignment.value && staticWord(assignment.value, assigned, "assignment") !== null,
     );
     if (staticAssignments && node.redirects.length === 0)
       return { success: [assigned], failure: [] };
@@ -472,7 +499,7 @@ function walkCommand(
       failure: node.redirects.length ? joinStates(states, [assigned]) : [assigned],
     };
   }
-  if (localFunction) return both([unknownDirectoryState(state.functions)]);
+  if (localFunction) return both([unknownDirectoryState(state.functions, state.paths)]);
   // Only an unambiguous exit terminates the list. `return` can fail outside
   // a function, and `exit` with too many arguments also leaves Bash running.
   if (
@@ -498,7 +525,7 @@ function walkCommand(
     let index = 0;
     for (; index < args.length; index++) {
       const option = staticWord(args[index], state);
-      if (option === null) return both([unknownDirectoryState(state.functions)]);
+      if (option === null) return both([unknownDirectoryState(state.functions, state.paths)]);
       if (option === "--") {
         index++;
         break;
@@ -508,7 +535,7 @@ function walkCommand(
         // Query forms do not invoke the named command.
         if (/[vV]/.test(option)) return both(states);
       } else {
-        return both([unknownDirectoryState(state.functions)]);
+        return both([unknownDirectoryState(state.functions, state.paths)]);
       }
     }
     invoked = args[index] ? staticWord(args[index], state) : undefined;
@@ -521,7 +548,8 @@ function walkCommand(
     invoked === null ||
     ["pushd", "popd", "eval", "source", ".", "cd"].includes(invoked ?? "") ||
     state.functions.includes(invoked ?? "")
-  ) return both([unknownDirectoryState(state.functions)]);
+  )
+    return both([unknownDirectoryState(state.functions, state.paths)]);
   // These builtins can change scalar values or their interpretation. Their
   // options, arrays, namerefs, and input data are not evaluated here.
   const printfOption = args[0] ? staticWord(args[0], state) : "";
@@ -529,13 +557,24 @@ function walkCommand(
     invoked === "printf" && (printfOption === null || printfOption.startsWith("-v"));
   if (
     printfAssigns ||
-    ["unset", "read", "readarray", "mapfile", "declare", "typeset",
-      "local", "export", "readonly", "let", "getopts"].includes(invoked ?? "")
+    [
+      "unset",
+      "read",
+      "readarray",
+      "mapfile",
+      "declare",
+      "typeset",
+      "local",
+      "export",
+      "readonly",
+      "let",
+      "getopts",
+    ].includes(invoked ?? "")
   ) {
     return both([unknownVariables(state)]);
   }
   if (hasVariableReference(node.name.parts ?? []) || staticWord(node.name, state) === null)
-    return both([unknownDirectoryState(state.functions)]);
+    return both([unknownDirectoryState(state.functions, state.paths)]);
   return both(states);
 }
 
@@ -593,8 +632,11 @@ function walkNodeAt(
       for (const w of node.wordlist)
         scanWord(w, state, command.slice(node.pos, node.end), command, targets);
       const flow = walkLoop(
-        node.body, undefined, command,
-        [assignVariable(state, node.name.value, null)], targets,
+        node.body,
+        undefined,
+        command,
+        [assignVariable(state, node.name.value, null)],
+        targets,
       );
       return mergeFlows({ success: [state], failure: [] }, flow);
     }
@@ -666,9 +708,10 @@ function walkLoop(
   if (first.some((state) => !before.has(directoryStateKey(state)))) {
     // Repeated relative cd can produce unbounded directories. Widen to unknown
     // instead of reusing the first iteration's state for later executions.
-    const unknown = unknownDirectoryState([
-      ...new Set([...states, ...first].flatMap((state) => state.functions)),
-    ]);
+    const unknown = unknownDirectoryState(
+      [...new Set([...states, ...first].flatMap((state) => state.functions))],
+      targets.paths,
+    );
     iteration([unknown]);
     return both(joinStates(states, first, [unknown]));
   }
@@ -683,7 +726,10 @@ function walkStatement(
 ): DirectoryFlow {
   const parent = states;
   states = states.map((state) =>
-    expansionState(stmt.redirects.flatMap((redirect) => [redirect.target, redirect.body]), state),
+    expansionState(
+      stmt.redirects.flatMap((redirect) => [redirect.target, redirect.body]),
+      state,
+    ),
   );
   // Redirections are expanded before the command (and therefore before cd).
   const source = command.slice(stmt.pos, stmt.end);
@@ -707,31 +753,42 @@ function walkStatement(
  * Pure extraction: returns candidates without judging allow/deny (that is the
  * PathManager's job). Heuristic — see module doc for blind spots.
  */
-export function extractBashTargetsDetailed(command: string, cwd: string): ExtractedTarget[] {
-  const targets = new TargetMap();
+export function extractBashTargetsDetailed(
+  command: string,
+  cwd: string,
+  api: PathAPI = paths,
+): ExtractedTarget[] {
+  const targets = new TargetMap(api);
   let ast: Script;
   try {
     ast = parse(command);
   } catch {
     return []; // unbash is best-effort and should not throw, but guard anyway.
   }
-  walkScript(ast, command, [initialDirectoryState(cwd)], targets);
-  return [...targets.entries()].map(([path, target]) => {
+  walkScript(ast, command, [initialDirectoryState(cwd, api)], targets);
+  return [...targets.values()].map((target) => {
     const exactSource = targets.exactSource(target);
     return {
-      path,
+      path: target.path,
       source: (exactSource ?? target.source) || undefined,
       ...(exactSource === undefined ? { estimate: true } : {}),
-      ...(target.conditions.length ? {
-        condition: "if " + target.conditions.map((condition) =>
-          `\`${condition.source.replace(/[\s\x00-\x1f\x7f-\x9f]+/g, " ").trim()}\` ${condition.outcome}`,
-        ).join(" and "),
-      } : {}),
+      ...(target.conditions.length
+        ? {
+            condition:
+              "if " +
+              target.conditions
+                .map(
+                  (condition) =>
+                    `\`${condition.source.replace(/[\s\x00-\x1f\x7f-\x9f]+/g, " ").trim()}\` ${condition.outcome}`,
+                )
+                .join(" and "),
+          }
+        : {}),
     };
   });
 }
 
 /** Path-only view of {@link extractBashTargetsDetailed} (for callers that only classify). */
-export function extractBashTargets(command: string, cwd: string): string[] {
-  return extractBashTargetsDetailed(command, cwd).map((t) => t.path);
+export function extractBashTargets(command: string, cwd: string, api: PathAPI = paths): string[] {
+  return extractBashTargetsDetailed(command, cwd, api).map((t) => t.path);
 }

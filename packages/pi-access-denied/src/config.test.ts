@@ -19,8 +19,7 @@
 import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
+import { paths as path } from "./paths.ts";
 
 import { loadConfig } from "./config.ts";
 import { DEFAULT_CONFIG } from "./types.ts";
@@ -30,8 +29,8 @@ let tmpProject = "";
 let savedAgentDir: string | undefined;
 
 function setup(): void {
-  tmpGlobal = fs.mkdtempSync(path.join(os.tmpdir(), "ad-global-"));
-  tmpProject = fs.mkdtempSync(path.join(os.tmpdir(), "ad-proj-"));
+  tmpGlobal = fs.mkdtempSync(path.join(path.temp, "ad-global-"));
+  tmpProject = fs.mkdtempSync(path.join(path.temp, "ad-proj-"));
   savedAgentDir = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = tmpGlobal;
 }

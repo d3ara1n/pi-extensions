@@ -1,7 +1,5 @@
-import * as os from "node:os";
-import * as path from "node:path";
 import type { Command, Word, WordPart } from "unbash";
-import { resolveTarget } from "./paths.ts";
+import { paths, type PathAPI, UnresolvedPathError } from "./paths.ts";
 
 const MAX_DIRECTORY_STATES = 32;
 const MAX_STATIC_WORD_LENGTH = 65_536;
@@ -15,6 +13,7 @@ export interface DirectoryCondition {
 
 /** @internal Shell-local directories and scalar values; null means not statically known. */
 export interface DirectoryState {
+  paths: PathAPI;
   cwd: string | null;
   /** OLDPWD, independent of any manual assignment to PWD. */
   previous: string | null;
@@ -32,24 +31,48 @@ export interface DirectoryState {
 }
 
 /** @internal Initial shell assumptions, scoped to a single tool call. */
-export function initialDirectoryState(cwd: string): DirectoryState {
+export function initialDirectoryState(cwd: string, api: PathAPI = paths): DirectoryState {
+  cwd = api.normalize(cwd);
   return {
-    cwd, previous: null, home: os.homedir(), pwd: cwd, cdpath: false,
-    functions: [], variables: {}, defaultIFS: true, conditions: [],
+    paths: api,
+    cwd,
+    previous: null,
+    home: api.home,
+    pwd: cwd,
+    cdpath: false,
+    functions: [],
+    variables: {},
+    defaultIFS: true,
+    conditions: [],
   };
 }
 
 /** @internal Unknown shell effects must invalidate directory-related variables too. */
-export function unknownDirectoryState(functions: string[] = []): DirectoryState {
+export function unknownDirectoryState(
+  functions: string[] = [],
+  api: PathAPI = paths,
+): DirectoryState {
   return {
-    cwd: null, previous: null, home: null, pwd: null, cdpath: true,
-    functions, variables: {}, defaultIFS: false, conditions: [],
+    paths: api,
+    cwd: null,
+    previous: null,
+    home: null,
+    pwd: null,
+    cdpath: true,
+    functions,
+    variables: {},
+    defaultIFS: false,
+    conditions: [],
   };
 }
 
 /** @internal Forget variable mutations without inventing a directory change. */
 export function unknownVariables(state: DirectoryState): DirectoryState {
-  return { ...unknownDirectoryState(state.functions), cwd: state.cwd, conditions: state.conditions };
+  return {
+    ...unknownDirectoryState(state.functions, state.paths),
+    cwd: state.cwd,
+    conditions: state.conditions,
+  };
 }
 
 function variableValue(name: string, state: DirectoryState): string | null {
@@ -84,7 +107,11 @@ export interface DirectoryFlow {
 }
 
 /** @internal Compare shell values independently of authorization explanations. */
-export function directoryStateKey({ conditions: _conditions, ...state }: DirectoryState): string {
+export function directoryStateKey({
+  conditions: _conditions,
+  paths: _paths,
+  ...state
+}: DirectoryState): string {
   return JSON.stringify(state);
 }
 
@@ -106,12 +133,15 @@ export function joinStates(...groups: DirectoryState[][]): DirectoryState[] {
       const key = directoryStateKey(state);
       const existing = states.get(key);
       if (existing) {
-        states.set(key, { ...existing, conditions: commonConditions(existing.conditions, state.conditions) });
+        states.set(key, {
+          ...existing,
+          conditions: commonConditions(existing.conditions, state.conditions),
+        });
         continue;
       }
       if (states.size === MAX_DIRECTORY_STATES) {
         const functions = [...new Set(groups.flat().flatMap((item) => item.functions))];
-        return [...states.values(), unknownDirectoryState(functions)];
+        return [...states.values(), unknownDirectoryState(functions, state.paths)];
       }
       states.set(key, state);
     }
@@ -153,12 +183,7 @@ function staticParts(
         const name = part.type === "SimpleExpansion" ? part.text.slice(1) : part.parameter;
         value = variableValue(name, state);
         // Unquoted expansions can split into multiple arguments or expand globs.
-        if (
-          !quoted &&
-          value !== null &&
-          (/[\s*?[]/.test(value) || !state.defaultIFS)
-        )
-          return null;
+        if (!quoted && value !== null && (/[\s*?[]/.test(value) || !state.defaultIFS)) return null;
         break;
       }
       default:
@@ -176,8 +201,8 @@ export function staticWord(
   state: DirectoryState,
   context: "argument" | "assignment" | "candidate" = "argument",
 ): string | null {
-  // Preserve the existing Git Bash handling of native Windows separators.
-  if (process.platform === "win32" && /^[A-Za-z]:[\\/]/.test(word.text)) return word.text;
+  // Native Windows drive separators must survive shell word decoding.
+  if (state.paths.isWindowsNativePath(word.text)) return word.text;
   const parts = word.parts ?? [{ type: "Literal", text: word.text, value: word.value }];
   let value = staticParts(parts, state, context === "assignment", context === "candidate");
   if (value === null) return null;
@@ -220,6 +245,7 @@ export function changeDirectory(
   target: string | null;
   success: DirectoryState[];
 } {
+  const path = state.paths;
   const effective = directoryAssignments(node, state);
   const unknownSuccess = () => ({
     target: null,
@@ -227,12 +253,16 @@ export function changeDirectory(
   });
   // An entirely empty unquoted expansion removes the argument. Explicit
   // quotes preserve it, so `cd $empty` uses HOME while `cd "$empty"` fails.
-  args = args.filter((word) =>
-    staticWord(word, state) !== "" ||
-    (word.parts ?? []).some((part) =>
-      part.type === "SingleQuoted" || part.type === "DoubleQuoted" ||
-      part.type === "AnsiCQuoted" || part.type === "LocaleString",
-    ),
+  args = args.filter(
+    (word) =>
+      staticWord(word, state) !== "" ||
+      (word.parts ?? []).some(
+        (part) =>
+          part.type === "SingleQuoted" ||
+          part.type === "DoubleQuoted" ||
+          part.type === "AnsiCQuoted" ||
+          part.type === "LocaleString",
+      ),
   );
   let physical = false;
   let index = 0;
@@ -258,9 +288,8 @@ export function changeDirectory(
   if (value === "") return { target: null, success: [] };
   let target: string | null;
   if (value === null) target = null;
-  // Literal quoted ~/$HOME must not be expanded again by resolveTarget.
-  else if (path.isAbsolute(value))
-    target = resolveTarget(value, state.cwd ?? path.parse(value).root);
+  // Literal quoted ~/$HOME must not undergo tool-input home expansion.
+  else if (path.isAbsolute(value)) target = path.target(value, state.cwd ?? path.root(value));
   else if (
     effective.cdpath &&
     value !== "." &&
@@ -269,7 +298,15 @@ export function changeDirectory(
     !value.startsWith("../")
   )
     target = null;
-  else target = state.cwd === null ? null : path.resolve(state.cwd, value);
+  else {
+    try {
+      target = state.cwd === null ? null : path.resolve(state.cwd, value);
+    } catch (error) {
+      if (!(error instanceof UnresolvedPathError)) throw error;
+      // A different drive's current directory is not known to this shell analysis.
+      return unknownSuccess();
+    }
+  }
   const cwd = physical ? null : target;
   return { target, success: [{ ...state, cwd, pwd: cwd, previous: state.pwd }] };
 }

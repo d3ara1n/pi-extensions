@@ -32,9 +32,15 @@ import {
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { loadConfig } from "./config.ts";
 import { PathManager } from "./path-manager.ts";
-import { resolveTarget, toPosix } from "./paths.ts";
+import { paths } from "./paths.ts";
 import { extractBashTargetsDetailed, type ExtractedTarget } from "./bash-extract.ts";
-import { DEFAULT_CONFIG, type AccessMode, type AuthResult, type Choice, type SupportedTool } from "./types.ts";
+import {
+  DEFAULT_CONFIG,
+  type AccessMode,
+  type AuthResult,
+  type Choice,
+  type SupportedTool,
+} from "./types.ts";
 import { AuthPanel, CHOICE_LABELS, CHOICES } from "./auth-panel.ts";
 
 const GLOBAL_KEY = "__piAccessDenied";
@@ -59,7 +65,7 @@ function getState(): SessionState {
     g[GLOBAL_KEY] = {
       mode: DEFAULT_CONFIG.mode,
       config: DEFAULT_CONFIG,
-      pm: new PathManager(process.cwd(), DEFAULT_CONFIG.allowedPaths, DEFAULT_CONFIG.deniedPaths),
+      pm: new PathManager(paths.cwd, DEFAULT_CONFIG.allowedPaths, DEFAULT_CONFIG.deniedPaths),
       alive: false,
     } satisfies SessionState;
   }
@@ -189,7 +195,7 @@ export default function (pi: ExtensionAPI) {
     //    bash:       escaping path candidates and known cd destinations.
     let targets: ExtractedTarget[];
     if (isToolCallEventType("write", event) || isToolCallEventType("edit", event)) {
-      targets = [{ path: resolveTarget(event.input.path, cwd) }];
+      targets = [{ path: paths.target(event.input.path, cwd) }];
     } else if (isToolCallEventType("bash", event)) {
       targets = extractBashTargetsDetailed(event.input.command, cwd);
     } else {
@@ -300,7 +306,7 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       const state = getState();
       const rules = state.pm.getRules();
-      const cwdNorm = toPosix(resolveTarget(ctx.cwd, ctx.cwd));
+      const cwdNorm = paths.target(ctx.cwd, ctx.cwd);
       const allowConfig = rules.config.filter((r) => r.decision === "allow");
       const allowSession = rules.session.filter((r) => r.decision === "allow");
       const denyRules = [
@@ -316,7 +322,7 @@ export default function (pi: ExtensionAPI) {
         lines.push(`  • ${rules.builtin.map((r) => r.path).join(", ")}   (builtin)`);
       }
       for (const r of allowConfig) {
-        const tag = r.path === cwdNorm ? "(cwd)" : "(config)";
+        const tag = paths.equals(r.path, cwdNorm) ? "(cwd)" : "(config)";
         lines.push(`  • ${r.path}   ${tag}`);
       }
       for (const r of allowSession) {

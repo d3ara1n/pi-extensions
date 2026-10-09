@@ -1,65 +1,22 @@
-/**
- * Tests for bash target extraction (bash-extract.ts) and the Windows-native
- * path predicate it exports.
- *
- * Zero-dependency: runs on node's built-in test runner.
- *   node --test src/bash-extract.test.ts
- *
- * Node strips TS types natively (v22.6+ with --experimental-strip-types,
- * default since v23.6), so no transpile step is needed.
- *
- * ## Test layering
- *
- * 1. **isWindowsNativePath** — pure predicate, runs on ALL platforms.
- * 2. **POSIX extraction** — skipped on win32. Bash syntax recovery of escaping
- *    paths under a POSIX cwd. This is where the structural-parser guarantees
- *    live: quoted strings (incl. multi-line commit messages) don't surface
- *    bare path tokens, and nested commands (`$(…)`, `<(…)`, control-flow
- *    bodies) recurse.
- * 3. **Windows extraction** — skipped on non-win32. Git Bash / MSYS command
- *    strings resolved through the real path.win32 module.
- */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import * as os from "node:os";
-import * as path from "node:path";
+import { posixPaths as path, windowsPaths } from "./test-paths.ts";
 
-import { extractBashTargets, extractBashTargetsDetailed, isWindowsNativePath } from "./bash-extract.ts";
-import { resolveTarget } from "./paths.ts";
+import {
+  extractBashTargets as extract,
+  extractBashTargetsDetailed as extractDetailed,
+} from "./bash-extract.ts";
 import { PathManager } from "./path-manager.ts";
 
-// Skip helpers: a truthy value becomes the skip reason shown in the report.
-const SKIP_POSIX: true | undefined = process.platform === "win32" ? true : undefined;
-const SKIP_WIN32: true | undefined = process.platform !== "win32" ? true : undefined;
+const extractBashTargets = (command: string, cwd: string) => extract(command, cwd, path);
+const extractBashTargetsDetailed = (command: string, cwd: string) =>
+  extractDetailed(command, cwd, path);
 
 // ────────────────────────────────────────────────────────────────────────────
-// 1. isWindowsNativePath — pure predicate (runs everywhere)
+// 2. POSIX extraction with an explicit environment
 // ────────────────────────────────────────────────────────────────────────────
 
-describe("isWindowsNativePath: drive-letter detection (cross-platform)", () => {
-  test("backslash drive form is native Windows", () => {
-    assert.equal(isWindowsNativePath("C:\\Users\\me"), true);
-    assert.equal(isWindowsNativePath("d:\\data\\x"), true);
-  });
-  test("forward-slash drive form is also native Windows", () => {
-    assert.equal(isWindowsNativePath("C:/Users/me"), true);
-  });
-  test("posix / MSYS / home forms are NOT native Windows", () => {
-    assert.equal(isWindowsNativePath("/etc/passwd"), false);
-    assert.equal(isWindowsNativePath("/c/Users/me"), false); // MSYS form
-    assert.equal(isWindowsNativePath("~/x"), false);
-  });
-  test("relative paths are NOT native Windows", () => {
-    assert.equal(isWindowsNativePath("src/foo.ts"), false);
-    assert.equal(isWindowsNativePath("../x"), false);
-  });
-});
-
-// ────────────────────────────────────────────────────────────────────────────
-// 2. POSIX extraction (skipped on win32)
-// ────────────────────────────────────────────────────────────────────────────
-
-describe("extractBashTargets: POSIX behavior", { skip: SKIP_POSIX }, () => {
+describe("extractBashTargets: POSIX behavior", () => {
   const CWD = "/home/me/proj";
 
   // ── the structural-parser win: quoted data stays whole ───────────────
@@ -67,7 +24,8 @@ describe("extractBashTargets: POSIX behavior", { skip: SKIP_POSIX }, () => {
   test("multi-line git commit message is NOT mined for paths", () => {
     // The whole message is a single DoubleQuoted word; the `/etc/config`,
     // `/old/data`, `/usr/local/bin` inside it are message text, not paths.
-    const cmd = 'git commit -m "feat: touch /etc/config\n\n- moved /old/data to /new/data\n- see /usr/local/bin"';
+    const cmd =
+      'git commit -m "feat: touch /etc/config\n\n- moved /old/data to /new/data\n- see /usr/local/bin"';
     assert.deepEqual(extractBashTargets(cmd, CWD), []);
   });
 
@@ -114,11 +72,8 @@ describe("extractBashTargets: POSIX behavior", { skip: SKIP_POSIX }, () => {
   });
 
   test("for-loop wordlist and body are recursed into", () => {
-    const cmd = "for f in /old/data/*; do cp \"$f\" /tmp; done";
-    assert.deepEqual(extractBashTargets(cmd, CWD).sort(), [
-      path.normalize("/old/data/*"),
-      "/tmp",
-    ]);
+    const cmd = 'for f in /old/data/*; do cp "$f" /tmp; done';
+    assert.deepEqual(extractBashTargets(cmd, CWD).sort(), [path.normalize("/old/data/*"), "/tmp"]);
   });
 
   test("unquoted heredoc command substitution IS caught", () => {
@@ -151,7 +106,7 @@ describe("extractBashTargets: POSIX behavior", { skip: SKIP_POSIX }, () => {
 
   test("escaped-space path under home is resolved and extracted", () => {
     assert.deepEqual(extractBashTargets("rm ~/My\\ Documents/secret", CWD), [
-      path.join(os.homedir(), "My Documents/secret"),
+      path.join(path.home, "My Documents/secret"),
     ]);
   });
 
@@ -193,13 +148,13 @@ describe("extractBashTargets: POSIX behavior", { skip: SKIP_POSIX }, () => {
 
   test("${HOME} prefix is recognized as home (no longer split on braces)", () => {
     assert.deepEqual(extractBashTargets("cat ${HOME}/.ssh/config", CWD), [
-      path.join(os.homedir(), ".ssh/config"),
+      path.join(path.home, ".ssh/config"),
     ]);
   });
 
   test("bare ${HOME} is extracted as home-dir access", () => {
     // Consistent with `cat $HOME`: a ${HOME}/$HOME token resolves to homedir.
-    assert.deepEqual(extractBashTargets("echo ${HOME}", CWD), [os.homedir()]);
+    assert.deepEqual(extractBashTargets("echo ${HOME}", CWD), [path.home]);
   });
 
   test("~otheruser is extracted as a symbolic escaping candidate", () => {
@@ -213,9 +168,9 @@ describe("extractBashTargets: POSIX behavior", { skip: SKIP_POSIX }, () => {
   });
 
   test("~currentuser expands to the real home (equivalent to ~)", () => {
-    const me = os.userInfo().username;
+    const me = path.username;
     assert.deepEqual(extractBashTargets(`cat ~${me}/.ssh/config`, CWD), [
-      path.join(os.homedir(), ".ssh/config"),
+      path.join(path.home, ".ssh/config"),
     ]);
   });
 
@@ -226,7 +181,7 @@ describe("extractBashTargets: POSIX behavior", { skip: SKIP_POSIX }, () => {
 
   test("\\$HOME is unescaped and extracted as home-dir access", () => {
     assert.deepEqual(extractBashTargets("cat \\$HOME/.ssh/config", CWD), [
-      path.join(os.homedir(), ".ssh/config"),
+      path.join(path.home, ".ssh/config"),
     ]);
   });
 
@@ -266,9 +221,7 @@ describe("extractBashTargets: POSIX behavior", { skip: SKIP_POSIX }, () => {
     assert.deepEqual(extractBashTargets("echo x > /dev/null", CWD), ["/dev/null"]);
   });
 
-  test("/private/tmp path (macOS symlink) is extracted as a candidate", {
-    skip: process.platform !== "darwin" ? true : undefined,
-  }, () => {
+  test("/private/tmp is extracted as a candidate", () => {
     assert.deepEqual(extractBashTargets("cat /private/tmp/build-out.log", CWD), [
       "/private/tmp/build-out.log",
     ]);
@@ -281,14 +234,14 @@ describe("extractBashTargets: POSIX behavior", { skip: SKIP_POSIX }, () => {
   // ── end-to-end: extraction + PathManager classification ──────────────
 
   test("end-to-end: a bash command outside cwd is 'outside'", () => {
-    const pm = new PathManager(CWD, [], {});
+    const pm = new PathManager(CWD, [], {}, path);
     const v = extractBashTargets("cat /etc/passwd", CWD);
     assert.equal(v.length, 1);
     assert.equal(pm.decide(v[0]).kind, "outside");
   });
 
   test("end-to-end: a bash command touching a denied path is 'deny'", () => {
-    const pm = new PathManager(CWD, [], { "/old/data": "moved to /new/data" });
+    const pm = new PathManager(CWD, [], { "/old/data": "moved to /new/data" }, path);
     const v = extractBashTargets("cat /old/data/x", CWD);
     assert.equal(pm.decide(v[0]).kind, "deny");
     assert.equal(pm.decide(v[0]).reason, "moved to /new/data");
@@ -296,37 +249,57 @@ describe("extractBashTargets: POSIX behavior", { skip: SKIP_POSIX }, () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// 3. Windows extraction (skipped on non-win32)
-//    Git Bash command strings resolved through the real path.win32 module.
+// 3. Windows extraction with an explicit environment
+//    Git Bash command strings resolved through the shared Windows API.
 // ────────────────────────────────────────────────────────────────────────────
 
-describe("extractBashTargets: Windows behavior (Git Bash / MSYS)", { skip: SKIP_WIN32 }, () => {
-  const CWD = path.win32.join("C:", "proj");
+describe("extractBashTargets: Windows behavior (Git Bash / MSYS)", () => {
+  const path = windowsPaths;
+  const extractBashTargets = (command: string, cwd: string) => extract(command, cwd, path);
+  const CWD = path.join("C:", "proj");
 
   test("MSYS path outside cwd is extracted in its Windows form", () => {
     const v = extractBashTargets("cat /c/Users/me/.ssh/config", CWD);
-    assert.deepEqual(v, [path.win32.join("C:", "Users", "me", ".ssh", "config")]);
+    assert.deepEqual(v, [path.join("C:", "Users", "me", ".ssh", "config")]);
   });
 
   test("Windows native absolute path (C:\\...) is extracted", () => {
-    const nativePath = path.win32.join("C:", "Users", "me", ".ssh", "config");
+    const nativePath = path.toNative(path.join("C:", "Users", "me", ".ssh", "config"));
     const v = extractBashTargets("cat " + nativePath, CWD);
-    assert.deepEqual(v, [nativePath]);
+    assert.deepEqual(v, [path.normalize(nativePath)]);
   });
 
   test("multi-line commit message is not mined for paths (win32)", () => {
     const cmd = 'git commit -m "see /c/old for context"';
     assert.deepEqual(extractBashTargets(cmd, CWD), []);
   });
+
+  test("unresolved drive-relative operands do not prevent later path checks", () => {
+    for (const prefix of ["echo D:file", "cd D:file"]) {
+      assert.deepEqual(extractBashTargets(`${prefix}; cat /outside/file`, CWD), ["/outside/file"]);
+    }
+    assert.deepEqual(extractBashTargets("cd D:file", CWD), []);
+  });
+
+  test("Windows case aliases share a definite target identity", () => {
+    const found = extractDetailed(
+      'if check; then f=C:/Project/File; else f=c:/project/file; fi; cat "$f"',
+      CWD,
+      path,
+    );
+    assert.equal(found.length, 1);
+    assert.equal(found[0].path, "C:/Project/File");
+    assert.equal(found[0].estimate, undefined);
+  });
 });
 
 // ────────────────────────────────────────────────────────────────────────────
 // 4. Leaf-command source tracking (extractBashTargetsDetailed)
 //    Each path is paired with the leaf command that produced it, so the auth
-//    panel can show "find /" rather than just "/". POSIX-only (path resolution).
+//    panel can show "find /" rather than just "/".
 // ────────────────────────────────────────────────────────────────────────────
 
-describe("extractBashTargetsDetailed: leaf-command source", { skip: SKIP_POSIX }, () => {
+describe("extractBashTargetsDetailed: leaf-command source", () => {
   const CWD = "/home/me/proj";
 
   test("source is the verbatim leaf command text", () => {

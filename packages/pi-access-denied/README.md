@@ -173,8 +173,21 @@ These limits favor fewer interruptions during ordinary work. Approval is not a g
 
 Pi uses Git Bash on Windows. The extension recognizes both native drive paths (`C:\Users\me`) and Git Bash drive paths (`/c/Users/me`), and treats `/tmp` as temporary storage. Paths such as `/usr` and `/etc` depend on your Git Bash installation and may still need authorization.
 
+Detected paths, rules, and authorization dialogs use forward slashes on every platform, such as `C:/Users/me/file`. POSIX filenames retain literal backslashes.
+
 ## Editors and non-interactive sessions
 
 In RPC/ACP hosts, such as an editor connected through pi-acp, requests appear as a separate choice dialog for each path. The same four actions are available. Custom denial reasons are available only in the terminal panel; dismissing a dialog blocks the call.
 
 In print/JSON mode there is no interactive response, so requests in `prompt` mode are blocked as dismissed. Set `mode` to `deny` to block outside paths without interaction, or `allow` to let them through. Explicit deny rules still apply.
+
+## Development
+
+Production code and tests share the path API in `src/paths.ts`. Use `paths` for the host environment or `createPathAPI(environment)` for a fixed target environment. The API owns normalization, joining, resolution, equality, directory containment, home expansion, and Git Bash drive conversion. `target(input, cwd)` expands tool/config path syntax; `resolve(...parts)` handles literal values without expanding stored `~` or `$HOME` again. `toNative()` converts paths at native filesystem boundaries.
+
+The API contract tests use independent expected values. Behavior tests use the same API as production and run with fixed POSIX and Windows environments on every host. The source boundary check rejects direct path/OS imports and host platform/cwd reads outside `paths.ts`, including in tests. Keep path assertions separate from display formatting.
+
+```bash
+node --test packages/pi-access-denied/src/*.test.ts
+npx tsc --noEmit
+```

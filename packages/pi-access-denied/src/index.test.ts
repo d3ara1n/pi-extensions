@@ -7,8 +7,7 @@
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
+import { paths as path } from "./paths.ts";
 
 import accessDenied from "./index.ts";
 import type { AuthResult } from "./types.ts";
@@ -28,7 +27,7 @@ afterEach(() => {
 });
 
 test("mixed always-allow and deny persists the grant while blocking the call", async () => {
-  project = fs.mkdtempSync(path.join(os.tmpdir(), "ad-index-test-"));
+  project = fs.mkdtempSync(path.join(path.temp, "ad-index-test-"));
   fs.mkdirSync(path.join(project, ".pi"));
   fs.writeFileSync(
     path.join(project, ".pi", "settings.json"),
@@ -102,7 +101,12 @@ test("mixed always-allow and deny persists the grant while blocking the call", a
   // The prior mixed decision installed the session grant, so this call no
   // longer prompts and is allowed through the gate.
   const allowed = await toolCall(
-    { type: "tool_call", toolCallId: "remembered", toolName: "write", input: { path: alwaysAllowed } },
+    {
+      type: "tool_call",
+      toolCallId: "remembered",
+      toolName: "write",
+      input: { path: alwaysAllowed },
+    },
     ctx,
   );
   assert.equal(allowed, undefined);
@@ -113,7 +117,7 @@ test("mixed always-allow and deny persists the grant while blocking the call", a
 });
 
 test("prompt mode outside TUI falls back to select() dialogs — allow passes through", async () => {
-  project = fs.mkdtempSync(path.join(os.tmpdir(), "ad-rpc-test-"));
+  project = fs.mkdtempSync(path.join(path.temp, "ad-rpc-test-"));
   fs.mkdirSync(path.join(project, ".pi"));
   fs.writeFileSync(
     path.join(project, ".pi", "settings.json"),
@@ -191,7 +195,12 @@ test("prompt mode outside TUI falls back to select() dialogs — allow passes th
 
   // The label is display metadata; session rules still use the original path.
   const remembered = await toolCall(
-    { type: "tool_call", toolCallId: "rpc-estimate-remembered", toolName: "write", input: { path: "/etc/shadow" } },
+    {
+      type: "tool_call",
+      toolCallId: "rpc-estimate-remembered",
+      toolName: "write",
+      input: { path: "/etc/shadow" },
+    },
     ctx,
   );
   assert.equal(remembered, undefined);
@@ -199,7 +208,7 @@ test("prompt mode outside TUI falls back to select() dialogs — allow passes th
 });
 
 test("prompt mode outside TUI: dismissing the dialog soft-denies", async () => {
-  project = fs.mkdtempSync(path.join(os.tmpdir(), "ad-rpc-test-"));
+  project = fs.mkdtempSync(path.join(path.temp, "ad-rpc-test-"));
   fs.mkdirSync(path.join(project, ".pi"));
   fs.writeFileSync(
     path.join(project, ".pi", "settings.json"),
@@ -249,7 +258,7 @@ test("prompt mode outside TUI: dismissing the dialog soft-denies", async () => {
 });
 
 test("prompt mode outside TUI: always-deny via dialog is remembered for the session", async () => {
-  project = fs.mkdtempSync(path.join(os.tmpdir(), "ad-rpc-test-"));
+  project = fs.mkdtempSync(path.join(path.temp, "ad-rpc-test-"));
   fs.mkdirSync(path.join(project, ".pi"));
   fs.writeFileSync(
     path.join(project, ".pi", "settings.json"),

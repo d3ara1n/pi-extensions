@@ -29,14 +29,14 @@
  * the policy can never diverge between layers.
  */
 
-import { builtinSafeRoots, isWinDeviceName, resolveTarget, toPosix, underRoot } from "./paths.ts";
+import { paths, type PathAPI } from "./paths.ts";
 
 /** Where a rule originated — used only for `/access-denied status` grouping. */
 export type RuleSource = "builtin" | "config" | "session";
 
 /** A single allow/deny rule covering a path and everything beneath it. */
 export interface Rule {
-  /** POSIX-normalized absolute path; covers itself + all descendants. */
+  /** Canonical absolute path or symbolic named home; covers itself and descendants. */
   path: string;
   decision: "allow" | "deny";
   /** Deny-only: an optional reason surfaced to the agent as a "user note". */
@@ -66,15 +66,22 @@ export class PathManager {
   private builtinRules: Rule[] = [];
   private configRules: Rule[] = [];
   private sessionRules: Rule[] = [];
+  private readonly paths: PathAPI;
 
   /**
    * @param cwd           Session working directory (always an allow root).
    * @param allowedPaths  Config `allowedPaths` (home-relative/absolute allow roots).
    * @param deniedPaths   Config `deniedPaths` (path → reason|null deny rules).
    */
-  constructor(cwd: string, allowedPaths: string[], deniedPaths: Record<string, string | null>) {
+  constructor(
+    cwd: string,
+    allowedPaths: string[],
+    deniedPaths: Record<string, string | null>,
+    api: PathAPI = paths,
+  ) {
+    this.paths = api;
     // Builtin: fixed safe roots (pseudo-devices, /tmp, os.tmpdir()).
-    this.builtinRules = builtinSafeRoots().map((p) => ({
+    this.builtinRules = this.paths.safeRoots().map((p) => ({
       path: p,
       decision: "allow" as const,
       source: "builtin" as const,
@@ -102,9 +109,9 @@ export class PathManager {
     this.configRules = [...allow, ...deny];
   }
 
-  /** Resolve + POSIX-normalize a path (handles ~, relative-to-cwd, MSYS drives). */
+  /** Resolve tool/config path syntax to the shared API's canonical representation. */
   private normalize(p: string, cwd: string): string {
-    return toPosix(resolveTarget(p, cwd));
+    return this.paths.target(p, cwd);
   }
 
   /**
@@ -114,9 +121,9 @@ export class PathManager {
    */
   decide(target: string): Decision {
     // Windows reserved device names: special builtin (basename match, not prefix).
-    if (isWinDeviceName(target)) return { kind: "allow" };
+    if (this.paths.isDevice(target)) return { kind: "allow" };
 
-    const posixTarget = toPosix(target);
+    const posixTarget = this.paths.normalize(target);
     const rule = this.mostSpecific(posixTarget);
     if (!rule) return { kind: "outside" };
     return rule.decision === "allow" ? { kind: "allow" } : { kind: "deny", reason: rule.reason };
@@ -131,7 +138,7 @@ export class PathManager {
     let best: Rule | undefined;
     let bestDepth = -1;
     for (const r of this.allRules()) {
-      if (!underRoot(target, r.path)) continue;
+      if (!this.paths.isWithin(target, r.path)) continue;
       const depth = segmentDepth(r.path);
       if (depth > bestDepth) {
         bestDepth = depth;
@@ -153,7 +160,7 @@ export class PathManager {
   /** Remember an always-allow root. `absPath` is already resolved+absolute. */
   addSessionAllow(absPath: string): void {
     this.remember({
-      path: toPosix(absPath),
+      path: this.paths.normalize(absPath),
       decision: "allow",
       source: "session",
     });
@@ -162,7 +169,7 @@ export class PathManager {
   /** Remember an always-deny root with an optional reason. `absPath` is already resolved+absolute. */
   addSessionDeny(absPath: string, reason: string): void {
     this.remember({
-      path: toPosix(absPath),
+      path: this.paths.normalize(absPath),
       decision: "deny",
       reason: reason.trim() || undefined,
       source: "session",
@@ -181,10 +188,14 @@ export class PathManager {
    */
   private remember(rule: Rule): void {
     const peers = this.sessionRules.filter((r) => r.decision === rule.decision);
-    if (peers.some((r) => underRoot(rule.path, r.path))) return; // already covered
+    if (peers.some((r) => this.paths.isWithin(rule.path, r.path))) return; // already covered
     this.sessionRules = this.sessionRules.filter(
       (r) =>
-        !(r.decision === rule.decision && r.path !== rule.path && underRoot(r.path, rule.path)),
+        !(
+          r.decision === rule.decision &&
+          !this.paths.equals(r.path, rule.path) &&
+          this.paths.isWithin(r.path, rule.path)
+        ),
     );
     this.sessionRules.push(rule);
   }

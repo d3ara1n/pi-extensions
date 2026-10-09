@@ -1,99 +1,76 @@
 /**
- * Path normalization primitives for pi-access-denied.
+ * Shared path operations for production and tests.
  *
- * This module is PURE: no policy, no decision logic. It owns separator-agnostic
- * comparison (toPosix/underRoot), home expansion, MSYS drive translation,
- * Windows device-name detection, and target resolution — the building blocks
- * the PathManager (path-manager.ts) compares targets against, and that
- * bash-extract.ts resolves extracted candidates with.
- *
- * Bash target extraction lives in bash-extract.ts. Access policy (what's safe,
- * outside, or remembered) lives in the PathManager's single longest-prefix-match
- * `decide()` — exactly one place decides access.
+ * Paths use forward slashes on every host. Windows drive and UNC paths retain
+ * their namespace; POSIX backslashes remain filename characters. Only this
+ * module selects path dialects and reads host platform/directory defaults.
  */
-
 import * as fs from "node:fs";
 import * as os from "node:os";
-import * as path from "node:path";
+import * as nodePath from "node:path";
 
-// ── Platform-agnostic comparison primitives (pure, exported for testing) ─────
-//
-// Node's `path` module is split: `path.posix` uses `/`, `path.win32` uses `\`,
-// and there is NO built-in function that treats `/dev/null` and `\dev\null` as
-// equivalent. On Windows, commands coming from a Git Bash shell are written
-// in MSYS style (`/dev/null`, `/tmp`, `/c/Users`), but `path.win32.normalize`
-// rewrites them to `\dev\null` etc. — which then fail literal comparisons
-// against Unix-style safe-path constants.
-//
-// We bridge that gap by normalizing the *comparison basis* to POSIX style
-// (forward slashes) before matching against a single set of Unix-style
-// safe-path constants. A Unix `/dev/null` and its Windows `\dev\null` alias
-// both reduce to `/dev/null` and match the same constant. Windows only adds its
-// own native device names (NUL/CON/...), which have no Unix analogue.
-//
-// These primitives are pure functions of their string inputs (no `path` module,
-// no `os` calls), so win32 semantics can be unit-tested on any platform.
-
-/** Normalize separators to POSIX `/` so `\dev\null` ≡ `/dev/null` for comparison. */
-export function toPosix(p: string): string {
-  // split/join avoids regex-escape pitfalls; after path.normalize() backslash
-  // is the only separator Node ever emits (POSIX paths already use `/`).
-  return p.includes("\\") ? p.split("\\").join("/") : p;
+export interface PathEnvironment {
+  platform: "posix" | "win32";
+  cwd: string;
+  home: string;
+  username: string;
+  temp: string;
+  /** The host's real /tmp location, when different from /tmp. */
+  realTmp?: string;
+  /** Known Windows per-drive working directories, keyed by drive such as "D:". */
+  driveCwds?: Record<string, string>;
 }
 
-/**
- * POSIX-style prefix check (separator `/`). Pure — usable on any platform to
- * test a posix-normalized target against a posix-normalized root. Windows
- * drive paths (`C:/...`) compare case-insensitively, matching Windows path
- * semantics without changing the paths retained for display.
- *
- * @internal — exported for testing; use {@link underRoot} in production.
- */
-export function posixUnder(posixTarget: string, posixRoot: string): boolean {
-  const target = isWindowsDrivePath(posixTarget) ? posixTarget.toLowerCase() : posixTarget;
-  const root = isWindowsDrivePath(posixRoot) ? posixRoot.toLowerCase() : posixRoot;
-  if (target === root) return true;
-  // Both POSIX `/` and Windows `C:/` are roots whose trailing slash already
-  // supplies the child boundary; appending another slash would make `//`.
-  return target.startsWith(root.endsWith("/") ? root : root + "/");
+/** A path needs a working directory absent from the explicit environment. */
+export class UnresolvedPathError extends Error {
+  constructor(input: string) {
+    super(`Cannot resolve drive-relative path without its drive's cwd: ${input}`);
+    this.name = "UnresolvedPathError";
+  }
 }
 
-/** True for a POSIX-normalized Windows drive path; pure for cross-host tests. */
-function isWindowsDrivePath(p: string): boolean {
-  return /^[A-Za-z]:\//.test(p);
+export interface PathAPI {
+  readonly platform: PathEnvironment["platform"];
+  readonly cwd: string;
+  readonly home: string;
+  readonly username: string;
+  readonly temp: string;
+  normalize(input: string): string;
+  join(...parts: string[]): string;
+  /**
+   * Resolve literal segments left to right; absolute segments replace the base.
+   * Unknown drive-relative bases throw UnresolvedPathError.
+   */
+  resolve(...parts: string[]): string;
+  /** Resolve tool/config input, including home forms and Git Bash drive paths. */
+  target(input: string, cwd: string): string;
+  isAbsolute(input: string): boolean;
+  /** Native drive syntax interpreted by a Windows target environment. */
+  isWindowsNativePath(input: string): boolean;
+  root(input: string): string;
+  basename(input: string): string;
+  /** Canonical identity for equality, state deduplication, and map keys. */
+  key(input: string): string;
+  equals(a: string, b: string): boolean;
+  isWithin(target: string, root: string): boolean;
+  isDevice(input: string): boolean;
+  safeRoots(): string[];
+  /** Convert a canonical path at a native filesystem boundary. */
+  toNative(input: string): string;
 }
 
-/**
- * True if `target` equals or sits beneath `root`. Separator-agnostic: both
- * sides are normalized to POSIX first. Windows drive paths compare without
- * case sensitivity while the original normalized paths remain available for
- * status display. Used by the PathManager for prefix matching.
- */
-export function underRoot(target: string, root: string): boolean {
-  return posixUnder(toPosix(target), toPosix(root));
-}
-
-/**
- * Windows reserved device names: NUL, CON, AUX, PRN, COM1-9, LPT1-9.
- *
- * These are Win32 device names with no Unix analogue; they are safe to write
- * (NUL is the null sink, like /dev/null). Matched by basename so `C:\proj\NUL`,
- * bare `NUL`, and `NUL.txt` are all recognized. Returns false on non-Windows.
- *
- * `platform` defaults to `process.platform`; tests inject `"win32"` to exercise
- * the logic on any host.
- */
-export function isWinDeviceName(target: string, platform: string = process.platform): boolean {
-  if (platform !== "win32") return false;
-  // basename on a win32-normalized path yields the final segment. Strip any
-  // `.<ext>` so `NUL.txt` matches (Win32 treats the bare name as the device).
-  const base = path.win32
-    .basename(target)
-    .replace(/\.[^.]*$/, "")
-    .toUpperCase();
-  return WIN_DEV_NAMES.has(base);
-}
-const WIN_DEV_NAMES: ReadonlySet<string> = new Set([
+const SAFE_ROOTS = [
+  "/dev/null",
+  "/dev/stdin",
+  "/dev/stdout",
+  "/dev/stderr",
+  "/dev/zero",
+  "/dev/urandom",
+  "/dev/random",
+  "/dev/fd",
+  "/tmp",
+];
+const WINDOWS_DEVICES = new Set([
   "NUL",
   "CON",
   "AUX",
@@ -118,135 +95,180 @@ const WIN_DEV_NAMES: ReadonlySet<string> = new Set([
   "LPT9",
 ]);
 
-/**
- * MSYS (Git Bash) drive notation: `/c/Users/me` → `C:\Users\me`.
- *
- * MSYS mounts Windows drives under a single-letter cygdrive prefix (case
- * insensitive). Node's `path.win32` does NOT understand this convention, so a
- * command like `ls /c/proj/src` would otherwise be mis-resolved to
- * `C:\c\proj\src` and wrongly flagged as escaping cwd `C:\proj`. Only
- * meaningful on Windows; on POSIX this returns null unconditionally.
- *
- * `platform` defaults to `process.platform`; tests inject `"win32"` to exercise
- * the logic on any host.
- */
-export function msysDrive(token: string, platform: string = process.platform): string | null {
-  if (platform !== "win32") return null;
-  // `/x` followed by `/` or end, single letter a-z (case insensitive per MSYS).
-  const m = /^\/([a-zA-Z])(\/|$)/.exec(token);
-  if (!m) return null;
-  const drive = m[1].toUpperCase();
-  // slice past the FULL matched prefix (e.g. "/c/"), not just "/c" — otherwise
-  // the leading `/` survives into `rest` and doubles up with the `:\` separator.
-  const rest = token.slice(m[0].length);
-  return `${drive}:\\${rest.replace(/\//g, "\\")}`;
+class PlatformPaths implements PathAPI {
+  readonly platform: PathEnvironment["platform"];
+  readonly cwd: string;
+  readonly home: string;
+  readonly username: string;
+  readonly temp: string;
+  private readonly native: typeof nodePath.posix;
+  private readonly realTmp?: string;
+  private readonly driveCwds = new Map<string, string>();
+
+  constructor(environment: PathEnvironment) {
+    this.platform = environment.platform;
+    this.native = this.platform === "win32" ? nodePath.win32 : nodePath.posix;
+    this.cwd = this.normalize(environment.cwd);
+    this.home = this.normalize(environment.home);
+    this.username = environment.username;
+    this.temp = this.normalize(environment.temp);
+    this.realTmp = environment.realTmp ? this.normalize(environment.realTmp) : undefined;
+    if (![this.cwd, this.home, this.temp].every((value) => this.isAbsolute(value))) {
+      throw new Error("Path environment requires absolute cwd, home, and temp paths.");
+    }
+    for (const [drive, cwd] of Object.entries(environment.driveCwds ?? {})) {
+      const normalized = this.normalize(cwd);
+      if (
+        !/^[A-Za-z]:$/.test(drive) ||
+        this.root(normalized).toLowerCase() !== `${drive.toLowerCase()}/`
+      ) {
+        throw new Error(`Invalid per-drive working directory: ${drive} = ${cwd}`);
+      }
+      this.driveCwds.set(drive.toLowerCase(), normalized);
+    }
+  }
+
+  private canonical(input: string): string {
+    return this.platform === "win32" ? input.replaceAll("\\", "/") : input;
+  }
+
+  normalize(input: string): string {
+    const normalized = this.native.normalize(input);
+    const value = this.canonical(normalized);
+    const root = this.canonical(this.native.parse(normalized).root);
+    return value.length > root.length ? value.replace(/\/+$/, "") : value;
+  }
+
+  join(...parts: string[]): string {
+    return this.normalize(this.native.join(...parts));
+  }
+
+  resolve(...parts: string[]): string {
+    let resolved = this.cwd;
+    for (const part of parts) {
+      if (!part) continue;
+      if (this.isAbsolute(part)) resolved = this.normalize(part);
+      else if (this.platform === "win32" && /^[A-Za-z]:/.test(part)) {
+        // Drive-relative input needs that drive's cwd. Never consult the host's
+        // hidden per-drive environment while analyzing an explicit environment.
+        const drive = part.slice(0, 2).toLowerCase();
+        const base =
+          drive === resolved.slice(0, 2).toLowerCase() ? resolved : this.driveCwds.get(drive);
+        if (!base) throw new UnresolvedPathError(part);
+        resolved = this.join(base, part.slice(2));
+      } else resolved = this.join(resolved, part);
+    }
+    return resolved;
+  }
+
+  target(input: string, cwd: string): string {
+    if (input === "~" || input === "$HOME") return this.home;
+    if (input.startsWith("~/")) return this.join(this.home, input.slice(2));
+    if (input.startsWith("$HOME/")) return this.join(this.home, input.slice(6));
+    const user = /^~([A-Za-z_][A-Za-z0-9_-]*)(.*)$/.exec(input);
+    if (user) {
+      return user[1] === this.username ? this.join(this.home, user[2]) : this.normalize(input);
+    }
+    if (this.platform === "win32") {
+      const drive = /^\/([A-Za-z])(?:\/|$)/.exec(input);
+      if (drive)
+        return this.normalize(`${drive[1].toUpperCase()}:/${input.slice(drive[0].length)}`);
+    }
+    return this.resolve(cwd, input);
+  }
+
+  isAbsolute(input: string): boolean {
+    return this.native.isAbsolute(input);
+  }
+
+  isWindowsNativePath(input: string): boolean {
+    return this.platform === "win32" && /^[A-Za-z]:[\\/]/.test(input);
+  }
+
+  root(input: string): string {
+    return this.canonical(this.native.parse(input).root);
+  }
+
+  basename(input: string): string {
+    return this.native.basename(input);
+  }
+
+  key(input: string): string {
+    const normalized = this.normalize(input);
+    const windowsNamespace = /^[A-Za-z]:\//.test(normalized) || normalized.startsWith("//");
+    return this.platform === "win32" && windowsNamespace ? normalized.toLowerCase() : normalized;
+  }
+
+  equals(a: string, b: string): boolean {
+    return this.key(a) === this.key(b);
+  }
+
+  isWithin(target: string, root: string): boolean {
+    const candidate = this.key(target);
+    const parent = this.key(root);
+    if (this.platform === "win32" && this.root(candidate) !== this.root(parent)) return false;
+    return (
+      candidate === parent || candidate.startsWith(parent.endsWith("/") ? parent : parent + "/")
+    );
+  }
+
+  isDevice(input: string): boolean {
+    return (
+      this.platform === "win32" &&
+      WINDOWS_DEVICES.has(this.basename(input).replace(/\..*$/, "").toUpperCase())
+    );
+  }
+
+  safeRoots(): string[] {
+    return [
+      ...new Set(
+        [...SAFE_ROOTS, this.temp, ...(this.realTmp ? [this.realTmp] : [])].map((root) =>
+          this.normalize(root),
+        ),
+      ),
+    ];
+  }
+
+  toNative(input: string): string {
+    return this.native.normalize(input);
+  }
 }
 
-// ── Built-in always-safe roots ──────────────────────────────────────────────
-//
-// The gate's purpose is to prevent an out-of-control agent from leaving
-// *permanent* footprints outside the project (configs, user data, system
-// files). Task-scoped scratch space that the OS reclaims is explicitly fine:
-//   - `/dev/null`, `/dev/stdin|out|err`, `/dev/zero`, `/dev/u?random`
-//     (process-internal pseudo-devices, safe)
-//   - `/dev/fd/` (current process's own file descriptors, safe)
-//   - `/tmp` (system shared, auto-cleaned; on Git Bash for Windows mounts to %TEMP%)
-//   - `os.tmpdir()` (per-user temp, auto-cleaned; on Linux it == /tmp)
-//
-// `/dev/tty` is intentionally NOT included — it can capture keyboard input.
-// `/dev/disk*`, `/dev/sda*` etc. are NOT included — block devices are dangerous.
-//
-// These become the PathManager's "builtin" allow rules. Windows native device
-// names (NUL/CON/...) are handled separately by {@link isWinDeviceName} since
-// they are matched by basename, not by prefix.
+/** Create the same path API for a fixed target environment without host reads. */
+export function createPathAPI(environment: PathEnvironment): PathAPI {
+  return new PlatformPaths(environment);
+}
 
-const SAFE_DEV_PATHS: readonly string[] = [
-  "/dev/null",
-  "/dev/stdin",
-  "/dev/stdout",
-  "/dev/stderr",
-  "/dev/zero",
-  "/dev/urandom",
-  "/dev/random",
-];
-const SAFE_DEV_PREFIXES: readonly string[] = ["/dev/fd/"];
-
-/** Resolve `/tmp` to its real path (handles the macOS `private/tmp` symlink). */
-const TMP_REAL = (() => {
+function hostEnvironment(): PathEnvironment {
+  let username = "";
+  let realTmp: string | undefined;
+  const driveCwds: Record<string, string> = {};
+  if (process.platform === "win32") {
+    // Capture native drive defaults once, so the API itself stays deterministic.
+    for (const drive of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+      driveCwds[`${drive}:`] = nodePath.win32.resolve(`${drive}:.`);
+    }
+  }
   try {
-    return fs.realpathSync("/tmp");
+    username = os.userInfo().username;
   } catch {
-    return "/tmp";
+    /* Keep named homes symbolic. */
   }
-})();
-
-/**
- * The always-safe root paths (POSIX-normalized) that never trigger an
- * authorization prompt, regardless of the allowlist: pseudo-devices, process
- * file descriptors, and OS-reclaimed scratch dirs. The PathManager turns
- * these into its "builtin" allow rules. Pure of policy beyond this fixed set.
- */
-export function builtinSafeRoots(): string[] {
-  const roots: string[] = [
-    ...SAFE_DEV_PATHS,
-    ...SAFE_DEV_PREFIXES.map((p) => p.replace(/\/$/, "")), // "/dev/fd/" → "/dev/fd"
-    "/tmp",
-  ];
-  // macOS /tmp → /private/tmp symlink: the real path must also be safe.
-  if (TMP_REAL !== "/tmp") roots.push(TMP_REAL);
-  roots.push(path.normalize(os.tmpdir()));
-  // Normalize every entry to POSIX so cross-platform prefix matching works
-  // (e.g. win32 os.tmpdir() → "C:\...\Temp" → "C:/.../Temp").
-  return [...new Set(roots.map(toPosix))];
-}
-
-// ── Path resolution ─────────────────────────────────────────────────────────
-
-/**
- * Current username, used to tell `~me` (→ my home, same as `~`) from `~other`
- * (another user's home). Empty when unobtainable, in which case every `~user` is
- * treated as another user and kept symbolic.
- */
-const CURRENT_USER: string = (() => {
   try {
-    return os.userInfo().username;
+    realTmp = fs.realpathSync("/tmp");
   } catch {
-    return "";
+    /* /tmp need not exist on Windows. */
   }
-})();
-
-/**
- * Expand a leading `~` or `$HOME` form. Returns null if not a home form.
- *
- * `~otheruser` cannot be resolved without the user database (getpwnam /
- * /etc/passwd), which Node does not expose and which is platform-specific, so
- * it is kept symbolic (`~otheruser/…`). This lets a config rule and a command
- * that both mention `~otheruser/x` normalize to the same string and match by
- * prefix. `~me` (the current user) still expands to the real home, like bash.
- */
-function expandHome(token: string): string | null {
-  if (token === "~") return os.homedir();
-  if (token.startsWith("~/")) return path.join(os.homedir(), token.slice(2));
-  if (token === "$HOME") return os.homedir();
-  if (token.startsWith("$HOME/")) return path.join(os.homedir(), token.slice(6));
-  // ~username: another user's home (or `~me`, which is equivalent to `~`).
-  const m = /^~([A-Za-z_][A-Za-z0-9_-]*)(.*)$/.exec(token);
-  if (m) {
-    const [, user, rest] = m;
-    if (user === CURRENT_USER) return path.join(os.homedir(), rest);
-    return `~${user}${rest}`;
-  }
-  return null;
+  return {
+    platform: process.platform === "win32" ? "win32" : "posix",
+    cwd: process.cwd(),
+    home: os.homedir(),
+    username,
+    temp: os.tmpdir(),
+    realTmp,
+    driveCwds,
+  };
 }
 
-/** Resolve any token (absolute, home, or relative-to-cwd) to a normalized absolute path. */
-export function resolveTarget(token: string, cwd: string): string {
-  const home = expandHome(token);
-  if (home !== null) return path.normalize(home);
-  // MSYS drive notation (/c/Users → C:\Users) must be tried before the generic
-  // absolute check: path.win32 mis-resolves /c/... to C:\c\.... (no-op on POSIX.)
-  const msys = msysDrive(token);
-  if (msys) return path.normalize(msys);
-  if (path.isAbsolute(token)) return path.normalize(token);
-  return path.resolve(cwd, token);
-}
+/** The production instance; tests may use it for real filesystem sandboxes. */
+export const paths: PathAPI = createPathAPI(hostEnvironment());

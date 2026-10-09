@@ -8,8 +8,13 @@
 
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
-import * as path from "node:path";
-import { DEFAULT_CONFIG, type AccessDeniedConfig, type AccessMode, type SupportedTool } from "./types.ts";
+import { paths } from "./paths.ts";
+import {
+  DEFAULT_CONFIG,
+  type AccessDeniedConfig,
+  type AccessMode,
+  type SupportedTool,
+} from "./types.ts";
 
 /** Read and parse a settings.json file. Returns parsed object or {}. */
 function readSettingsFile(filePath: string): any {
@@ -88,8 +93,12 @@ function asDeniedPaths(value: unknown): Record<string, string | null> {
  * @param cwd - Project working directory (for .pi/settings.json lookup)
  */
 export function loadConfig(cwd?: string): AccessDeniedConfig {
-  const globalSettings = readSettingsFile(path.join(getAgentDir(), "settings.json"));
-  const projectSettings = cwd ? readSettingsFile(path.join(cwd, ".pi", "settings.json")) : {};
+  const globalSettings = readSettingsFile(
+    paths.toNative(paths.join(getAgentDir(), "settings.json")),
+  );
+  const projectSettings = cwd
+    ? readSettingsFile(paths.toNative(paths.join(cwd, ".pi", "settings.json")))
+    : {};
 
   // A project accessDenied block replaces the global block as a whole. Fields
   // omitted from that selected block fall back to DEFAULT_CONFIG below.

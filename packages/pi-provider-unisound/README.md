@@ -17,26 +17,44 @@ Both channels share the endpoint `https://maas-api.unisound.com/v1`. The keys ar
 
 ## Models
 
-### `unisound` (pay-as-you-go)
+The catalog covers the full platform model set — both channels expose the
+same models and differ only in billing (permissions live on the API key).
+It is **refreshed from the live API** (`GET /v1/models`) when the cached
+snapshot is stale — at most once every 4 hours, matching pi's built-in
+catalog cadence — so newly published models appear without a plugin
+update:
 
-| Model | Reasoning | Input | Context | Max Output |
-|---|---|---|---|---|
-| `u2-flash` | Yes (on/off, no effort levels) | text | 512K | 128K |
-| `u2` | Always on (cannot disable) | text | 160K | 64K |
-| `u2-med` | Yes (off / low / medium / high) | text, image | 256K | not documented — declared as 64K |
-| `u2-radimed` | No (cannot enable) | text, image | 40K | not documented — declared as 8K |
+- **Network refresh**: each registration fetches the live catalog with its
+  own key during interactive startup when the persisted snapshot is older
+  than 4 hours, and replaces the registered model list. `pi update
+  --models` forces an immediate refresh.
+- **Offline restore**: the last-seen catalog is persisted to
+  `~/.pi/agent/models-store.json` and restored on offline startups
+  (`PI_OFFLINE=1`).
+- **Metadata**: `context_window` / `max_output` come from the live catalog.
+  Modalities, thinking behavior and pricing are not exposed by the
+  endpoint and fall back to the shipped specs per model id; models new to
+  the catalog get conservative family defaults (text-only input, on/off
+  thinking).
+- **Fallback**: the shipped spec table is used until the first
+  successful network refresh (or while the API is unreachable).
 
-### `unisound-plan` (Token Plan)
+### Reasoning families (shipped specs)
 
-| Model | Reasoning | Input | Context | Max Output |
-|---|---|---|---|---|
-| `u2-flash` | Yes (on/off) | text | 512K | 128K |
-| `u2` | Always on | text | 160K | 64K |
-| `u2-med` | Yes (off / low / medium / high) | text, image | 256K | not documented — declared as 64K |
-| `glm-5.2` | Yes (`reasoning_effort` off/high/max) | text | 1M | 128K |
-| `kimi-k3` | Always on (`reasoning_effort` low/high/max) | text, image | 1M | 1M |
+| Family | Thinking levels |
+|---|---|
+| U2 Flash | on/off (`thinking.type`) |
+| U2 | always on (cannot disable) |
+| U2 Med | off / low / medium / high (`reasoning_effort`) |
+| GLM-5.2, DeepSeek V4 family | off / high / max (`reasoning_effort`) |
+| GLM-5.3 / 5.3 Flash | off / low / high / max (`reasoning_effort`) |
+| Kimi K3 | low / high / max, always on (`reasoning_effort`) |
+| others | on/off (`thinking.type`) — levels unverified |
 
-`u2-radimed` is not part of the Token Plan. The platform also hosts third-party models on pay-as-you-go (DeepSeek, Kimi, GLM, Qwen, MiniMax); they are intentionally not registered — use their native providers.
+`u2-radimed` (medical imaging) is no longer listed by the live catalog
+and was removed (2026-10); it re-registers automatically if it returns.
+Pay-as-you-go U2 pricing is in [Pricing](#pricing); every model on the
+Token Plan and unpublished-price third-party models cost 0.
 
 ## Compatibility
 

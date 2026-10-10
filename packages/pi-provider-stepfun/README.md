@@ -20,6 +20,17 @@ StepFun also supports Anthropic-compatible Messages, but this extension uses its
 
 ## Models
 
+Each registration **refreshes its own channel catalog** (`GET <base>/models`)
+when the cached snapshot is stale — at most once every 4 hours, matching
+pi's built-in catalog cadence — and restores the last-seen catalog on
+offline startups; `pi update --models` forces an immediate refresh. The
+response shape is not yet verified against the live API (no key at
+hand): the parser accepts the common OpenAI-compatible dialects and
+prefers the shipped specs below for anything the catalog omits, and on
+any mismatch the refresh fails safely, keeping these static lists.
+
+Shipped specs:
+
 | Model | Reasoning | Input | Context | Max Output | Providers |
 |---|---|---|---|---|---|
 | `step-5-preview` | Yes | text, image | 1M | 64K | both |

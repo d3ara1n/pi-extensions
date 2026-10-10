@@ -21,14 +21,28 @@ Subscription plan provider. Cost set to zero — the subscription fee is a fixed
 
 ## Models
 
-Both providers export the same models:
+Both providers export the same chat model list, **refreshed from the
+live API** (`GET /v1/models`) when the cached snapshot is stale — at most
+once every 4 hours, matching pi's built-in catalog cadence. `pi update
+--models` forces an immediate refresh; the last-seen catalog is restored
+on offline startups. The endpoint returns ids only, so context windows,
+modalities and thinking behavior fall back to the shipped specs per model
+id; models new to the catalog get family defaults (text+image input,
+Qwen-style thinking toggle). Image-generation (`agnes-image-*`) and
+video-generation (`agnes-video-*`) models are excluded automatically.
+
+Shipped chat specs (verified against the live catalog 2026-10-10):
 
 | Model | Reasoning | Input | Context | Max Output |
 |---|---|---|---|---|
+| `agnes-2.5-flash` | Yes | text, image | 512K | 65.5K |
 | `agnes-2.0-flash` | Yes | text, image | 256K | 64K |
-| `agnes-1.5-flash` | No | text, image | 256K | 64K |
+| `agnes-2.5-pro` / `-beta` / `-alpha` | Yes | text, image | 256K* | 64K* |
+| `agnes-3.0-flash` / `-flash-max` | Yes | text, image | 256K* | 64K* |
 
-## Installation
+\* endpoint publishes no metadata — family defaults, pending a live check.
+`agnes-1.5-flash` is no longer listed by the live catalog and was
+removed (2026-10); it re-registers automatically if it returns.
 
 ```bash
 pi install npm:@d3ara1n/pi-provider-agnes

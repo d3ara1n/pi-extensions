@@ -57,19 +57,10 @@ const CHAT_COMPAT = {
 // whenever the live catalog cannot be fetched (offline, HTTP errors, aborts).
 const FALLBACK_MODELS: ChatModelConfig[] = [
   {
-    id: "sensenova-6.7-flash-lite",
-    name: "SenseNova 6.7 Flash-Lite",
-    reasoning: true,
-    input: ["text", "image"],
-    cost: ZERO_COST,
-    contextWindow: 262_144,
-    maxTokens: 65_536,
-    thinkingLevelMap: REASONING,
-    compat: CHAT_COMPAT,
-  },
-  {
+    // Listed by the live catalog (re-checked 2026-10-10).
+    // re-registers automatically if it returns.
     id: "sensenova-6.8-flash-lite",
-    name: "SenseNova 6.8 Flash Lite (Preview)",
+    name: "SenseNova 6.8 Flash Lite",
     reasoning: true,
     input: ["text", "image"],
     cost: ZERO_COST,
@@ -90,13 +81,26 @@ const FALLBACK_MODELS: ChatModelConfig[] = [
     compat: CHAT_COMPAT,
   },
   {
-    id: "deepseek-v4-pro",
-    name: "DeepSeek V4 Pro",
+    // New in the live catalog (first seen 2026-10).
+    id: "deepseek-flash",
+    name: "DeepSeek Flash",
     reasoning: true,
     input: ["text"],
     cost: ZERO_COST,
     contextWindow: 1_048_576,
-    maxTokens: 393_216,
+    maxTokens: 65_536,
+    thinkingLevelMap: REASONING,
+    compat: CHAT_COMPAT,
+  },
+  {
+    // New in the live catalog (first seen 2026-10).
+    id: "deepseek-v4.1-flash",
+    name: "DeepSeek V4.1 Flash",
+    reasoning: true,
+    input: ["text"],
+    cost: ZERO_COST,
+    contextWindow: 1_048_576,
+    maxTokens: 65_536,
     thinkingLevelMap: REASONING,
     compat: CHAT_COMPAT,
   },
@@ -112,16 +116,21 @@ const FALLBACK_MODELS: ChatModelConfig[] = [
     compat: CHAT_COMPAT,
   },
   {
+    // Catalog (2026-10) now reports text-only input and 64K max output;
+    // earlier specs advertised text+image / 1M output — catalog wins.
     id: "kimi-k3",
     name: "Kimi K3",
     reasoning: true,
-    input: ["text", "image"],
+    input: ["text"],
     cost: ZERO_COST,
     contextWindow: 1_048_576,
-    maxTokens: 1_048_576,
+    maxTokens: 65_536,
     thinkingLevelMap: REASONING,
     compat: CHAT_COMPAT,
   },
+  // sensenova-6.7-flash-lite and deepseek-v4-pro are delisted (absent from
+  // the live catalog since 2026-10) — removed; they re-register
+  // automatically if they return.
 ];
 
 /** Shipped specs by model id, used to fill gaps in live catalog entries. */

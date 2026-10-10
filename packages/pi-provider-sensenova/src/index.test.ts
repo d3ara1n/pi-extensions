@@ -126,6 +126,9 @@ test("registers the sensenova-plan provider with fallback models and a refresh h
   assert.equal(typeof config.refreshModels, "function");
   assert.ok(config.models.length > 0);
   assert.ok(config.models.some((model) => model.id === "kimi-k3"));
+  // Delisted models are gone from the shipped fallback.
+  assert.ok(!config.models.some((model) => model.id === "sensenova-6.7-flash-lite"));
+  assert.ok(!config.models.some((model) => model.id === "deepseek-v4-pro"));
 });
 
 test("offline phase without a stored catalog keeps the fallback list", async () => {
@@ -134,10 +137,10 @@ test("offline phase without a stored catalog keeps the fallback list", async () 
   assert.deepEqual(
     result.map((model) => model.id),
     [
-      "sensenova-6.7-flash-lite",
       "sensenova-6.8-flash-lite",
       "deepseek-v4-flash",
-      "deepseek-v4-pro",
+      "deepseek-flash",
+      "deepseek-v4.1-flash",
       "glm-5.2",
       "kimi-k3",
     ],
@@ -317,8 +320,8 @@ test("missing remote metadata falls back to shipped specs for known ids", async 
     assert.ok(kimi);
     assert.equal(kimi.name, "Kimi K3");
     assert.equal(kimi.contextWindow, 1_048_576);
-    assert.equal(kimi.maxTokens, 1_048_576);
-    assert.deepEqual(kimi.input, ["text", "image"]);
+    assert.equal(kimi.maxTokens, 65_536); // catalog-verified spec (2026-10)
+    assert.deepEqual(kimi.input, ["text"]); // catalog now reports text-only
     assert.equal(kimi.reasoning, true);
     const unknown = result.find((model) => model.id === "brand-new-model");
     assert.ok(unknown);

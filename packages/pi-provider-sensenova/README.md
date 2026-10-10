@@ -12,16 +12,15 @@ SenseNova (商汤日日新) provider for [Pi Coding Agent](https://pi.dev) — r
 
 ## Models
 
-| Model | Reasoning | Input | Context | Max Output |
-|---|---|---|---|---|
-| `sensenova-6.7-flash-lite` | Yes | text, image | 256K | 64K |
-| `sensenova-6.8-flash-lite` | Yes | text, image | 256K | 64K |
-| `deepseek-v4-flash` | Yes | text | 1M | 64K |
-| `deepseek-v4-pro` | Yes | text | 1M | 384K |
-| `glm-5.2` | Yes | text | 1M | 128K |
-| `kimi-k3` | Yes | text, image | 1M | 1M |
+The model catalog is **refreshed from the live SenseNova API** (`GET /v1/models`) when the cached snapshot is stale — at most once every 4 hours, matching pi's built-in catalog cadence — so newly published models appear without a plugin update:
 
-Image-generation models (`sensenova-u1-fast`, `sensenova-u1.5-lite`) are intentionally not registered — their output modality is image, not chat.
+- **Network refresh**: pi fetches the live catalog with your API key during interactive startup when the persisted snapshot is older than 4 hours, and replaces the registered model list. `pi update --models` forces an immediate refresh.
+- **Offline restore**: the last-seen catalog is persisted to `~/.pi/agent/models-store.json` and restored on offline startups (`PI_OFFLINE=1`).
+- **Filtering**: chat models (`output_modalities` contains `"text"`) are registered; image-generation models (e.g. `sensenova-u1.5-lite`, which outputs `image`) are excluded automatically.
+- **Metadata**: `context_length`, `max_output_length`, `pricing` and `supported_features` come from the live catalog; entries missing fields fall back to the shipped specs for known model ids, then to generic defaults. `thinkingLevelMap`/compat flags stay fixed.
+- **Fallback**: a static list is used only until the first successful network refresh (or while the API is unreachable), so a fresh install keeps working immediately.
+
+Image-generation models (e.g. `sensenova-u1.5-lite`, `sensenova-u1-fast`) are intentionally not registered — their output modality is image, not chat.
 
 The chat models run over an OpenAI-compatible chat/completions API — tool calling, streaming, and usage reporting are verified against the live API. Reasoning accepts only `low` / `medium` / `high` / `none`, so pi's `minimal` thinking level is not offered for these models.
 

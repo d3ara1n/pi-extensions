@@ -17,7 +17,8 @@ interface ChatModelLike {
 
 interface RefreshContextLike {
   allowNetwork: boolean;
-  stored?: { models?: unknown[] };
+  stored?: { models?: unknown[]; checkedAt?: number };
+  force?: boolean;
   credential?: { type: "api_key" | "oauth"; key?: string };
   signal: AbortSignal;
   publish: (publication: unknown) => Promise<boolean>;
@@ -91,6 +92,17 @@ const LIVE_CATALOG = {
     // Older catalog shape without modalities: excluded by the image-gen id heuristic.
     { id: "sensenova-u1.5-legacy", context_length: 262_144, max_output_length: 65_536 },
   ],
+};
+
+/** A persisted chat entry as written by a previous successful refresh. */
+const STORED_CHAT_MODEL = {
+  id: "deepseek-v4-pro",
+  name: "DeepSeek V4 Pro",
+  reasoning: true,
+  input: ["text"],
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 1_048_576,
+  maxTokens: 393_216,
 };
 
 async function withFetchStub(response: unknown, run: () => Promise<void>): Promise<void> {
@@ -240,5 +252,87 @@ test("network phase rejects unexpected response shapes", async () => {
       refreshModels(makeContext({ allowNetwork: true })),
       /unexpected response shape/,
     );
+  });
+});
+
+test("network phase skips fetching while the persisted snapshot is fresh", async () => {
+  const config = registeredConfig();
+  const refreshModels = config.refreshModels;
+  assert.ok(refreshModels);
+  const original = globalThis.fetch;
+  let fetchCalled = false;
+  let published = false;
+  globalThis.fetch = async () => {
+    fetchCalled = true;
+    return { ok: true, json: async () => LIVE_CATALOG } as unknown as Response;
+  };
+  try {
+    const result = await refreshModels(
+      makeContext({
+        allowNetwork: true,
+        stored: { models: [STORED_CHAT_MODEL], checkedAt: Date.now() },
+        publish: async () => {
+          published = true;
+          return true;
+        },
+      }),
+    );
+    assert.equal(fetchCalled, false);
+    assert.equal(published, false);
+    assert.deepEqual(
+      result.map((model) => model.id),
+      ["deepseek-v4-pro"],
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("forced refresh bypasses the freshness window", async () => {
+  const config = registeredConfig();
+  const refreshModels = config.refreshModels;
+  assert.ok(refreshModels);
+  await withFetchStub(LIVE_CATALOG, async () => {
+    const result = await refreshModels(
+      makeContext({
+        allowNetwork: true,
+        force: true,
+        stored: { models: [STORED_CHAT_MODEL], checkedAt: Date.now() },
+      }),
+    );
+    assert.deepEqual(
+      result.map((model) => model.id),
+      ["deepseek-v4-flash", "sensenova-6.8-flash-lite", "legacy-model"],
+    );
+  });
+});
+
+test("missing remote metadata falls back to shipped specs for known ids", async () => {
+  const config = registeredConfig();
+  const refreshModels = config.refreshModels;
+  assert.ok(refreshModels);
+  await withFetchStub({ data: [{ id: "kimi-k3" }, { id: "brand-new-model" }] }, async () => {
+    const result = await refreshModels(makeContext({ allowNetwork: true }));
+    const kimi = result.find((model) => model.id === "kimi-k3");
+    assert.ok(kimi);
+    assert.equal(kimi.name, "Kimi K3");
+    assert.equal(kimi.contextWindow, 1_048_576);
+    assert.equal(kimi.maxTokens, 1_048_576);
+    assert.deepEqual(kimi.input, ["text", "image"]);
+    assert.equal(kimi.reasoning, true);
+    const unknown = result.find((model) => model.id === "brand-new-model");
+    assert.ok(unknown);
+    assert.equal(unknown.name, "brand-new-model");
+    assert.equal(unknown.contextWindow, 262_144);
+    assert.deepEqual(unknown.input, ["text"]);
+  });
+});
+
+test("chat-empty catalogs are rejected so the previous list is kept", async () => {
+  const config = registeredConfig();
+  const refreshModels = config.refreshModels;
+  assert.ok(refreshModels);
+  await withFetchStub({ data: [LIVE_CATALOG.data[2]] }, async () => {
+    await assert.rejects(refreshModels(makeContext({ allowNetwork: true })), /no chat models/);
   });
 });

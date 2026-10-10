@@ -12,12 +12,12 @@ SenseNova (商汤日日新) provider for [Pi Coding Agent](https://pi.dev) — r
 
 ## Models
 
-The model catalog is **auto-refreshed from the live SenseNova API** (`GET /v1/models`) on every pi startup, so newly published models appear without a plugin update:
+The model catalog is **refreshed from the live SenseNova API** (`GET /v1/models`) when the cached snapshot is stale — at most once every 4 hours, matching pi's built-in catalog cadence — so newly published models appear without a plugin update:
 
-- **Network refresh**: pi fetches the live catalog with your API key during interactive startup and replaces the registered model list.
+- **Network refresh**: pi fetches the live catalog with your API key during interactive startup when the persisted snapshot is older than 4 hours, and replaces the registered model list. `pi update --models` forces an immediate refresh.
 - **Offline restore**: the last-seen catalog is persisted to `~/.pi/agent/models-store.json` and restored on offline startups (`PI_OFFLINE=1`).
 - **Filtering**: chat models (`output_modalities` contains `"text"`) are registered; image-generation models (e.g. `sensenova-u1.5-lite`, which outputs `image`) are excluded automatically.
-- **Metadata**: `context_length`, `max_output_length`, `pricing` and `supported_features` come from the live catalog; `thinkingLevelMap`/compat flags stay fixed.
+- **Metadata**: `context_length`, `max_output_length`, `pricing` and `supported_features` come from the live catalog; entries missing fields fall back to the shipped specs for known model ids, then to generic defaults. `thinkingLevelMap`/compat flags stay fixed.
 - **Fallback**: a static list is used only until the first successful network refresh (or while the API is unreachable), so a fresh install keeps working immediately.
 
 Image-generation models (e.g. `sensenova-u1.5-lite`, `sensenova-u1-fast`) are intentionally not registered — their output modality is image, not chat.

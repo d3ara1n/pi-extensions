@@ -18,13 +18,17 @@ export type IdleTimerToken = "muted" | "warning" | "error";
 const WARN_AT_TTL = 0.9;
 
 /**
- * Whole minutes since the anchor, floored — 4:59 reads as "4m", anything
- * under a minute reads as "0m". Negative or non-finite input clamps to 0.
+ * Idle duration, floored to whole minutes below an hour or one decimal
+ * in hours below a day and days thereafter. Invalid input clamps to "0m".
  *
  * @internal — exported for testing.
  */
-export function formatIdleMinutes(elapsedMs: number): string {
+export function formatIdleDuration(elapsedMs: number): string {
   if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return "0m";
+  const hourMs = 3_600_000;
+  const dayMs = 24 * hourMs;
+  if (elapsedMs >= dayMs) return `${(Math.floor(elapsedMs / dayMs * 10) / 10).toFixed(1)}d`;
+  if (elapsedMs >= hourMs) return `${(Math.floor(elapsedMs / hourMs * 10) / 10).toFixed(1)}h`;
   return `${Math.floor(elapsedMs / 60_000)}m`;
 }
 
@@ -152,7 +156,7 @@ export class ActivityIndicator {
     const elapsed = Date.now() - this.idleSince;
     return {
       kind: "idle",
-      label: formatIdleMinutes(elapsed),
+      label: formatIdleDuration(elapsed),
       token: idleTimerToken(elapsed, this.getTtl()),
     };
   }

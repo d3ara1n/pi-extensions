@@ -2,7 +2,7 @@ import * as assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import {
   ActivityIndicator,
-  formatIdleMinutes,
+  formatIdleDuration,
   idleTimerToken,
   lastActivityFromEntries,
   promptCacheTtlMs,
@@ -10,20 +10,28 @@ import {
 
 const MIN = 60_000;
 
-test("formatIdleMinutes floors to whole minutes", () => {
-  assert.equal(formatIdleMinutes(0), "0m");
-  assert.equal(formatIdleMinutes(59_999), "0m");
-  assert.equal(formatIdleMinutes(MIN), "1m");
+test("formatIdleDuration floors minutes and switches to decimal hours and days", () => {
+  assert.equal(formatIdleDuration(0), "0m");
+  assert.equal(formatIdleDuration(59_999), "0m");
+  assert.equal(formatIdleDuration(MIN), "1m");
   // 4:59 reads as 4m — the user-facing spec.
-  assert.equal(formatIdleMinutes(4 * MIN + 59_999), "4m");
-  assert.equal(formatIdleMinutes(5 * MIN), "5m");
-  assert.equal(formatIdleMinutes(63 * MIN), "63m");
+  assert.equal(formatIdleDuration(4 * MIN + 59_999), "4m");
+  assert.equal(formatIdleDuration(5 * MIN), "5m");
+  assert.equal(formatIdleDuration(60 * MIN - 1), "59m");
+  assert.equal(formatIdleDuration(60 * MIN), "1.0h");
+  assert.equal(formatIdleDuration(66 * MIN - 1), "1.0h");
+  assert.equal(formatIdleDuration(66 * MIN), "1.1h");
+  assert.equal(formatIdleDuration(24 * 60 * MIN - 1), "23.9h");
+  assert.equal(formatIdleDuration(24 * 60 * MIN), "1.0d");
+  assert.equal(formatIdleDuration(1_584 * MIN - 1), "1.0d");
+  assert.equal(formatIdleDuration(1_584 * MIN), "1.1d");
+  assert.equal(formatIdleDuration(10_000 * MIN), "6.9d");
 });
 
-test("formatIdleMinutes clamps negative and non-finite input to 0m", () => {
-  assert.equal(formatIdleMinutes(-MIN), "0m");
-  assert.equal(formatIdleMinutes(Number.NaN), "0m");
-  assert.equal(formatIdleMinutes(Number.POSITIVE_INFINITY), "0m");
+test("formatIdleDuration clamps negative and non-finite input to 0m", () => {
+  assert.equal(formatIdleDuration(-MIN), "0m");
+  assert.equal(formatIdleDuration(Number.NaN), "0m");
+  assert.equal(formatIdleDuration(Number.POSITIVE_INFINITY), "0m");
 });
 
 test("idleTimerToken stays muted while fresh and when the TTL is unknown", () => {

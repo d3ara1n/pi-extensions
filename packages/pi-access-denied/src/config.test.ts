@@ -316,7 +316,12 @@ describe("tools", () => {
     assert.deepEqual(loadConfig(tmpProject).tools, ["write", "edit"]);
   });
 
-  test("empty or invalid tool list falls back to default three", () => {
+  test("apply_patch is a supported tool", () => {
+    writeGlobal({ accessDenied: { tools: ["apply_patch"] } });
+    assert.deepEqual(loadConfig(tmpProject).tools, ["apply_patch"]);
+  });
+
+  test("empty or invalid tool list falls back to default tools", () => {
     writeGlobal({ accessDenied: { tools: ["read", "grep"] } });
     assert.deepEqual(loadConfig(tmpProject).tools, DEFAULT_CONFIG.tools);
   });

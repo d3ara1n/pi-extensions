@@ -37,7 +37,7 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 import type { AuthResult, Choice } from "./types.ts";
-import type { ExtractedTarget } from "./bash-extract.ts";
+import type { ExtractedTarget } from "./tools/types.ts";
 
 export interface TuiLike {
   requestRender(): void;

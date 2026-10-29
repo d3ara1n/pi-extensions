@@ -4,7 +4,7 @@
 
 Keep pi focused on your project. Review detected access to outside paths, remember locations you trust, and give the agent a reason when you block a path.
 
-For example, you can catch a broad `find /`, allow a shared notes folder, or tell the agent where an old data directory moved. The extension checks `write`, `edit`, and common path expressions in `bash` commands.
+For example, you can catch a broad `find /`, allow a shared notes folder, or tell the agent where an old data directory moved. The extension checks `write`, `edit`, `apply_patch`, and common path expressions in `bash` commands.
 
 Bash checks are best-effort. This is a behavior guard, not a security sandbox; use OS or container isolation when you need enforced filesystem boundaries.
 
@@ -91,14 +91,14 @@ Add an `accessDenied` block to `~/.pi/agent/settings.json`, or to `.pi/settings.
       },
       { "paths": ["/old/cache"] }
     ],
-    "tools": ["write", "edit", "bash"]
+    "tools": ["write", "edit", "bash", "apply_patch"]
   }
 }
 ```
 
 - `allowedPaths` lets you work in additional locations without repeated prompts.
 - `deniedPaths` blocks detected access to listed locations. An optional `reason` tells the agent what to do instead.
-- `tools` selects which supported tools to check. The default is `write`, `edit`, and `bash`.
+- `tools` selects which supported tools to check. The default is `write`, `edit`, `bash`, and `apply_patch`.
 - `mode` sets the starting mode. The default is `prompt`.
 
 A project's `accessDenied` block replaces the global block as a whole. Omitted fields use defaults, so include any global rules you also want in that project. Reload pi after changing settings.
@@ -114,6 +114,12 @@ This applies equally to default paths, settings, and remembered decisions. A mor
 The extension allows your project directory, the system temporary directory, `/tmp`, and common process I/O paths such as `/dev/null`, `/dev/stdout`, and `/dev/fd/`. It also recognizes macOS's `/private/tmp` and Windows device names such as `NUL`.
 
 Your home directory, `/etc`, `/var`, and `/usr` are not generally allowed. Add any locations you need to `allowedPaths`. You can also override a default allow with a more specific deny rule.
+
+## What apply_patch checks cover
+
+`apply_patch` paths come from the patch headers: `*** Add File:`, `*** Update File:`, `*** Delete File:`, and `*** Move to:`. The extension checks every source and move destination, deduplicates them, and applies the same allow/deny/prompt rules as `write` and `edit`.
+
+The adapter recognizes the tool name `apply_patch` and patch text in its `input` field, regardless of which extension provides the tool. Paths are literal: `~` and `$HOME` are not expanded. It scans declared paths without validating the patch envelope or hunks, resolving symlinks, or reading files. Unknown syntax is left to the tool itself; any detected paths still pass through the normal rules in every mode.
 
 ## What bash checks cover
 
@@ -182,6 +188,8 @@ In RPC/ACP hosts, such as an editor connected through pi-acp, requests appear as
 In print/JSON mode there is no interactive response, so requests in `prompt` mode are blocked as dismissed. Set `mode` to `deny` to block outside paths without interaction, or `allow` to let them through. Explicit deny rules still apply.
 
 ## Development
+
+Tool adapters live in `src/tools/`. Each adapter implements `extract(input, cwd)` and returns paths with optional display context. Add a module and register it in `src/tools/index.ts`; supported tool names, configuration validation, and default selection all derive from that table. `file.ts` handles `write` and `edit`, `bash.ts` uses the shell analyzer, and `apply-patch.ts` scans Codex-format patch headers. Adapters depend on input formats, not on the extensions that provide the tools. Rule decisions and authorization UI stay in the shared gate.
 
 Production code and tests share the path API in `src/paths.ts`. Use `paths` for the host environment or `createPathAPI(environment)` for a fixed target environment. The API owns normalization, joining, resolution, equality, directory containment, home expansion, and Git Bash drive conversion. `target(input, cwd)` expands tool/config path syntax; `resolve(...parts)` handles literal values without expanding stored `~` or `$HOME` again. `toNative()` converts paths at native filesystem boundaries.
 

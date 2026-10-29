@@ -124,7 +124,7 @@ test("config falls back to defaults without any settings file", () => {
 
 test("config reads the applyPatch block from global settings", () => {
   withSettings({ contextLines: 3, maxChangedLines: 25 }, (cwd) => {
-    assert.deepEqual(loadConfig(cwd), { contextLines: 3, maxChangedLines: 25 });
+    assert.deepEqual(loadConfig(cwd), { contextLines: 3, maxChangedLines: 25, workspaceOnly: true });
   });
 });
 
@@ -133,7 +133,7 @@ test("config replaces the global applyPatch block with a project one", () => {
     writeProjectSettings(cwd, { contextLines: 2 });
     // The project block wins as a whole, so maxChangedLines falls back to the
     // default instead of inheriting the global 25.
-    assert.deepEqual(loadConfig(cwd), { contextLines: 2, maxChangedLines: 10 });
+    assert.deepEqual(loadConfig(cwd), { contextLines: 2, maxChangedLines: 10, workspaceOnly: true });
   });
 });
 
@@ -143,7 +143,16 @@ test("config ignores invalid fields per field", () => {
   });
   withSettings({ contextLines: 2.9 }, (cwd) => {
     // A budget below the minimum is invalid, not clamped: fall back to default.
-    assert.deepEqual(loadConfig(cwd), { contextLines: 2, maxChangedLines: 10 });
+    assert.deepEqual(loadConfig(cwd), { contextLines: 2, maxChangedLines: 10, workspaceOnly: true });
+  });
+});
+
+test("config reads workspaceOnly and defaults it to true", () => {
+  withSettings({ workspaceOnly: false }, (cwd) => {
+    assert.deepEqual(loadConfig(cwd), { ...DEFAULT_CONFIG, workspaceOnly: false });
+  });
+  withSettings({ workspaceOnly: "no" }, (cwd) => {
+    assert.deepEqual(loadConfig(cwd), DEFAULT_CONFIG);
   });
 });
 

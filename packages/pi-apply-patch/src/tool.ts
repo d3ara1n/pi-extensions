@@ -6,7 +6,7 @@ import {
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { applyPatch, formatSummary, nodeFileSystem, type ApplyContext } from "./apply.ts";
-import { DEFAULT_CONFIG, type PatchRenderConfig } from "./config.ts";
+import { DEFAULT_CONFIG, type PatchConfig } from "./config.ts";
 import { CODEX_APPLY_PATCH_GRAMMAR } from "./grammar.ts";
 import {
   countPatchFiles,
@@ -51,12 +51,13 @@ function previewRows(
   theme: Theme,
   cwd: string,
   state: Record<string, unknown>,
+  workspaceOnly: boolean,
 ): string[] {
   if (typeof args.input !== "string" || args.input.length === 0) return [];
   const previewState =
     (state.previewState as StreamPreviewState | undefined) ?? emptyPreviewState();
   state.previewState = previewState;
-  return buildPreview(args.input, cwd, previewState).flatMap((block) =>
+  return buildPreview(args.input, cwd, previewState, undefined, workspaceOnly).flatMap((block) =>
     renderPreviewBlock(block, theme),
   );
 }
@@ -64,15 +65,15 @@ function previewRows(
 /** @internal */
 export function makeApplyPatchTool(
   dependencies: Dependencies = { fs: nodeFileSystem, withFileQueue: withFileMutationQueue },
-  getConfig: () => PatchRenderConfig = () => DEFAULT_CONFIG,
+  getConfig: () => PatchConfig = () => DEFAULT_CONFIG,
 ): ToolDefinition<typeof schema, PatchDetails> {
   return {
     name: "apply_patch",
     label: "apply_patch",
-    promptSnippet: "Edit workspace files with Codex-format patches",
+    promptSnippet: "Edit files with Codex-format patches",
     promptGuidelines: [
       "apply_patch format: send patch text without markdown fences, commentary, or unified-diff headers ('---', '+++', '@@ -N,M +N,M @@').",
-      "Paths: use literal, unquoted paths relative to the workspace, or absolute paths within it. Each source file may appear only once per patch; combine its edits under one '*** Update File: path' header.",
+      "Paths: use literal, unquoted paths relative to the workspace, or absolute paths. With workspaceOnly enabled (the default), paths must resolve inside the workspace. Each source file may appear only once per patch; combine its edits under one '*** Update File: path' header.",
       "Add: write '*** Add File: path', then prefix EVERY content line with '+', including blank lines (a blank line is '+'). Add overwrites an existing file; use Update for partial edits. Delete: write '*** Delete File: path' with no body.",
       "Update: write '*** Update File: path', then one or more nonempty hunks, each starting with '@@' or '@@ <existing line>'. Prefix unchanged context with one space, removed lines with '-', and added lines with '+'. These prefixes come before the original indentation. Blank lines still need their corresponding prefix. Replace text with '-' old lines followed by '+' new lines.",
       "Match current content: read the relevant source before constructing an update; reuse known current content, and re-read when it may be stale. Copy removed and context lines literally, with enough surrounding context to identify the intended occurrence. Matching selects the first match; an ambiguous snippet can edit the wrong location.",
@@ -102,7 +103,7 @@ export function makeApplyPatchTool(
       ].join("\n"),
     ],
     description:
-      "Create, update, move, or delete workspace files using a Codex-format patch. Returns a summary of changed files or failure diagnostics. Direct tool call only — not callable from codemode scripts: it is absent from the script's `tools` object.",
+      "Create, update, move, or delete files using a Codex-format patch. Returns a summary of changed files or failure diagnostics. Direct tool call only — not callable from codemode scripts: it is absent from the script's `tools` object.",
     parameters: schema,
     constrainedSampling: { type: "grammar", variants: { openai_lark: CODEX_APPLY_PATCH_GRAMMAR } },
     // Model-only: the tool is built around grammar-constrained patch generation by the
@@ -111,7 +112,12 @@ export function makeApplyPatchTool(
     exposure: "model-only",
     renderShell: "default",
     async execute(_id, { input }, signal, _onUpdate, ctx) {
-      const result = await applyPatch(input, { ...dependencies, cwd: ctx.cwd, signal });
+      const result = await applyPatch(input, {
+        ...dependencies,
+        cwd: ctx.cwd,
+        signal,
+        workspaceOnly: getConfig().workspaceOnly,
+      });
       return {
         content: [{ type: "text", text: formatSummary(result.files) }],
         details: makeDetails(result.files),
@@ -135,7 +141,13 @@ export function makeApplyPatchTool(
       // History replay supplies a final result without an execution-start event.
       // Preview only while the call is pending and has no final result.
       if (!context.executionStarted && context.isPartial) {
-        const rows = previewRows(args, theme, context.cwd, context.state);
+        const rows = previewRows(
+          args,
+          theme,
+          context.cwd,
+          context.state,
+          getConfig().workspaceOnly,
+        );
         if (rows.length > 0) {
           component.addChild(new Text("", 0, 0));
           component.addChild(new Text(rows.join("\n"), 0, 0));

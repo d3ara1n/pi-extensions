@@ -322,3 +322,117 @@ test("prompt mode outside TUI: always-deny via dialog is remembered for the sess
   assert.ok(second && typeof second === "object" && "block" in second);
   assert.equal(calls, 1);
 });
+
+test("deny mode blocks apply_patch paths outside the project", async () => {
+  project = fs.mkdtempSync(path.join(path.temp, "ad-patch-test-"));
+  fs.mkdirSync(path.join(project, ".pi"));
+  fs.writeFileSync(
+    path.join(project, ".pi", "settings.json"),
+    JSON.stringify({ accessDenied: { mode: "deny" } }),
+  );
+
+  const handlers = new Map<string, Handler>();
+  accessDenied({
+    on(event: string, handler: Handler) {
+      handlers.set(event, handler);
+    },
+    registerCommand() {},
+  } as any);
+
+  const start = handlers.get("session_start");
+  const toolCall = handlers.get("tool_call");
+  const stop = handlers.get("session_shutdown");
+  assert.ok(start);
+  assert.ok(toolCall);
+  assert.ok(stop);
+  shutdown = () => stop();
+
+  const ctx = {
+    cwd: project,
+    mode: "rpc",
+    hasUI: false,
+    ui: {
+      theme: { fg: (_color: string, text: string) => text },
+      setStatus() {},
+    },
+  };
+  await start({}, ctx);
+
+  const inside = await toolCall(
+    {
+      type: "tool_call",
+      toolCallId: "patch-inside",
+      toolName: "apply_patch",
+      input: { input: "*** Begin Patch\n*** Add File: inside.txt\n+x\n*** End Patch" },
+    },
+    ctx,
+  );
+  assert.equal(inside, undefined);
+
+  const outside = path.join(path.root(project), "outside-patch.txt");
+  const blocked = await toolCall(
+    {
+      type: "tool_call",
+      toolCallId: "patch-outside",
+      toolName: "apply_patch",
+      input: { input: `*** Begin Patch\n*** Add File: ${outside}\n+x\n*** End Patch` },
+    },
+    ctx,
+  );
+  assert.ok(blocked && typeof blocked === "object" && "block" in blocked);
+  assert.match((blocked as any).reason, /Blocked by access-denied/);
+  assert.match((blocked as any).reason, /outside-patch\.txt/);
+});
+
+test("allow mode still enforces explicit denies for detected patch paths", async () => {
+  project = fs.mkdtempSync(path.join(path.temp, "ad-patch-parse-"));
+  const denied = path.join(path.root(project), "blocked-patch.txt");
+  fs.mkdirSync(path.join(project, ".pi"));
+  fs.writeFileSync(
+    path.join(project, ".pi", "settings.json"),
+    JSON.stringify({
+      accessDenied: { mode: "allow", deniedPaths: [{ paths: [denied], reason: "use another file" }] },
+    }),
+  );
+
+  const handlers = new Map<string, Handler>();
+  accessDenied({
+    on(event: string, handler: Handler) {
+      handlers.set(event, handler);
+    },
+    registerCommand() {},
+  } as any);
+
+  const start = handlers.get("session_start");
+  const toolCall = handlers.get("tool_call");
+  const stop = handlers.get("session_shutdown");
+  assert.ok(start);
+  assert.ok(toolCall);
+  assert.ok(stop);
+  shutdown = () => stop();
+
+  const ctx = {
+    cwd: project,
+    mode: "rpc",
+    hasUI: false,
+    ui: {
+      theme: { fg: (_color: string, text: string) => text },
+      setStatus() {},
+    },
+  };
+  await start({}, ctx);
+
+  const blocked = await toolCall(
+    {
+      type: "tool_call",
+      toolCallId: "patch-parse",
+      toolName: "apply_patch",
+      input: {
+        input: `<<'EOF'\n*** Begin Patch\n*** Unknown: x\n*** Add File: ${denied}\n+x\n*** End Patch\nEOF`,
+      },
+    },
+    ctx,
+  );
+  assert.ok(blocked && typeof blocked === "object" && "block" in blocked);
+  assert.match((blocked as any).reason, /use another file/);
+});

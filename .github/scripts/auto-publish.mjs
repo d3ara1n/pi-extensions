@@ -7,7 +7,7 @@
  *   1. Find the latest published version (npm tag)
  *   2. Parse conventional commits since that tag
  *   3. Determine bump level (feat → minor, fix → patch, ! → major)
- *   4. Bump version, commit, tag, publish
+ *   4. Publish, save the source tag, then update version fields on main
  *
  * Commits without a matching scope or with chore/docs/refactor/style/test
  * are ignored — no publish triggered.
@@ -16,6 +16,7 @@
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { saveReleaseTag, writeReleaseVersions } from "./release-records.mjs";
 
 // ── Helpers ─────────────────────────────────────────────
 
@@ -121,7 +122,7 @@ await waitForOtherPublishRuns();
 
 console.log(`Scanning ${packageDirs.length} package(s)...\n`);
 
-let published = 0;
+const published = [];
 let failed = 0;
 
 for (const dir of packageDirs) {
@@ -150,6 +151,7 @@ for (const dir of packageDirs) {
     if (remoteVersion === "0.0.0") {
       // Never published — create baseline tag at HEAD so future runs work.
       run(`git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" tag ${lastTag}`);
+      run(`git push origin refs/tags/${lastTag}`);
       log(`Created baseline tag: ${lastTag}`);
       log("No previous publish, skipping");
       continue;
@@ -253,49 +255,27 @@ for (const dir of packageDirs) {
         writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + "\n");
       }
     }
-    log(`✅ Published ${fullName}@${newVersion}`);
-    published++;
-
-    // Computed after publish: an E409 retry may have bumped the version.
-    const tag = `${fullName}@${newVersion}`;
-
-    // Only commit + tag on success
-    run(`git add ${pkgJsonPath}`);
-    const needsCommit = run(`git diff --cached --name-only`, { allowFail: true });
-    if (needsCommit) {
-      run(`git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" commit -m "release: ${fullName}@${newVersion}"`);
-    }
-
-    const existingTag = run(`git tag -l "${tag}"`, { allowFail: true });
-    if (existingTag) {
-      log(`Tag already exists: ${tag}, skipping`);
-    } else {
-      run(`git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" tag ${tag}`);
-      log(`Tagged: ${tag}`);
-    }
   } catch (e) {
     // Publish failed — revert package.json, continue to next package
     pkg.version = originalVersion;
     writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + "\n");
     console.error(`  ❌ Failed to publish ${fullName}@${newVersion}: ${e.stderr?.trim() || e.message}`);
     failed++;
+    continue;
   }
+  log(`✅ Published ${fullName}@${newVersion}`);
+  const release = { dir, name: fullName, version: newVersion };
+  published.push(release);
+  // Preserve successful npm releases even if updating main later fails.
+  // Bookkeeping failures must not be reported as failed npm publications.
+  log(`Saved tag: ${saveReleaseTag(rootDir, release)}`);
 }
 
 console.log(`\n${"─".repeat(40)}`);
-console.log(`Published ${published} package(s), ${failed} failed`);
+console.log(`Published ${published.length} package(s), ${failed} failed`);
 
 if (failed > 0) {
   process.exitCode = 1;
 }
 
-if (published > 0) {
-  // Fetch + rebase to avoid rejected push when remote moved ahead.
-  run("git fetch origin main");
-  // Rebase needs a committer identity when it replays commits (diverged remote),
-  // same as commit/tag above — otherwise: "Committer identity unknown".
-  run(`git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" rebase origin/main`);
-  // Push version bump commits + all tags (lightweight tags aren't picked up by --follow-tags)
-  run("git push");
-  run("git push --tags");
-}
+writeReleaseVersions(rootDir, published);

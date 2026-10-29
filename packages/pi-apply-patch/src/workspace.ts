@@ -16,6 +16,8 @@ export interface Workspace {
   readonly cwd: string;
   readonly root: string;
   readonly fs: PatchFileSystem;
+  /** When false, paths outside `cwd`/`root` are allowed. */
+  readonly workspaceOnly: boolean;
 }
 
 export interface WorkspacePath {
@@ -42,8 +44,12 @@ export function within(path: string, root: string): boolean {
 }
 
 /** @internal */
-export async function openWorkspace(cwd: string, fs: PatchFileSystem): Promise<Workspace> {
-  return { cwd: resolve(cwd), root: await fs.realpath(cwd), fs };
+export async function openWorkspace(
+  cwd: string,
+  fs: PatchFileSystem,
+  workspaceOnly = true,
+): Promise<Workspace> {
+  return { cwd: resolve(cwd), root: await fs.realpath(cwd), fs, workspaceOnly };
 }
 
 /** Resolve nonexistent leaves through their nearest existing, non-dangling ancestor. */
@@ -72,11 +78,15 @@ export async function resolveWorkspacePath(
   if (!input || input.includes("\0"))
     throw new Error("Patch paths must be nonempty and contain no NUL characters.");
   const path = resolve(workspace.cwd, input);
-  if (!within(path, workspace.cwd) && !within(path, workspace.root)) {
+  if (
+    workspace.workspaceOnly &&
+    !within(path, workspace.cwd) &&
+    !within(path, workspace.root)
+  ) {
     throw new Error(`Path is outside the workspace: ${input}`);
   }
   const key = await canonicalPath(path, workspace.fs);
-  if (!within(key, workspace.root))
+  if (workspace.workspaceOnly && !within(key, workspace.root))
     throw new Error(`Path resolves outside the workspace: ${input}`);
   if (key === workspace.root) throw new Error(`Patch target is the workspace directory: ${input}`);
   return { path, key };

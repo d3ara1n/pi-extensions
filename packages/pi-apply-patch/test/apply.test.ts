@@ -78,6 +78,49 @@ test("rejects dangling symlinks and non-file targets", async () => {
   );
 });
 
+test("workspaceOnly false allows add, update, delete, and move outside the workspace", async () => {
+  const fs = new MemoryFileSystem();
+  const outside = resolve(ROOT, "../outside");
+  fs.addDir(outside);
+  fs.files.set(resolve(outside, "edit.txt"), "old\n");
+  fs.files.set(resolve(outside, "delete.txt"), "gone\n");
+  fs.files.set(resolve(outside, "move.txt"), "old\n");
+  await applyPatch(
+    patch(
+      [
+        `*** Add File: ${resolve(outside, "new.txt")}`,
+        "+new",
+        "*** Update File: ../outside/edit.txt",
+        "@@",
+        "-old",
+        "+edited",
+        `*** Delete File: ${resolve(outside, "delete.txt")}`,
+        "*** Update File: ../outside/move.txt",
+        "*** Move to: ../outside/moved.txt",
+        "@@",
+        "-old",
+        "+moved",
+      ].join("\n"),
+    ),
+    fs.context({ workspaceOnly: false }),
+  );
+  assert.equal(fs.files.get(resolve(outside, "new.txt")), "new\n");
+  assert.equal(fs.files.get(resolve(outside, "edit.txt")), "edited\n");
+  assert.equal(fs.files.has(resolve(outside, "delete.txt")), false);
+  assert.equal(fs.files.has(resolve(outside, "move.txt")), false);
+  assert.equal(fs.files.get(resolve(outside, "moved.txt")), "moved\n");
+});
+
+test("workspaceOnly false follows external symlinks", async () => {
+  const fs = new MemoryFileSystem({ "../external/secret": "secret\n" });
+  fs.links.set(resolve(ROOT, "escape"), resolve(ROOT, "../external"));
+  await applyPatch(
+    patch("*** Update File: escape/secret\n@@\n-secret\n+new"),
+    fs.context({ workspaceOnly: false }),
+  );
+  assert.equal(fs.files.get(resolve(ROOT, "../external/secret")), "new\n");
+});
+
 test("preserves internal symlink update and delete semantics", async () => {
   const fs = new MemoryFileSystem({ target: "old\n" });
   fs.links.set(resolve(ROOT, "link"), resolve(ROOT, "target"));

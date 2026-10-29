@@ -1,9 +1,9 @@
 /**
- * pi-access-denied — behavior guard for write/edit/bash path choices.
+ * pi-access-denied — behavior guard for tool path choices.
  *
  * Nudges agents away from unnecessary access outside the project: broad disk
- * searches, stale application-data paths, and persistent output written to
- * Because static bash inspection cannot be accurate (see bash-extract.ts), it
+ * searches, stale application-data paths, and unwanted persistent output.
+ * Because static inspection cannot be exhaustive, it
  * favors low noise — letting an ambiguous case through over blocking an
  * ordinary command — so it is a behavior guard, not a security boundary or
  * shell sandbox.
@@ -11,7 +11,7 @@
  * Three modes (switchable at runtime via `/access-denied`):
  *   - prompt: ask the user; choices are allow / always-allow / deny / always-deny
  *   - deny:   block any out-of-bounds access outright
- *   - allow:  passthrough (effectively disable the gate)
+ *   - allow:  allow uncovered paths; explicit deny rules still apply
  *
  * All access decisions flow through a single PathManager (path-manager.ts)
  * using longest-prefix-match across three rule layers (builtin / config /
@@ -24,32 +24,18 @@
  * "the user declined this" — the software speaks with the user's voice.
  */
 
-import {
-  isToolCallEventType,
-  type ExtensionAPI,
-  type ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { loadConfig } from "./config.ts";
 import { PathManager } from "./path-manager.ts";
 import { paths } from "./paths.ts";
-import { extractBashTargetsDetailed, type ExtractedTarget } from "./bash-extract.ts";
-import {
-  DEFAULT_CONFIG,
-  type AccessMode,
-  type AuthResult,
-  type Choice,
-  type SupportedTool,
-} from "./types.ts";
+import { isSupportedTool, TOOL_ADAPTERS } from "./tools/index.ts";
+import type { ExtractedTarget } from "./tools/types.ts";
+import { DEFAULT_CONFIG, type AccessMode, type AuthResult, type Choice } from "./types.ts";
 import { AuthPanel, CHOICE_LABELS, CHOICES } from "./auth-panel.ts";
 
 const GLOBAL_KEY = "__piAccessDenied";
 const STATUS_KEY = "access-denied";
-const SUPPORTED_TOOLS: ReadonlySet<string> = new Set<SupportedTool>(["write", "edit", "bash"]);
-
-function isSupportedTool(toolName: string): toolName is SupportedTool {
-  return SUPPORTED_TOOLS.has(toolName);
-}
 
 interface SessionState {
   mode: AccessMode;
@@ -112,11 +98,10 @@ function denyReason(note?: string): string {
  * dismisses the path list (Esc), `cancelled` is true.
  */
 async function promptDecision(
-  toolName: string,
+  header: string,
   violations: ExtractedTarget[],
   ctx: ExtensionContext,
 ): Promise<AuthResult> {
-  const header = toolName === "bash" ? "bash command" : `${toolName}`;
   return ctx.ui.custom<AuthResult>(
     (tui, theme, _kb, done) => {
       return new AuthPanel(violations, header, tui, theme, { onResult: (r) => done(r) });
@@ -142,16 +127,15 @@ async function promptDecision(
  * path cancels the whole authorization.
  */
 async function dialogDecision(
-  toolName: string,
+  header: string,
+  action: string,
   violations: ExtractedTarget[],
   ctx: ExtensionContext,
 ): Promise<AuthResult> {
-  const header = toolName === "bash" ? "bash command" : `${toolName}`;
   const options = CHOICES.map((c) => CHOICE_LABELS[c]);
   const byLabel = new Map(CHOICES.map((c) => [CHOICE_LABELS[c], c]));
   const choices = new Map<string, Choice>();
   for (const v of violations) {
-    const action = toolName === "bash" ? "may access" : "wants";
     const displayPath = `${v.path}${v.estimate ? " [estimate]" : ""}`;
     const title = v.source
       ? `access-denied · ${header} ${action} ${displayPath}\nsource: ${v.source}${v.condition ? `\n    ${v.condition}` : ""}`
@@ -190,17 +174,10 @@ export default function (pi: ExtensionAPI) {
     const pm = state.pm;
     const cwd = ctx.cwd;
 
-    // 1. Extract the targets this call wants to reach.
-    //    write/edit: the single `path` argument — exact.
-    //    bash:       escaping path candidates and known cd destinations.
-    let targets: ExtractedTarget[];
-    if (isToolCallEventType("write", event) || isToolCallEventType("edit", event)) {
-      targets = [{ path: paths.target(event.input.path, cwd) }];
-    } else if (isToolCallEventType("bash", event)) {
-      targets = extractBashTargetsDetailed(event.input.command, cwd);
-    } else {
-      return; // tool not understood here — nothing to gate
-    }
+    // 1. Interpret the tool's input through its adapter.
+    const adapter = TOOL_ADAPTERS[toolName];
+    const targets = adapter.extract(event.input, cwd);
+    const header = adapter.label ?? toolName;
 
     // 2. Classify every target through the single PathManager decision engine.
     //    decide() returns allow | deny | outside. A deny is an explicit rule
@@ -226,7 +203,7 @@ export default function (pi: ExtensionAPI) {
     if (outside.length === 0) return;
 
     // 5. mode logic applies only to uncovered ("outside") targets.
-    if (state.mode === "allow") return; // gate disabled
+    if (state.mode === "allow") return;
 
     if (state.mode === "deny") {
       return {
@@ -243,8 +220,8 @@ export default function (pi: ExtensionAPI) {
     // select() resolves undefined and the call is dismissed (soft deny).
     const result =
       ctx.mode === "tui"
-        ? await promptDecision(toolName, outside, ctx)
-        : await dialogDecision(toolName, outside, ctx);
+        ? await promptDecision(header, outside, ctx)
+        : await dialogDecision(header, adapter.action ?? "wants", outside, ctx);
     if (result.cancelled) {
       // dismissed — soft deny so the agent learns it was not authorized
       return { block: true, reason: "Authorization dismissed" };

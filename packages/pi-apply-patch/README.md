@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-apply-patch)](https://www.npmjs.com/package/@d3ara1n/pi-apply-patch) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-apply-patch)](https://www.npmjs.com/package/@d3ara1n/pi-apply-patch) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-apply-patch)](https://www.npmjs.com/package/@d3ara1n/pi-apply-patch)
 
-Codex-compatible `apply_patch` editing for pi, limited to the current workspace.
+Codex-compatible `apply_patch` editing for pi, limited to the current workspace by default.
 
 GPT models accustomed to Codex can use the familiar freeform patch format. The extension registers the official Lark grammar through pi's constrained sampling API and implements patch parsing, context matching, and file operations in TypeScript. It has no additional runtime library dependencies.
 
@@ -30,7 +30,7 @@ After changing extension source or loading configuration, run `/reload` or resta
 
 ## Configuration
 
-The folded view of the result diff is configurable via the `applyPatch` block in
+The result-diff view and patch path policy are configurable via the `applyPatch` block in
 `~/.pi/agent/settings.json` (or a project-level `.pi/settings.json`, which
 replaces the global block entirely):
 
@@ -38,7 +38,8 @@ replaces the global block entirely):
 {
   "applyPatch": {
     "contextLines": 1,
-    "maxChangedLines": 10
+    "maxChangedLines": 10,
+    "workspaceOnly": true
   }
 }
 ```
@@ -47,11 +48,15 @@ replaces the global block entirely):
 drops surrounding context.
 - `maxChangedLines` — changed (`-`/`+`) lines kept per changed region, counted
 across removals and additions together. The rest collapse into one hint line.
+- `workspaceOnly` — keep patch paths inside the workspace. Default `true`. Set
+it to `false` to allow Add, Update, Delete, and Move outside the workspace;
+the same canonical-path, duplicate-target, and symlink checks still apply.
 
-These bound the folded view, which is what the TUI shows by default. `ctrl+o`
-expands the tool row to the full, uncropped diff. A non-numeric, negative, or
-below-minimum value falls back to the default above. Changes apply after
-`/reload` or a restart.
+`contextLines` and `maxChangedLines` bound the folded view, which is what the
+TUI shows by default. `ctrl+o` expands the tool row to the full, uncropped
+diff. A non-numeric, negative, or below-minimum value falls back to the default
+above. `workspaceOnly` applies to both execution and streaming preview reads.
+Changes apply after `/reload` or a restart.
 
 ## Tool and transport
 
@@ -65,7 +70,7 @@ This uses the Codex custom-tool protocol, not the distinct OpenAI API built-in `
 
 The tool is registered with `model-only` exposure: it is declared to the model, but codemode scripts cannot call it — it is absent from the script's `tools` object, whose file edits go through pi's callable file tools instead.
 
-While the model streams the patch, the tool row previews the files it has parsed so far. Completed updates use the same parser and matcher as execution to show a diff against the file on disk; additions show their proposed content and deletions show the file name. Sections still being written appear as colored patch lines. Invalid or unmatched sections show a warning without hiding the rest of the patch. Preview reads follow the same workspace boundaries as execution, including symbolic links. The preview disappears when execution starts.
+While the model streams the patch, the tool row previews the files it has parsed so far. Completed updates use the same parser and matcher as execution to show a diff against the file on disk; additions show their proposed content and deletions show the file name. Sections still being written appear as colored patch lines. Invalid or unmatched sections show a warning without hiding the rest of the patch. Preview reads follow the same path policy as execution, including symbolic links and `workspaceOnly`. The preview disappears when execution starts.
 
 ## Patch format
 
@@ -110,9 +115,11 @@ Add overwrites existing files. Move writes the destination, overwriting it if ne
 
 ## Workspace and failure behavior
 
-The workspace is `ctx.cwd` at execution time. Relative paths and absolute paths are accepted when both their resolved spelling and canonical location are within that workspace. Source paths, move destinations, existing symlinks, and the nearest existing ancestors of new files are checked. Dangling symlinks, non-file targets, and duplicate canonical source paths are rejected. The same boundary rule applies to Delete: a symlink pointing outside the workspace is rejected even when the operation would only unlink that symlink.
+The workspace is `ctx.cwd` at execution time. With the default `workspaceOnly: true`, relative paths and absolute paths are accepted when both their resolved spelling and canonical location are within that workspace. Source paths, move destinations, existing symlinks, and the nearest existing ancestors of new files are checked. Dangling symlinks, non-file targets, and duplicate canonical source paths are rejected. The same boundary rule applies to Delete: a symlink pointing outside the workspace is rejected even when the operation would only unlink that symlink.
 
-The extension performs these checks itself and does not integrate with a separate permission extension. Path checks are not an OS sandbox: they do not isolate other processes, eliminate filesystem races, or track hard-link destinations outside the workspace.
+Set `applyPatch.workspaceOnly` to `false` to allow Add, Update, Delete, and Move outside the workspace. Relative and absolute paths are both accepted; the extension still resolves canonical paths, deduplicates targets, rejects dangling symlinks, and rejects directory targets. This is an explicit opt-in.
+
+The extension performs these checks itself and does not integrate with a separate permission extension. Path checks are not an OS sandbox: they do not isolate other processes, eliminate filesystem races, or track hard-link destinations outside the workspace. With `workspaceOnly: false`, `apply_patch` can write or delete anywhere the pi process can access.
 
 All operations are parsed, paths are checked, and file changes are verified before the first write. Participating files share pi's mutation queues, acquired in a consistent order. Paths are rechecked after waiting and before mutations. For nonexistent targets beneath directory symlinks, pi's built-in tools can use a different queue key; concurrent creation through those aliases is not guaranteed to serialize across tools. If an earlier move changes a later source, the later update is matched against that source's current content.
 

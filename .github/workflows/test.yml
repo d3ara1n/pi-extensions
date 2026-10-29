@@ -57,3 +57,6 @@ jobs:
 
       - name: Run workspace tests
         run: npm test --workspaces --if-present
+
+      - name: Test release bookkeeping in isolated Git repositories
+        run: node --test .github/scripts/release-records.integration.test.mjs

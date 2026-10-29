@@ -108,6 +108,20 @@ test("completed deletions do not report a read failure", () => {
   assert.deepEqual(reads, []);
 });
 
+test("preview reads outside paths when workspaceOnly is false", () => {
+  const outside = resolve(ROOT, "../outside.txt");
+  const { fs, reads } = fixture({ [outside]: "old\n" });
+  const [block] = buildPreview(
+    patch(`*** Update File: ${outside}`, "@@", "-old", "+new"),
+    ROOT,
+    emptyPreviewState(),
+    fs,
+    false,
+  );
+  assert.equal(block.state, "ready");
+  assert.deepEqual(reads, [outside]);
+});
+
 test("preview reads follow canonical workspace boundaries", () => {
   const outside = resolve(ROOT, "../outside.txt");
   const { fs, reads } = fixture(

@@ -37,6 +37,8 @@ export interface ApplyContext {
   readonly fs: PatchFileSystem;
   readonly signal?: AbortSignal;
   readonly withFileQueue: <T>(path: string, action: () => Promise<T>) => Promise<T>;
+  /** When false, patch paths outside the workspace are allowed. Defaults to true. */
+  readonly workspaceOnly?: boolean;
 }
 
 export interface FileChange {
@@ -270,7 +272,7 @@ export async function applyPatch(input: string, context: ApplyContext): Promise<
   try {
     const { operations } = parsePatch(input);
     if (!operations.length) throw new Error("empty patch");
-    workspace = await openWorkspace(context.cwd, context.fs);
+    workspace = await openWorkspace(context.cwd, context.fs, context.workspaceOnly ?? true);
     resolved = [];
     const sources = new Set<string>();
     for (const operation of operations) {

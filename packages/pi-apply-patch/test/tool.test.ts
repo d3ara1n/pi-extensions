@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import { test } from "node:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_CONFIG } from "../src/config.ts";
 import { makeApplyPatchTool } from "../src/tool.ts";
 import { renderRejection } from "../src/report.ts";
 import { MemoryFileSystem, ROOT } from "./memory-fs.ts";
@@ -27,6 +29,24 @@ test("tool uses the execution workspace and returns plain text plus serializable
   assert.equal(tool.constrainedSampling && tool.constrainedSampling.type, "grammar");
   assert.equal(tool.exposure, "model-only");
   assert.deepEqual(tool.parameters.required, ["input"]);
+});
+
+test("the tool passes workspaceOnly to the executor", async () => {
+  const fs = new MemoryFileSystem();
+  const target = resolve("/outside", "created.txt");
+  fs.addDir(resolve("/outside"));
+  const tool = makeApplyPatchTool(
+    { fs, withFileQueue: fs.context().withFileQueue },
+    () => ({ ...DEFAULT_CONFIG, workspaceOnly: false }),
+  );
+  await tool.execute(
+    "call",
+    { input: `*** Begin Patch\n*** Add File: ${target}\n+new\n*** End Patch` },
+    undefined,
+    undefined,
+    { cwd: ROOT, mode: "rpc" } as ExtensionContext,
+  );
+  assert.equal(fs.files.get(target), "new\n");
 });
 
 test("the model-facing example creates blank lines, updates, renames, and deletes", async () => {

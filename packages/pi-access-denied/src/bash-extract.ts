@@ -44,17 +44,7 @@ import {
 } from "./bash-cwd.ts";
 import type { DirectoryCondition, DirectoryFlow, DirectoryState } from "./bash-cwd.ts";
 
-/** A path the command appears to reach, plus the leaf command that produced it. */
-export interface ExtractedTarget {
-  /** Canonical absolute path or symbolic named home. */
-  path: string;
-  /** Text of the leaf command (e.g. `find / -name *.log`) that produced `path`. Absent when meaningless. */
-  source?: string;
-  /** Known cd outcomes shared by this path's detected branches; not an exhaustive execution predicate. */
-  condition?: string;
-  /** True when the operand has multiple possible locations or remains partly unresolved. */
-  estimate?: boolean;
-}
+import type { ExtractedTarget } from "./tools/types.ts";
 
 type TargetOrigin = Word | Command;
 type RecordedTarget = {

@@ -9,6 +9,7 @@
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import { paths } from "./paths.ts";
+import { isSupportedTool } from "./tools/index.ts";
 import {
   DEFAULT_CONFIG,
   type AccessDeniedConfig,
@@ -28,7 +29,6 @@ function readSettingsFile(filePath: string): any {
 }
 
 const VALID_MODES: ReadonlySet<AccessMode> = new Set(["prompt", "deny", "allow"]);
-const VALID_TOOLS: ReadonlySet<SupportedTool> = new Set(["write", "edit", "bash"]);
 
 function asMode(value: unknown): AccessMode | undefined {
   return typeof value === "string" && VALID_MODES.has(value as AccessMode)
@@ -42,9 +42,7 @@ function asStringArray(value: unknown): string[] | undefined {
 }
 
 function asToolArray(value: unknown): SupportedTool[] | undefined {
-  const tools = asStringArray(value)?.filter((tool): tool is SupportedTool =>
-    VALID_TOOLS.has(tool as SupportedTool),
-  );
+  const tools = asStringArray(value)?.filter(isSupportedTool);
   return tools && tools.length > 0 ? tools : undefined;
 }
 

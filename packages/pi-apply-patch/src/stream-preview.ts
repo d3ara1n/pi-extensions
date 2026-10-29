@@ -97,15 +97,25 @@ function matchOperation(line: string): { kind: RawSection["kind"]; path: string 
   return undefined;
 }
 
-/** Apply the executor's lexical and canonical workspace boundaries before reading. */
-function readPreviewFile(cwd: string, path: string, fs: PreviewFileSystem): string | undefined {
+/** Apply the executor's path policy before reading; workspaceOnly keeps reads inside it. */
+function readPreviewFile(
+  cwd: string,
+  path: string,
+  fs: PreviewFileSystem,
+  workspaceOnly = true,
+): string | undefined {
   try {
     const directory = resolve(cwd);
     const root = fs.realpath(directory);
     const absolute = resolve(directory, path);
-    if (!within(absolute, directory) && !within(absolute, root)) return undefined;
+    if (workspaceOnly && !within(absolute, directory) && !within(absolute, root)) return undefined;
     const canonical = fs.realpath(absolute);
-    if (canonical === root || !within(canonical, root) || !fs.isFile(canonical)) return undefined;
+    if (
+      canonical === root ||
+      (workspaceOnly && !within(canonical, root)) ||
+      !fs.isFile(canonical)
+    )
+      return undefined;
     return fs.readFile(canonical);
   } catch {
     return undefined;
@@ -123,6 +133,7 @@ function completedBlock(
   patch: string,
   cwd: string,
   fs: PreviewFileSystem,
+  workspaceOnly: boolean,
 ): PreviewBlock {
   const base = { kind: section.kind, path: section.path, moveTo: section.moveTo };
   let operation;
@@ -136,7 +147,7 @@ function completedBlock(
   }
   if (operation.kind === "delete") return { ...base, state: "ready" };
 
-  const content = readPreviewFile(cwd, operation.path, fs);
+  const content = readPreviewFile(cwd, operation.path, fs, workspaceOnly);
   if (content === undefined) return { ...base, state: "noread" };
   const plan = planUpdate(content, operation.chunks);
   const unmatched = plan.outcomes.filter((outcome) => outcome.status === "unmatched").length;
@@ -160,6 +171,7 @@ export function buildPreview(
   cwd: string,
   state: StreamPreviewState,
   fs: PreviewFileSystem = nodePreviewFileSystem,
+  workspaceOnly = true,
 ): readonly PreviewBlock[] {
   if (input === state.input && state.cached) return state.cached;
   const blocks: PreviewBlock[] = [];
@@ -176,7 +188,8 @@ export function buildPreview(
       continue;
     }
     const patch = ["*** Begin Patch", section.header, ...section.lines, "*** End Patch"].join("\n");
-    const block = state.sections.get(patch) ?? completedBlock(section, patch, cwd, fs);
+    const block =
+      state.sections.get(patch) ?? completedBlock(section, patch, cwd, fs, workspaceOnly);
     sections.set(patch, block);
     blocks.push(block);
   }

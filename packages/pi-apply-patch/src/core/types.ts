@@ -44,6 +44,8 @@ export interface HunkFailure {
   readonly pattern: readonly string[];
   /** 1-based source line the forward search started from. */
   readonly searchFrom: number;
+  /** The constraint that established the search start. */
+  readonly searchBoundary: "start" | "hunk" | "anchor" | "eof";
   /** True when the chunk carried *** End of File, so only the last window was searched. */
   readonly endOfFile: boolean;
   /** Closest windows in the file, most explanatory first. */
@@ -63,6 +65,8 @@ export interface HunkCandidate {
   readonly difference: "exact" | "whitespace" | "content";
   /** The candidate lies before the position the hunk's forward search started from. */
   readonly beforeSearchStart: boolean;
+  /** All exact match lines before the search start, when more than one. */
+  readonly earlierMatches?: readonly number[];
   /** Bounded examples of the actual differences, never used for matching. */
   readonly details?: readonly HunkLineDifference[];
   readonly omittedDifferences?: number;

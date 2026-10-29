@@ -184,6 +184,19 @@ test("candidate search flags exact matches outside the searched range", () => {
   ]);
 });
 
+test("candidate search reports every exact match outside the searched range", () => {
+  assert.deepEqual(findCandidates(["x", "y", "x", "z"], ["x"], 3), [
+    {
+      line: 1,
+      differing: 0,
+      whitespace: 0,
+      difference: "exact",
+      beforeSearchStart: true,
+      earlierMatches: [1, 3],
+    },
+  ]);
+});
+
 test("already-applied detection ignores no-op replacements", () => {
   assert.equal(findAlreadyApplied(["a", "b"], ["b"], ["a"], 0, false), 2);
   assert.equal(findAlreadyApplied(["a"], ["a"], ["a"], 0, false), undefined);

@@ -2,7 +2,7 @@
 import { countOccurrences, diagnoseContext } from "./diagnostics.ts";
 import { seekPass, seekSequence, strategyOf } from "./matcher.ts";
 import { splitSource } from "./source.ts";
-import type { Chunk, HunkOutcome } from "./types.ts";
+import type { Chunk, HunkFailure, HunkOutcome } from "./types.ts";
 
 /** seekSequence found a match, so pass 0 is the safe fallback if seekPass ever disagrees. */
 const EXACT_PASS = 0;
@@ -38,6 +38,7 @@ export function planUpdate(original: string, chunks: readonly Chunk[]): UpdatePl
   const replacements: Replacement[] = [];
   const outcomes: HunkOutcome[] = [];
   let cursor = 0;
+  let searchBoundary: HunkFailure["searchBoundary"] = "start";
   for (const [position, chunk] of chunks.entries()) {
     const hunk = position + 1;
     if (chunk.anchor !== undefined) {
@@ -51,12 +52,14 @@ export function planUpdate(original: string, chunks: readonly Chunk[]): UpdatePl
             pattern: [chunk.anchor],
             replacement: [],
             start: cursor,
-            endOfFile: chunk.endOfFile,
+            searchBoundary,
+            endOfFile: false,
           }),
         });
         continue;
       }
       cursor = anchor + 1;
+      searchBoundary = "anchor";
     }
     if (!chunk.oldLines.length) {
       const index = lines.at(-1) === "" ? lines.length - 1 : lines.length;
@@ -84,6 +87,7 @@ export function planUpdate(original: string, chunks: readonly Chunk[]): UpdatePl
           pattern,
           replacement,
           start: cursor,
+          searchBoundary,
           endOfFile: chunk.endOfFile,
         }),
       });
@@ -99,6 +103,7 @@ export function planUpdate(original: string, chunks: readonly Chunk[]): UpdatePl
       occurrences: countOccurrences(lines, pattern, pass),
     });
     cursor = index + pattern.length;
+    searchBoundary = "hunk";
   }
   return { replacements, outcomes };
 }

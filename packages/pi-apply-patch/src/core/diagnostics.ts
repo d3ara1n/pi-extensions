@@ -163,8 +163,9 @@ function blankLineCandidate(
 }
 
 /**
- * Closest windows to an unmatched context: at most one exact match that lies
- * before the forward search start, plus the best near miss at or after it.
+ * Closest windows to an unmatched context: every exact match that lies before
+ * the forward search start, so the report can flag ambiguity, plus the best
+ * near miss at or after it.
  */
 export function findCandidates(
   lines: readonly string[],
@@ -173,8 +174,15 @@ export function findCandidates(
 ): HunkCandidate[] {
   const windows = scanWindows(lines, pattern);
   const candidates: HunkCandidate[] = [];
-  const earlier = windows.find((window) => window.line - 1 < start && window.differing === 0);
-  if (earlier) candidates.push(toCandidate(earlier, true, lines, pattern));
+  const earlier = windows.filter((window) => window.line - 1 < start && window.differing === 0);
+  if (earlier.length) {
+    const candidate = toCandidate(earlier[0], true, lines, pattern);
+    candidates.push(
+      earlier.length > 1
+        ? { ...candidate, earlierMatches: earlier.map((window) => window.line) }
+        : candidate,
+    );
+  }
   const near = windows
     .filter(
       (window) =>
@@ -234,6 +242,7 @@ export interface ContextSearch {
   readonly replacement: readonly string[];
   /** 0-based position the forward search started from. */
   readonly start: number;
+  readonly searchBoundary: HunkFailure["searchBoundary"];
   readonly endOfFile: boolean;
 }
 
@@ -249,6 +258,7 @@ export function diagnoseContext(
     anchor: search.anchor,
     pattern: search.pattern,
     searchFrom: start + 1,
+    searchBoundary: search.endOfFile ? "eof" : search.searchBoundary,
     endOfFile: search.endOfFile,
     candidates: findCandidates(lines, search.pattern, start),
     alreadyAppliedAt:

@@ -63,7 +63,7 @@ test("rejection reports bound echoed context and listed hunks", () => {
   const failed = (hunk: number) => ({
     status: "unmatched" as const,
     hunk,
-    failure: { pattern, searchFrom: 1, endOfFile: false, candidates: [] },
+    failure: { pattern, searchFrom: 1, searchBoundary: "start", endOfFile: false, candidates: [] },
   });
   const message = renderRejection({
     rejected: [

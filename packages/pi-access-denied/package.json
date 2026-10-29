@@ -1,6 +1,6 @@
 {
   "name": "@d3ara1n/pi-access-denied",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "type": "module",
   "description": "Review detected tool paths with prompt, deny, or allow modes, configurable path rules, and per-session decisions",
   "homepage": "https://github.com/d3ara1n/pi-extensions/tree/main/packages/pi-access-denied#readme",

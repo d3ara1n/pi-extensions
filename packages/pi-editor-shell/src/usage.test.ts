@@ -1,6 +1,7 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
-import { cacheHitRateToken, cacheReadToken, sumSessionCost } from "./index.ts";
+import { cacheHitRateToken, cacheReadToken } from "./index.ts";
+import { collectSessionStats } from "./stats.ts";
 
 test("cache-read color follows the latest reading, independently of session totals", () => {
   assert.equal(cacheReadToken(0), "error");
@@ -31,7 +32,11 @@ test("session cost includes non-message usage without counting unrelated entries
   ];
 
   assert.equal(
-    sumSessionCost({ sessionManager: { getEntries: () => entries } }),
+    collectSessionStats(entries.map((entry, i) => ({
+      ...entry,
+      id: String(i),
+      parentId: i === 0 ? null : String(i - 1),
+    })), String(entries.length - 1)).cost,
     21,
   );
 });

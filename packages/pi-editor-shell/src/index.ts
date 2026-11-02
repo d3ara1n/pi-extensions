@@ -6,7 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { CardEditor, type FrameProvider } from "./card-editor.ts";
 import { DEFAULT_CONFIG, loadEditorShellConfig, type EditorShellConfig, type EditorShellIcons } from "./config.ts";
-import { countCompactions, countUserMessages } from "./turn-count.ts";
+import { SessionStatsCache, type UsageSnap } from "./stats.ts";
 import {
   ActivityIndicator,
   lastActivityFromEntries,
@@ -85,89 +85,15 @@ const DEFAULT_ICONS: EditorShellIcons = {
   folder: "\uf07c ", //   fa-folder_open
 };
 
-/** Minimal inline types to read cache-read totals without importing the
- *  full pi-ai message union tree. */
-interface UsageSnap {
-  input?: number;
-  output?: number;
-  reasoning?: number;
-  cacheRead?: number;
-  cacheWrite?: number;
-  cost?: {
-    total?: number;
-  };
-}
+/** Minimal assistant-message shape used for response timing. */
 interface MsgSnap {
   role: string;
   content?: Array<{ type: string; text?: string }>;
   usage?: UsageSnap;
   stopReason?: string;
 }
-interface EntrySnap {
-  type: string;
-  message?: MsgSnap;
-  usage?: UsageSnap;
-}
 
-/** Sum cache-related usage across all assistant messages on the session.
- *  Returns the same shape as UsageSnap so we can reuse cacheHitRate(). */
-function sumSessionUsage(ctx: { sessionManager: { getEntries(): unknown[] } }): UsageSnap {
-  let input = 0;
-  let cacheRead = 0;
-  let cacheWrite = 0;
-  for (const entry of ctx.sessionManager.getEntries()) {
-    const e = entry as EntrySnap;
-    if (e.type !== "message" || e.message?.role !== "assistant" || !e.message.usage) continue;
-    input += e.message.usage.input ?? 0;
-    cacheRead += e.message.usage.cacheRead ?? 0;
-    cacheWrite += e.message.usage.cacheWrite ?? 0;
-  }
-  return { input, cacheRead, cacheWrite };
-}
-
-/** @internal Sum every billable session entry, including non-message usage. */
-export function sumSessionCost(ctx: { sessionManager: { getEntries(): unknown[] } }): number {
-  let total = 0;
-  for (const entry of ctx.sessionManager.getEntries()) {
-    const e = entry as EntrySnap;
-    let usage: UsageSnap | undefined;
-    if (e.type === "message" && (e.message?.role === "assistant" || e.message?.role === "toolResult")) {
-      usage = e.message.usage;
-    } else if (e.type === "compaction" || e.type === "branch_summary" || e.type === "usage") {
-      usage = e.usage;
-    }
-    const cost = usage?.cost?.total;
-    if (typeof cost === "number" && Number.isFinite(cost)) total += cost;
-  }
-  return total;
-}
-
-/** Sum cache-read tokens across all assistant messages — session total for
- *  the "(14.0M)" display in the border. Kept separate from sumSessionUsage
- *  to keep the hot path (agent_end) minimal. */
-function sumCacheRead(ctx: { sessionManager: { getEntries(): unknown[] } }): number {
-  let total = 0;
-  for (const entry of ctx.sessionManager.getEntries()) {
-    const e = entry as EntrySnap;
-    if (e.type !== "message" || e.message?.role !== "assistant" || !e.message.usage) continue;
-    total += e.message.usage.cacheRead ?? 0;
-  }
-  return total;
-}
-
-/** Usage of the most recent assistant message — drives the per-turn
- *  cacheRead and the hit rate, matching pi's footer (last entry wins). */
-function latestAssistantUsage(ctx: { sessionManager: { getEntries(): unknown[] } }): UsageSnap | undefined {
-  let latest: UsageSnap | undefined;
-  for (const entry of ctx.sessionManager.getEntries()) {
-    const e = entry as EntrySnap;
-    if (e.type !== "message" || e.message?.role !== "assistant" || !e.message.usage) continue;
-    latest = e.message.usage;
-  }
-  return latest;
-}
-
-/** Cache hit rate for a single turn.
+/** Cache hit rate for a single request.
  *
  *  The `Usage.input` field has different semantics depending on the provider:
  *  - OpenAI/DeepSeek: `input` = fresh non-cached tokens (promptTokens −
@@ -182,7 +108,7 @@ function latestAssistantUsage(ctx: { sessionManager: { getEntries(): unknown[] }
  *  practice; the real fix belongs in pi-ai where Usage is populated.
  *
  *  Returns undefined when there is no usage or no prompt tokens. */
-function cacheHitRate(u: UsageSnap | undefined): number | undefined {
+function cacheHitRate(u: Pick<UsageSnap, "input" | "cacheRead" | "cacheWrite"> | undefined): number | undefined {
   if (!u) return undefined;
   const nonCached = u.input ?? 0;
   const cached = (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
@@ -382,11 +308,7 @@ export default function (pi: ExtensionAPI) {
   // (worktree names are stable for the lifetime of a session). Null = main
   // worktree or outside any repo — no badge.
   let _worktreeName: string | null = null;
-  // cacheRead total + latest-turn usage, refreshed at session_start +
-  // agent_end. The render provider reads these instead of re-scanning
-  // entries every frame.
-  let _cacheTotal = 0;
-  let _latestUsage: UsageSnap | undefined;
+  let statsCache = new SessionStatsCache();
   // Client-observed timing for the current assistant response. The completed
   // measurement replaces the previous turn even when throughput is unavailable,
   // so the shell never displays stale performance data.
@@ -396,31 +318,6 @@ export default function (pi: ExtensionAPI) {
   let _reasoningExpected = false;
   let _sawThinking = false;
   let _latestPerformance: ResponsePerformance | undefined;
-  // Full-session billable cost, including tool/summarization usage. Zero means the
-  // provider supplied no priced usage, so the border omits the dollar segment.
-  let _sessionCost = 0;
-  let _costLeafId: string | null = null;
-  const refreshSessionCost = (ctx: { sessionManager: { getEntries(): unknown[]; getLeafId(): string | null } }) => {
-    _sessionCost = sumSessionCost(ctx);
-    _costLeafId = ctx.sessionManager.getLeafId();
-  };
-
-  // Branch-local user-message count, re-derived only when the active leaf
-  // changes so restored sessions and branch switches cannot drift.
-  let _turnCount = 0;
-  let _turnCountLeafId: string | null = null;
-  let _compactionCount = 0;
-  let _compactionCountLeafId: string | null = null;
-  const refreshTurnCount = (ctx: {
-    sessionManager: { getBranch(): unknown[]; getLeafId(): string | null };
-  }): void => {
-    const branch = ctx.sessionManager.getBranch();
-    const leafId = ctx.sessionManager.getLeafId();
-    _turnCount = countUserMessages(branch);
-    _turnCountLeafId = leafId;
-    _compactionCount = countCompactions(branch);
-    _compactionCountLeafId = leafId;
-  };
 
   // Session-owned activity state survives editor replacements. Only TUI
   // sessions create a clock; events remain harmless in other modes.
@@ -460,6 +357,9 @@ export default function (pi: ExtensionAPI) {
     activity?.setPhase(next);
   });
   pi.on("message_end", (event) => {
+    // Persistence follows this hook. The next paint reads the new leaf once
+    // for every statistic, including user messages and billable tool results.
+    editor?.requestRender();
     if (event.message.role !== "assistant") return;
     _responseEndedAt = performance.now();
     const message = event.message as MsgSnap;
@@ -468,18 +368,22 @@ export default function (pi: ExtensionAPI) {
     ) ?? false;
     // Non-streaming providers expose visible text only when the response completes.
     if (hasVisibleText) _firstVisibleTextAt ??= _responseEndedAt;
+    _latestPerformance = calculateResponsePerformance({
+      outputTokens: message.usage?.output,
+      reasoningTokens: message.usage?.reasoning,
+      reasoningExpected: _reasoningExpected || _sawThinking,
+      turnStartedAt: _turnStartedAt,
+      firstVisibleTextAt: _firstVisibleTextAt,
+      responseEndedAt: _responseEndedAt,
+      hasVisibleText,
+      hasToolCall: message.content?.some((part) => part.type === "toolCall") ?? false,
+      stopReason: message.stopReason,
+    });
   });
   pi.on("tool_execution_start", () => {
     activity?.setPhase("exec");
   });
-  pi.on("agent_end", (_event, ctx) => {
-    // cacheRead totals + latest usage are stable once a turn finishes —
-    // recompute here instead of on every render frame.
-    _cacheTotal = sumCacheRead(ctx);
-    _latestUsage = latestAssistantUsage(ctx);
-    refreshSessionCost(ctx);
-    editor?.requestRender();
-  });
+  pi.on("agent_end", () => editor?.requestRender());
   // agent_end may be followed by retries, compaction, or queued work.
   pi.on("agent_settled", () => activity?.settle());
   pi.on("session_shutdown", () => {
@@ -489,53 +393,18 @@ export default function (pi: ExtensionAPI) {
     _reasoningExpected = false;
     _sawThinking = false;
     _latestPerformance = undefined;
-    _sessionCost = 0;
-    _costLeafId = null;
-    _turnCount = 0;
-    _turnCountLeafId = null;
-    _compactionCount = 0;
-    _compactionCountLeafId = null;
+    statsCache = new SessionStatsCache();
     activity?.stop();
     activity = undefined;
     editor = undefined;
   });
-  pi.on("session_compact", (_event, ctx) => {
-    refreshSessionCost(ctx);
-    refreshTurnCount(ctx);
-    editor?.requestRender();
-  });
-  pi.on("session_tree", (_event, ctx) => {
-    refreshSessionCost(ctx);
-    refreshTurnCount(ctx);
-    editor?.requestRender();
-  });
+  pi.on("session_compact", () => editor?.requestRender());
+  pi.on("session_tree", () => editor?.requestRender());
 
   // Refresh git dirty after every agent turn (tools may have changed files).
   // Async — never blocks the event loop; re-renders once settled.
-  pi.on("turn_end", (event) => {
-    if (event.message.role === "assistant") {
-      const message = event.message as MsgSnap;
-      const hasVisibleText = message.content?.some(
-        (part) => part.type === "text" && typeof part.text === "string" && part.text.length > 0,
-      ) ?? false;
-      _latestPerformance = calculateResponsePerformance({
-        outputTokens: message.usage?.output,
-        reasoningTokens: message.usage?.reasoning,
-        reasoningExpected: _reasoningExpected || _sawThinking,
-        turnStartedAt: _turnStartedAt,
-        firstVisibleTextAt: _firstVisibleTextAt,
-        responseEndedAt: _responseEndedAt,
-        hasVisibleText,
-        hasToolCall: message.content?.some((part) => part.type === "toolCall") ?? false,
-        stopReason: message.stopReason,
-      });
-      _turnStartedAt = undefined;
-      _firstVisibleTextAt = undefined;
-      _responseEndedAt = undefined;
-      _reasoningExpected = false;
-      _sawThinking = false;
-      editor?.requestRender();
-    }
+  pi.on("turn_end", () => {
+    editor?.requestRender();
     if (_cwd) refreshGitDirty(_cwd, () => editor?.requestRender());
   });
 
@@ -549,8 +418,7 @@ export default function (pi: ExtensionAPI) {
     _worktreeName = linkedWorktreeName(ctx.cwd);
     config = loadEditorShellConfig(ctx.cwd);
     icons = { ...DEFAULT_ICONS, ...config.icons };
-    _cacheTotal = sumCacheRead(ctx);
-    _latestUsage = latestAssistantUsage(ctx);
+    statsCache = new SessionStatsCache();
     activity = new ActivityIndicator(
       () => editor?.requestRender(),
       () => promptCacheTtlMs(ctx.model, process.env.PI_CACHE_RETENTION),
@@ -562,8 +430,7 @@ export default function (pi: ExtensionAPI) {
     _reasoningExpected = false;
     _sawThinking = false;
     _latestPerformance = undefined;
-    refreshSessionCost(ctx);
-    refreshTurnCount(ctx);
+    statsCache.read(ctx.sessionManager);
     refreshGitDirty(ctx.cwd, () => editor?.requestRender());
 
     // Fresh segments on every render — reads live ctx state, so thinking /
@@ -571,9 +438,7 @@ export default function (pi: ExtensionAPI) {
     // The border color itself is left to pi (editor.borderColor), matching
     // the default editor's behavior.
     const provider: FrameProvider = (border) => {
-      const leafId = ctx.sessionManager.getLeafId();
-      if (_costLeafId !== leafId) refreshSessionCost(ctx);
-      if (_turnCountLeafId !== leafId || _compactionCountLeafId !== leafId) refreshTurnCount(ctx);
+      const stats = statsCache.read(ctx.sessionManager);
       const theme = ctx.ui.theme;
 
       // Resolve pinned status keys → already-themed text, " · "-joined.
@@ -604,15 +469,13 @@ export default function (pi: ExtensionAPI) {
           ? `${pct.toFixed(1)}%/${formatContextWindow(ctxWindow)}`
           : "?/??";
 
-      // Cache-read tokens — per-turn figure first, session total in parens,
-      // then hit rate (pi's "CHxx%" formula). All refreshed at agent_end and
-      // read from cache off the hot path.
+      // Latest request and session totals share the same persisted snapshot.
       // Session hit rate is available via /editor-shell:status.
-      const cacheReadNow = _latestUsage?.cacheRead ?? 0;
-      const hitRate = cacheHitRate(_latestUsage);
+      const cacheReadNow = stats.latestUsage?.cacheRead ?? 0;
+      const hitRate = cacheHitRate(stats.latestUsage);
       const cachePart =
-        _cacheTotal > 0
-          ? `${theme.fg("dim", " · ")}${theme.fg(cacheReadToken(cacheReadNow), `${icons.cache}${formatTokens(cacheReadNow)}(${formatTokens(_cacheTotal)})`)}${hitRate != null ? theme.fg(cacheHitRateToken(hitRate), ` ${icons.hitRate}${hitRate.toFixed(1)}%`) : ""}`
+        stats.cacheRead > 0
+          ? `${theme.fg("dim", " · ")}${theme.fg(cacheReadToken(cacheReadNow), `${icons.cache}${formatTokens(cacheReadNow)}(${formatTokens(stats.cacheRead)})`)}${hitRate != null ? theme.fg(cacheHitRateToken(hitRate), ` ${icons.hitRate}${hitRate.toFixed(1)}%`) : ""}`
           : "";
       const displayedTps = config.tpsDisplay === "end-to-end"
         ? _latestPerformance?.e2eTps
@@ -624,14 +487,14 @@ export default function (pi: ExtensionAPI) {
         ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.tps}${formatTps(displayedTps)} ${tpsLabel} t/s`)}`
         : "";
       const costPart =
-        _sessionCost > 0
-          ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.cost}${_sessionCost.toFixed(3)}`)}`
+        stats.cost > 0
+          ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.cost}${stats.cost.toFixed(3)}`)}`
           : "";
-      const turnPart = _turnCount > 0
-        ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.turn}${_turnCount}`)}`
+      const turnPart = stats.userMessages > 0
+        ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.turn}${stats.userMessages}`)}`
         : "";
-      const compactionPart = _compactionCount > 0
-        ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.compaction}${_compactionCount}`)}`
+      const compactionPart = stats.compactions > 0
+        ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${icons.compaction}${stats.compactions}`)}`
         : "";
 
       const activityView = activity?.read();
@@ -747,26 +610,24 @@ export default function (pi: ExtensionAPI) {
 
       lines.push("");
       lines.push("[cache totals]");
-      const sess = sumSessionUsage(ctx);
-      lines.push(`  session input: ${formatTokens(sess.input ?? 0)}`);
-      lines.push(`  session cacheRead: ${formatTokens(sess.cacheRead ?? 0)}`);
-      lines.push(`  session cacheWrite: ${formatTokens(sess.cacheWrite ?? 0)}`);
-      const sRate = cacheHitRate(sess);
+      const stats = statsCache.read(ctx.sessionManager);
+      lines.push(`  session input: ${formatTokens(stats.input)}`);
+      lines.push(`  session cacheRead: ${formatTokens(stats.cacheRead)}`);
+      lines.push(`  session cacheWrite: ${formatTokens(stats.cacheWrite)}`);
+      const sRate = cacheHitRate(stats);
       lines.push(`  session hit rate: ${sRate != null ? `${sRate.toFixed(1)}%` : "n/a"}`);
-      refreshSessionCost(ctx);
-      const sessionCost = _sessionCost;
+      const sessionCost = stats.cost;
       lines.push(`  session cost: ${sessionCost > 0 ? `$${sessionCost.toFixed(3)}` : "n/a"}`);
-      const latest = latestAssistantUsage(ctx);
+      const latest = stats.latestUsage;
       const now = latest?.cacheRead ?? 0;
-      lines.push(`  this turn cacheRead: ${formatTokens(now)}`);
+      lines.push(`  latest request cacheRead: ${formatTokens(now)}`);
       const hr = cacheHitRate(latest);
-      lines.push(`  this turn hit rate: ${hr != null ? `${hr.toFixed(1)}%` : "n/a"}`);
+      lines.push(`  latest request hit rate: ${hr != null ? `${hr.toFixed(1)}%` : "n/a"}`);
 
-      refreshTurnCount(ctx);
       lines.push("");
       lines.push("[branch counter]");
-      lines.push(`  user messages: ${_turnCount}`);
-      lines.push(`  compactions: ${_compactionCount}`);
+      lines.push(`  user messages: ${stats.userMessages}`);
+      lines.push(`  compactions: ${stats.compactions}`);
 
       lines.push("");
       lines.push("[response performance]");

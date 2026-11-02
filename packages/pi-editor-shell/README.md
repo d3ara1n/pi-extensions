@@ -11,7 +11,7 @@ Replaces pi's default editor and status bar with a unified rounded-corner shell 
 - **Below shell** — Auto-wrapping extension status line (all `setStatus` entries not pinned to the top)
 - **Border color** follows pi's thinking-level / bash-mode indicator automatically.
 
-All segments are re-read from live session state on every paint, so switching thinking level or burning context updates the frame on the next render with no extra wiring. The activity indicator precedes the model label; its width follows its content.
+Cache usage, session cost, and branch counters share one snapshot, computed in a single pass over session entries and reused until the active leaf changes. Each completed model response requests a repaint before tool execution; the next paint picks up its persisted usage without waiting for the tool batch or full agent run to finish. Persisted tool results, compactions, and branch changes update the same snapshot. Model, thinking level, and context usage are read live on each paint. The activity indicator precedes the model label; its width follows its content.
 
 ## Configuration
 
@@ -97,11 +97,11 @@ Choose the response-throughput metric shown in the bottom border (`"end-to-end"`
 
 | Value | Border label | Measurement |
 |-------|--------------|-------------|
-| `"end-to-end"` (default) | `e2e t/s` | Visible output tokens divided by total turn duration, including wait time and hidden reasoning |
+| `"end-to-end"` (default) | `e2e t/s` | Visible output tokens divided by total request duration, including wait time and hidden reasoning |
 | `"generation"` | `gen t/s` | Visible tokens after the first divided by the time from first visible text to response completion |
 | `"none"` | — | Hides response throughput from the border |
 
-Both throughput values, time to first visible text, total response time, visible-token count, and token source remain available via `/editor-shell:status`. Generation samples below 10 visible tokens or 250 ms are reported as unavailable. Responses containing tool calls cannot provide a portable text-token split. If reasoning is active but the provider does not supply a usable positive reasoning-token count, both throughput values are reported as unavailable rather than treating hidden tokens as visible output.
+Response timing is finalized at assistant `message_end`, before local tool execution. Both throughput values, time to first visible text, total response time, visible-token count, and token source remain available via `/editor-shell:status`. Generation samples below 10 visible tokens or 250 ms are reported as unavailable. Responses containing tool calls cannot provide a portable text-token split. If reasoning is active but the provider does not supply a usable positive reasoning-token count, both throughput values are reported as unavailable rather than treating hidden tokens as visible output.
 
 ## Commands
 

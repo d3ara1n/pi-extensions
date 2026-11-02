@@ -1431,6 +1431,13 @@ export default function askUserExtension(pi: ExtensionAPI) {
                 // "Layout" note at the top of this file for why overlay:true breaks
                 // transcript scrolling.
                 overlay: false,
+                // Report pi as blocked on terminal program status while the
+                // panel is up, so an idle glance at the tab shows the run is
+                // waiting on the user, not the model.
+                blocked: {
+                  kind: "question",
+                  message: `Answer ${questions.length} question${questions.length === 1 ? "" : "s"}`,
+                },
               },
             )
           : await dialogAsk(questions, ctx);

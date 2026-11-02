@@ -6,7 +6,7 @@
  * and keep the singleton current.
  */
 
-import { keyHint, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { initModelRolesAPI, getModelRolesAPI, updateCurrentModel } from "./api.ts";
@@ -60,7 +60,7 @@ export default function registerModelRolesExtension(pi: ExtensionAPI): void {
         details: { models } satisfies ListModelsDetails,
       };
     },
-    renderResult(result, { expanded }, theme) {
+    renderResult(result, { expanded }, theme, context) {
       const details = result.details as ListModelsDetails | undefined;
       const models = details?.models ?? [];
       const count = models.length;
@@ -70,7 +70,7 @@ export default function registerModelRolesExtension(pi: ExtensionAPI): void {
 
       const lines = shown.map((m) => `  ${theme.fg("dim", m)}`);
       if (omitted > 0) {
-        lines.push(`  ${theme.fg("muted", `… more (${keyHint("app.tools.expand", "expand")})`)}`);
+        lines.push(`  ${theme.fg("muted", `… more (${context.keyHint("app.tools.expand", "expand")})`)}`);
       }
       lines.push(theme.fg("success", `${count} models`));
       return new Text(lines.join("\n"), 0, 0);

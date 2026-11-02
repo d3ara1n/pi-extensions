@@ -115,6 +115,12 @@ async function promptDecision(
       // overlay:true would hide the transcript via ui.showOverlay(), making it
       // unscrollable — see pi-ask-user for the same design decision.
       overlay: false,
+      // Report pi as blocked on terminal program status while the approval
+      // prompt is up: the run is gated on the user's permission decision.
+      blocked: {
+        kind: "permission",
+        message: `Approve ${violations.length} out-of-bounds path${violations.length === 1 ? "" : "s"}`,
+      },
     },
   );
 }

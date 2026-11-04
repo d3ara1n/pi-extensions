@@ -106,7 +106,11 @@ test("Responses protocol supports freeform, fallback, streaming escapes, and pai
   const { convertResponsesTools, convertResponsesMessages } = await import(
     new URL("./api/openai-responses-shared.js", ai).href
   );
-  const { createGrammarToolInputProperties, appendGrammarToolInputJsonDelta } = await import(
+  const {
+    createGrammarToolInputProperties,
+    appendGrammarToolInputJsonDelta,
+    closeGrammarToolInputJson,
+  } = await import(
     new URL("./api/constrained-sampling.js", ai).href
   );
   const tool = makeApplyPatchTool();
@@ -122,8 +126,8 @@ test("Responses protocol supports freeform, fallback, streaming escapes, and pai
 
   const input = '*** Begin Patch\n*** Add File: x\n+"quoted" \\ path\n*** End Patch';
   const buffer = { input: "", started: false, closed: false };
-  let delta = appendGrammarToolInputJsonDelta(buffer, "input", input.slice(0, 30), false) ?? "";
-  delta += appendGrammarToolInputJsonDelta(buffer, "input", input, true) ?? "";
+  let delta = appendGrammarToolInputJsonDelta(buffer, "input", input.slice(0, 30)) ?? "";
+  delta += closeGrammarToolInputJson(buffer, "input", input) ?? "";
   assert.deepEqual(JSON.parse(delta), { input });
   const model = {
     id: "test",

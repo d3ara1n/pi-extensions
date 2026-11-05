@@ -66,10 +66,10 @@ Optional, in `~/.pi/agent/settings.json` under `peek`:
 ```json
 {
   "peek": {
-    "investigateTimeoutMs": 120000,
-    "timeoutMs": 90000,
+    "investigateTimeoutMs": 240000,
+    "timeoutMs": 180000,
     "role": "utility",
-    "maxRounds": 6,
+    "maxRounds": 12,
     "maxOutputTokens": 8192
   }
 }

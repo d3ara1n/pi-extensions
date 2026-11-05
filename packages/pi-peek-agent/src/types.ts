@@ -13,12 +13,12 @@ import type { InvestigateProgress } from "@d3ara1n/pi-peek";
 // ---------------------------------------------------------------------------
 
 export interface PeekConfig {
-  /** Synchronous wait timeout for a remote investigation. Default 120s. */
+  /** Synchronous wait timeout for a remote investigation. Default 240s. */
   investigateTimeoutMs?: number;
 }
 
 export const DEFAULT_PEEK_CONFIG: Required<Pick<PeekConfig, "investigateTimeoutMs">> = {
-  investigateTimeoutMs: 120_000,
+  investigateTimeoutMs: 240_000,
 };
 
 // ---------------------------------------------------------------------------

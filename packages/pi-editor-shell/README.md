@@ -13,6 +13,8 @@ Replaces pi's default editor and status bar with a unified rounded-corner shell 
 
 Cache usage, session cost, and branch counters share one snapshot, computed in a single pass over session entries and reused until the active leaf changes. Each completed model response requests a repaint before tool execution; the next paint picks up its persisted usage without waiting for the tool batch or full agent run to finish. Persisted tool results, compactions, and branch changes update the same snapshot. Model, thinking level, and context usage are read live on each paint. The activity indicator precedes the model label; its width follows its content.
 
+Git file counts refresh at session start and once the full agent run settles, including automatic retries and queued continuations. `/editor-shell:status` also refreshes them on demand. There is no periodic polling; external file changes appear on the next refresh.
+
 ## Configuration
 
 In `~/.pi/agent/settings.json` under the `editorShell` key:

@@ -158,7 +158,7 @@ function formatTps(tps: number): string {
 }
 
 // ── Git dirty state (event-driven, not TTL) ───────────────────────
-// Refreshed at session_start and after every agent turn (turn_end).
+// Refreshed at session_start and once the full agent run settles (agent_settled).
 interface GitDirty {
   staged: number;
   unstaged: number;
@@ -188,8 +188,8 @@ export function parseGitPorcelain(stdout: string): GitDirty {
 }
 
 /** Run `git status --porcelain` asynchronously so a slow / hanging git never
- *  blocks the event loop (turn_end is the most latency-sensitive moment —
- *  the agent just finished and the user wants to type). Updates `_gitDirty`
+ *  blocks the event loop when the run settles and the user wants to type.
+ *  Updates `_gitDirty`
  *  and invokes `onDone` once settled so the caller can trigger a re-render.
  *  A 2s guard kills a runaway process. */
 function refreshGitDirty(cwd: string, onDone?: () => void): void {
@@ -385,7 +385,10 @@ export default function (pi: ExtensionAPI) {
   });
   pi.on("agent_end", () => editor?.requestRender());
   // agent_end may be followed by retries, compaction, or queued work.
-  pi.on("agent_settled", () => activity?.settle());
+  pi.on("agent_settled", () => {
+    activity?.settle();
+    if (_cwd) refreshGitDirty(_cwd, () => editor?.requestRender());
+  });
   pi.on("session_shutdown", () => {
     _turnStartedAt = undefined;
     _firstVisibleTextAt = undefined;
@@ -401,12 +404,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_compact", () => editor?.requestRender());
   pi.on("session_tree", () => editor?.requestRender());
 
-  // Refresh git dirty after every agent turn (tools may have changed files).
-  // Async — never blocks the event loop; re-renders once settled.
-  pi.on("turn_end", () => {
-    editor?.requestRender();
-    if (_cwd) refreshGitDirty(_cwd, () => editor?.requestRender());
-  });
+  pi.on("turn_end", () => editor?.requestRender());
 
   pi.on("session_start", (_event, ctx) => {
     activity?.stop();
@@ -578,7 +576,7 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       // Refresh git dirty first so the status output reflects the current
       // working tree — the event-driven cache is otherwise only updated at
-      // session_start / turn_end (see refreshGitDirty).
+      // session_start / agent_settled (see refreshGitDirty).
       await new Promise<void>((resolve) => refreshGitDirty(ctx.cwd, resolve));
       const lines: string[] = [];
 

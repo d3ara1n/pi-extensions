@@ -12,9 +12,9 @@ export interface PeekConfig {
 }
 
 export const DEFAULT_PEEK_CONFIG: Required<PeekConfig> = {
-  timeoutMs: 90_000,
+  timeoutMs: 180_000,
   role: "utility",
-  maxRounds: 6,
+  maxRounds: 12,
   maxOutputTokens: 8192,
 };
 

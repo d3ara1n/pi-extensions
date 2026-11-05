@@ -63,7 +63,7 @@ The request estimator counts ASCII at approximately three characters per token a
 
 - The initial reference preserves all dialogue, summaries and retrieval labels. Retrieved blocks and prior successful questions/reports also remain complete.
 - Reads return full blocks without a character limit; searches return at most 20 short matches. At most eight tool calls execute per model response.
-- By default, a question allows six model responses. The last round disables further tool calls and requests the report using the information already supplied.
+- By default, a question allows twelve model responses. The last round disables further tool calls and requests the report using the information already supplied.
 - If the complete request exceeds the estimated input budget, or the provider reports a context overflow, the investigation raises `PeekContextOverflowError` (`code: "context_overflow"`). It does not clip dialogue, shorten retrieved blocks, discard earlier exchanges or retry with reduced context. Use a larger-context model or start a new investigation with a smaller active context. Failures after visible output preserve the partial report with an incomplete-report notice.
 - One deadline covers authentication, all model requests and retrieval rounds. Cancellation and disposal abort the active transport.
 
@@ -96,9 +96,9 @@ Or add to `~/.pi/agent/settings.json`:
 ```json
 {
   "peek": {
-    "timeoutMs": 90000,
+    "timeoutMs": 180000,
     "role": "utility",
-    "maxRounds": 6,
+    "maxRounds": 12,
     "maxOutputTokens": 8192
   }
 }
@@ -106,7 +106,7 @@ Or add to `~/.pi/agent/settings.json`:
 
 Global `~/.pi/agent/settings.json` and project `.pi/settings.json` are supported. A project `peek` block replaces the global block wholesale; missing fields use defaults. `maxRounds` is bounded to 1–20; setting it to 1 disables retrieval and requests a report from the outline. `maxOutputTokens` is a per-request allowance, subject to the model caps above. Pi-model-roles continues to control whether the selected role enables thinking.
 
-The serving deadline defaults to 90 seconds. Cross-instance callers have their own longer transport wait timeout, configured by [`pi-peek-agent`](../pi-peek-agent#configuration).
+The serving deadline defaults to 180 seconds. Cross-instance callers have their own longer transport wait timeout, configured by [`pi-peek-agent`](../pi-peek-agent#configuration).
 
 ## API
 

@@ -4,6 +4,7 @@ import {
   type ToolRenderContext,
 } from "@earendil-works/pi-coding-agent";
 import assert from "node:assert/strict";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { test } from "node:test";
 import { renderPreviewBlock } from "../src/render.ts";
@@ -120,6 +121,39 @@ test("preview reads outside paths when workspaceOnly is false", () => {
   );
   assert.equal(block.state, "ready");
   assert.deepEqual(reads, [outside]);
+});
+
+test("home-relative preview reads expand before workspace checks", () => {
+  const home = homedir();
+  const target = resolve(home, "preview.txt");
+  const cwd = resolve(home, "patch-workspace");
+  const { fs, reads } = fixture({ [target]: "old\n" });
+  const input = patch("*** Update File: ~/preview.txt", "@@", "-old", "+new");
+  const [blocked] = buildPreview(input, cwd, emptyPreviewState(), fs);
+  assert.equal(blocked.state, "noread");
+  assert.deepEqual(reads, []);
+
+  const [outside] = buildPreview(input, cwd, emptyPreviewState(), fs, false);
+  assert.equal(outside.state, "ready");
+  assert.deepEqual(reads, [target]);
+
+  reads.length = 0;
+  const [inside] = buildPreview(input, home, emptyPreviewState(), fs);
+  assert.equal(inside.state, "ready");
+  assert.deepEqual(reads, [target]);
+});
+
+test("preview preserves the literal tilde directory escape", () => {
+  const target = resolve(ROOT, "~/preview.txt");
+  const { fs, reads } = fixture({ [target]: "old\n" });
+  const [block] = buildPreview(
+    patch("*** Update File: ./~/preview.txt", "@@", "-old", "+new"),
+    ROOT,
+    emptyPreviewState(),
+    fs,
+  );
+  assert.equal(block.state, "ready");
+  assert.deepEqual(reads, [target]);
 });
 
 test("preview reads follow canonical workspace boundaries", () => {

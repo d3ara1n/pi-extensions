@@ -9,7 +9,7 @@ import { readFileSync, realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { parsePatch } from "./core/parser.ts";
 import { applyReplacements, planUpdate } from "./core/update.ts";
-import { within } from "./workspace.ts";
+import { resolvePatchPath, within } from "./workspace.ts";
 
 export interface PreviewBlock {
   readonly kind: "add" | "update" | "delete";
@@ -107,7 +107,7 @@ function readPreviewFile(
   try {
     const directory = resolve(cwd);
     const root = fs.realpath(directory);
-    const absolute = resolve(directory, path);
+    const absolute = resolvePatchPath(directory, path);
     if (workspaceOnly && !within(absolute, directory) && !within(absolute, root)) return undefined;
     const canonical = fs.realpath(absolute);
     if (

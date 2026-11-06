@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 
 /** The filesystem boundary used by patch preparation and execution. */
@@ -70,6 +71,11 @@ async function canonicalPath(path: string, fs: PatchFileSystem): Promise<string>
   }
 }
 
+/** Expand a leading ~/ before resolving against cwd; all other path text stays literal. @internal */
+export function resolvePatchPath(cwd: string, input: string): string {
+  return input.startsWith("~/") ? resolve(homedir(), input.slice(2)) : resolve(cwd, input);
+}
+
 /** @internal */
 export async function resolveWorkspacePath(
   workspace: Workspace,
@@ -77,7 +83,7 @@ export async function resolveWorkspacePath(
 ): Promise<WorkspacePath> {
   if (!input || input.includes("\0"))
     throw new Error("Patch paths must be nonempty and contain no NUL characters.");
-  const path = resolve(workspace.cwd, input);
+  const path = resolvePatchPath(workspace.cwd, input);
   if (
     workspace.workspaceOnly &&
     !within(path, workspace.cwd) &&

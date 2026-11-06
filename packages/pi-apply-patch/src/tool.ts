@@ -73,7 +73,7 @@ export function makeApplyPatchTool(
     promptSnippet: "Edit files with Codex-format patches",
     promptGuidelines: [
       "apply_patch format: send patch text without markdown fences, commentary, or unified-diff headers ('---', '+++', '@@ -N,M +N,M @@').",
-      "Paths: use literal, unquoted paths relative to the workspace, or absolute paths. With workspaceOnly enabled (the default), paths must resolve inside the workspace.",
+      "Paths: use unquoted paths relative to the workspace, absolute paths, or '~/...' for the current user's home directory. Use './~/...' for a literal '~' directory. Other path text stays literal. With workspaceOnly enabled (the default), expanded paths must resolve inside the workspace.",
       "Add: write '*** Add File: path', then prefix EVERY content line with '+', including blank lines (a blank line is '+'). Add overwrites an existing file; use Update for partial edits. Delete: write '*** Delete File: path' with no body.",
       "Update: write '*** Update File: path', then one or more nonempty hunks, each starting with '@@' or '@@ <existing line>'. Prefix unchanged context with one space, removed lines with '-', and added lines with '+'. These prefixes come before the original indentation. Blank lines still need their corresponding prefix. Replace text with '-' old lines followed by '+' new lines.",
       "Match current content: read the relevant source before constructing an update; reuse known current content, and re-read when it may be stale. Copy removed and context lines literally, with enough surrounding context to identify the intended occurrence. Matching selects the first match; an ambiguous snippet can edit the wrong location.",

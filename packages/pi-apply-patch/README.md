@@ -112,7 +112,9 @@ A BOM at the beginning of the source file is treated as metadata: the first line
 
 Unchanged context lines retain their original text and line endings, even when matching used a looser comparison. Explicit `-`/`+` replacements inherit the removed lines' endings in order; additional lines inherit the last removed line's ending. Insertions use the preceding source line's ending, falling back to the following line, then the file's first ending, then LF. Existing blank lines are retained unless explicitly removed.
 
-Add overwrites existing files. Move writes the destination, overwriting it if necessary, then removes the source. Overwriting does not require the previous target contents to be readable as UTF-8; when an Add target cannot be read, its diff is unavailable. Missing destination directories are created. Paths are literal text, so quotes are part of a filename rather than shell quoting.
+Add overwrites existing files. Move writes the destination, overwriting it if necessary, then removes the source. Overwriting does not require the previous target contents to be readable as UTF-8; when an Add target cannot be read, its diff is unavailable. Missing destination directories are created.
+
+In source paths and Move destinations, a leading `~/` expands to the current user's home directory, obtained from `os.homedir()`. Use `./~/file` for a literal `~` directory. Only the leading `~/` expands; `~user` and environment variables such as `$HOME` stay literal. Quotes are part of a filename rather than shell quoting. Execution and streaming preview apply the same expansion before workspace checks, so `workspaceOnly: true` still rejects expanded paths outside the workspace.
 
 ## Workspace and failure behavior
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { test } from "node:test";
 import { applyPatch, formatSummary } from "../src/apply.ts";
@@ -33,6 +34,62 @@ test("accepts absolute paths within the workspace and rejects lexical escapes be
     );
     assert.equal(fs.writes.length, before);
   }
+});
+
+test("expands home-relative paths for add, update, delete, and move", async () => {
+  const home = homedir();
+  const fs = new MemoryFileSystem({
+    [resolve(home, "edit.txt")]: "old\n",
+    [resolve(home, "delete.txt")]: "gone\n",
+    source: "old\n",
+  });
+  await applyPatch(
+    patch(
+      "*** Add File: ~/new.txt\n+new\n*** Update File: ~/edit.txt\n@@\n-old\n+edited\n*** Delete File: ~/delete.txt\n*** Update File: source\n*** Move to: ~/moved.txt\n@@\n-old\n+moved",
+    ),
+    fs.context({ workspaceOnly: false }),
+  );
+  assert.equal(fs.files.get(resolve(home, "new.txt")), "new\n");
+  assert.equal(fs.files.get(resolve(home, "edit.txt")), "edited\n");
+  assert.equal(fs.files.has(resolve(home, "delete.txt")), false);
+  assert.equal(fs.files.get(resolve(home, "moved.txt")), "moved\n");
+  assert.equal(fs.files.has(resolve(ROOT, "source")), false);
+  assert.equal(fs.files.has(resolve(ROOT, "~/new.txt")), false);
+});
+
+test("checks expanded sources and move destinations against the workspace before writing", async () => {
+  const cwd = resolve(homedir(), "patch-workspace");
+  const source = resolve(cwd, "source");
+  const fs = new MemoryFileSystem({ [source]: "old\n" });
+  for (const body of [
+    "*** Add File: first\n+ok\n*** Add File: ~/outside.txt\n+bad",
+    "*** Update File: source\n*** Move to: ~/outside.txt\n@@\n-old\n+bad",
+  ]) {
+    await assert.rejects(applyPatch(patch(body), fs.context({ cwd })), /outside the workspace/);
+  }
+  assert.equal(fs.files.get(source), "old\n");
+  assert.equal(fs.writes.length, 0);
+});
+
+test("accepts expanded paths inside the workspace with the default boundary", async () => {
+  const cwd = homedir();
+  const fs = new MemoryFileSystem();
+  fs.addDir(cwd);
+  await applyPatch(patch("*** Add File: ~/inside.txt\n+ok"), fs.context({ cwd }));
+  assert.equal(fs.files.get(resolve(cwd, "inside.txt")), "ok\n");
+});
+
+test("keeps escaped tilde directories, usernames, and environment variables literal", async () => {
+  const fs = new MemoryFileSystem();
+  await applyPatch(
+    patch("*** Add File: ./~/file\n+tilde\n*** Add File: ~someone/file\n+user\n*** Add File: $HOME/file\n+variable"),
+    fs.context(),
+  );
+  assert.deepEqual(fs.snapshot(), {
+    "$HOME/file": "variable\n",
+    "~/file": "tilde\n",
+    "~someone/file": "user\n",
+  });
 });
 
 test("rejects move destinations outside the workspace without modifying the source", async () => {

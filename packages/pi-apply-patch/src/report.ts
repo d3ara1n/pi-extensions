@@ -19,7 +19,7 @@ export interface RejectedFile {
 
 export interface RejectionReport {
   readonly rejected: readonly RejectedFile[];
-  /** Paths that verified but were not written because the whole patch was rejected. */
+  /** One path per verified operation, including repeats; none were written. */
   readonly verified: readonly string[];
 }
 
@@ -108,10 +108,11 @@ export function renderRejection(report: RejectionReport): string {
   const text = new DiagnosticText();
   const sections = report.rejected.map((file) => fileSection(file, text));
   if (report.verified.length) {
-    const listed = report.verified.slice(0, MAX_VERIFIED_LISTED).join(", ");
+    const paths = [...new Set(report.verified)];
+    const listed = paths.slice(0, MAX_VERIFIED_LISTED).join(", ");
     const overflow =
-      report.verified.length > MAX_VERIFIED_LISTED
-        ? `, … ${plural(report.verified.length - MAX_VERIFIED_LISTED, "more")}`
+      paths.length > MAX_VERIFIED_LISTED
+        ? `, … ${plural(paths.length - MAX_VERIFIED_LISTED, "more")}`
         : "";
     sections.push([`verified but not written (whole patch rejected): ${listed}${overflow}`]);
   }

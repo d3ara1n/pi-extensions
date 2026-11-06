@@ -90,7 +90,10 @@ test("matches the upstream batch parser's final duplicate End marker handling", 
 
 test("keeps patch body whitespace and accepts implicit first chunks and bare context lines", () => {
   assert.equal(update("a  \n\nb\n", "-a  \n+A  \n\n b"), "A  \n\nb\n");
-  assert.throws(() => update("a\n", "@@\n-a\n+b\n*** End of File\n+x"), /Expected update hunk/);
+  assert.throws(
+    () => update("a\n", "@@\n-a\n+b\n*** End of File\n+x\n-invalid"),
+    /Expected update hunk/,
+  );
 });
 
 test("prefers a later exact match to an earlier fuzzy match", () => {

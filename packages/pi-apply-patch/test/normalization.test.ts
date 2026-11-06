@@ -160,3 +160,41 @@ test("tool errors retain structured notices and the framework error flag", async
   );
   assert.equal(fs.writes.length, 0);
 });
+
+test("EOF addition repair appends and reports the actual repair through RPC text and details", async () => {
+  const fs = new MemoryFileSystem({ a: "existing\n" });
+  const tool = makeApplyPatchTool({ fs, withFileQueue: fs.context().withFileQueue });
+  const result = await tool.execute(
+    "eof-addition",
+    {
+      input: patch("*** Update File: a\n@@\n existing\n*** End of File\n+added\n+"),
+    },
+    undefined,
+    undefined,
+    { cwd: ROOT, mode: "rpc" } as ExtensionContext,
+  );
+  assert.deepEqual(fs.snapshot(), { a: "existing\nadded\n\n" });
+  const repair = result.details.notices?.find((notice) => notice.code === "eof-addition-hunk");
+  assert.ok(repair);
+  assert.equal(repair.line, 6);
+  assert.ok(
+    result.content.some((block) => block.type === "text" && block.text.includes(repair.message)),
+  );
+});
+
+test("EOF addition repair cannot bypass the preceding hunk's EOF verification", async () => {
+  const initial = { a: "existing\nnot-at-end\n" };
+  const fs = new MemoryFileSystem(initial);
+  await assert.rejects(
+    applyPatch(patch("*** Update File: a\n@@\n existing\n*** End of File\n+added"), fs.context()),
+    (error: unknown) => {
+      assert.ok(error instanceof PatchApplicationError);
+      assert.match(error.message, /verification failed/);
+      assert.match(error.message, /not at the end of the file/);
+      assert.ok(error.notices.some((notice) => notice.code === "eof-addition-hunk"));
+      return true;
+    },
+  );
+  assert.equal(fs.writes.length, 0);
+  assert.deepEqual(fs.snapshot(), initial);
+});

@@ -153,7 +153,7 @@ test("normalization never guesses Update prefixes, hides unknown markers, or rep
     "*** Add File: a\n*** Unknown File: b",
     "*** Add File: a\n*** End Patc",
     "*** Update File: a\n@@\nmissing-prefix",
-    "*** Update File: a\n@@\n-old\n+new\n*** End of File\n+late",
+    "*** Update File: a\n@@\n-old\n+new\n*** End of File\n+late\n-invalid",
     "*** Environment ID: remote\n*** Add File: a\n+x",
   ])
     assert.throws(() => parse(patch(body)));
@@ -173,8 +173,69 @@ test("the canonical parser does not independently repair format variations", () 
     patch("*** Update File: a\n@@anchor\n-old\n+new"),
     patch("*** Update File: a\n-old\n+new"),
     patch("*** Update File: a\n@@\n-old\n+new\n"),
+    patch("*** Update File: a\n@@\n existing\n*** End of File\n+new"),
     patch("*** Update File: a"),
     `${patch("*** Add File: a\n+x")}\n*** End Patch`,
   ])
     assert.throws(() => parsePatch(input));
+});
+
+test("EOF additions receive a separate hunk without changing content or the previous EOF constraint", () => {
+  const input = patch(
+    "*** Update File: a\n@@\n existing\n*** End of File\n+new\n+\n++literal plus\n+*** End Patch",
+  );
+  const result = normalize(input);
+  assert.equal(
+    result.input,
+    patch(
+      "*** Update File: a\n@@\n existing\n*** End of File\n@@\n+new\n+\n++literal plus\n+*** End Patch",
+    ),
+  );
+  assert.deepEqual(
+    result.notices.map((notice) => notice.code),
+    ["eof-addition-hunk"],
+  );
+  assert.equal(result.notices[0].line, 6);
+  assert.deepEqual(result.sourceLines.slice(4, 7), [5, 6, 6]);
+  const operation = parse(input).operations[0];
+  assert.equal(operation.kind, "update");
+  assert.equal(operation.chunks.length, 2);
+  assert.equal(operation.chunks[0].endOfFile, true);
+  assert.deepEqual(operation.chunks[1].oldLines, []);
+  assert.deepEqual(operation.chunks[1].newLines, ["new", "", "+literal plus", "*** End Patch"]);
+});
+
+test("EOF addition runs stop at operation and explicit hunk boundaries", () => {
+  for (const next of ["*** Delete File: b", "@@\n-other\n+OTHER"]) {
+    const input = patch(`*** Update File: a\n@@\n existing\n*** End of File\n+new\n${next}`);
+    const result = normalize(input);
+    assert.equal(result.notices.filter((notice) => notice.code === "eof-addition-hunk").length, 1);
+    assert.ok(result.input.includes(`*** End of File\n@@\n+new\n${next}`));
+    assert.ok(parse(input).operations.length > 0);
+  }
+  const canonical = patch("*** Update File: a\n@@\n existing\n*** End of File\n@@\n+new");
+  assert.deepEqual(normalize(canonical).notices, []);
+});
+
+test("EOF repair rejects mixed tails and preserves their blanks across repeated normalization", () => {
+  for (const tail of [
+    "\n+new",
+    "+new\n",
+    "+new\n\n+more",
+    "+new\n \n+more",
+    "+new\n context",
+    "+new\n-removed",
+    "+new\nunknown",
+    "+new\n*** Unknown File: b",
+    "+new\n*** Move to: b",
+  ]) {
+    const input = patch(`*** Update File: a\n@@\n existing\n*** End of File\n${tail}`);
+    const result = normalize(input);
+    assert.equal(result.input, input);
+    assert.deepEqual(result.notices, []);
+    assert.throws(() => parsePatch(result.input), /Expected update hunk/);
+  }
+  const empty = patch("*** Update File: a\n@@\n*** End of File\n+new");
+  assert.deepEqual(normalize(empty).notices, []);
+  assert.throws(() => parse(empty), /does not contain any lines/);
 });

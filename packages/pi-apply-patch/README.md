@@ -127,8 +127,11 @@ The normalizer repairs:
 - an empty Update header with no body and no Move destination (the block is discarded and makes no changes);
 - a matching outer Markdown fence enclosing a complete Begin/End patch;
 - unified-diff numeric hunk headers, replacing them with bare `@@` only when that hunk has context or removed lines to locate. Pure-addition hunks retain the header and go through normal locator verification.
+- a missing hunk marker before a nonempty run of `+` lines after `*** End of File`, when the preceding hunk is nonempty and every line up to the next structural boundary is an addition. The original EOF constraint stays on the preceding hunk; the new hunk appends. Bare blank lines, context, removals, and unknown lines mixed into that run prevent this repair.
 
 Existing format compatibility uses the same normalization path: specific heredoc wrappers, structural marker padding, an omitted first hunk marker, blank Update context lines without a prefix, ignored padding after End of File, and one extra final End marker. Payload whitespace and explicit content prefixes remain literal. Unknown control markers and Update lines with an unknown operation prefix are not guessed. Missing patch boundaries are never invented, and commentary outside an enclosing fence is not discarded. A patch left with no operations is rejected, not reported as a successful edit.
+
+Model-facing tool descriptions and guidelines teach the canonical format, not repair availability or normalization rules. Normalization is an execution detail, not an alternative input contract.
 
 Every repair is reported in the plain text tool result, including when later parsing, verification, or writing fails. Repair notices identify the original patch line and affected path when available; repeated repairs of the same kind and path are counted. A repair means the supplied input was noncanonical, not that a file was successfully modified.
 

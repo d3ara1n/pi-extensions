@@ -20,6 +20,25 @@ function structuralMarker(line: string, inUpdate: boolean, finalLine: boolean): 
   return inUpdate && !finalLine ? trimEnd(line) : trim(line);
 }
 
+/** Classify the complete EOF tail without guessing whether bare blanks are additions. */
+function eofTailKind(
+  lines: readonly InputLine[],
+  start: number,
+): "additions" | "padding" | "invalid" {
+  let additions = false;
+  let padding = false;
+  for (let index = start; index < lines.length; index++) {
+    const line = lines[index].text;
+    const marker = structuralMarker(line, true, index === lines.length - 1);
+    if (line.startsWith("@@") || operationHeader(marker) || marker === END || marker === EOF) break;
+    if (line.startsWith("+")) additions = true;
+    else if (!marker) padding = true;
+    else return "invalid";
+    if (additions && padding) return "invalid";
+  }
+  return additions ? "additions" : "padding";
+}
+
 /**
  * Canonicalize deterministic format variations before strict parsing. Never read
  * source files, invent missing boundaries, or guess Update line prefixes.
@@ -75,7 +94,9 @@ export function normalizePatchInput(input: string): NormalizedPatch {
   const output: InputLine[] = [];
   let current: { kind: "add" | "update" | "delete"; path: string } | undefined;
   let hasChunk = false;
+  let chunkHasBody = false;
   let afterEof = false;
+  let eofTail: "additions" | "padding" | "invalid" = "padding";
   let ended = false;
   for (let index = 0; index < lines.length; index++) {
     const entry = lines[index];
@@ -120,6 +141,7 @@ export function normalizePatchInput(input: string): NormalizedPatch {
       const [prefix, kind] = header;
       current = { kind, path: marker.slice(prefix.length) };
       hasChunk = false;
+      chunkHasBody = false;
       afterEof = false;
       // Only a truly empty Update with no Move is a no-op. An empty explicit
       // hunk or Move still fails, rather than losing its requested operation.
@@ -202,24 +224,43 @@ export function normalizePatchInput(input: string): NormalizedPatch {
       if (anchor === marker) canonicalMarker(anchor);
       else emit(anchor);
       hasChunk = true;
+      chunkHasBody = false;
       afterEof = false;
       continue;
     }
     if (marker === EOF) {
       canonicalMarker(marker);
       afterEof = hasChunk;
+      eofTail = eofTailKind(lines, index + 1);
       continue;
     }
-    if (afterEof && !marker) {
+    if (afterEof && chunkHasBody && eofTail === "additions" && line.startsWith("+")) {
+      // Preserve the preceding hunk's EOF constraint; the new hunk only appends.
       repair(
-        "eof-padding",
+        "eof-addition-hunk",
         entry.source,
-        "removed ignored blank padding after End of File",
+        "inserted an omitted hunk marker before additions after End of File",
         current.path,
       );
+      emit("@@");
+      afterEof = false;
+      chunkHasBody = false;
+    }
+    if (afterEof && !marker) {
+      // Padding-only tails retain their old compatibility. In a mixed tail,
+      // leave blanks intact so another normalization pass cannot enable repair.
+      if (eofTail === "padding") {
+        repair(
+          "eof-padding",
+          entry.source,
+          "removed ignored blank padding after End of File",
+          current.path,
+        );
+      } else emit(line);
       continue;
     }
     if (!afterEof && (line === "" || /^[ +\-]/.test(line))) {
+      chunkHasBody = true;
       if (!hasChunk) {
         repair(
           "implicit-hunk",

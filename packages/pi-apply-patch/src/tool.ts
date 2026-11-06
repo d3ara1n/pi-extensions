@@ -104,7 +104,7 @@ export function makeApplyPatchTool(
       ].join("\n"),
     ],
     description:
-      "Create, update, move, or delete files using a Codex-format patch. Returns a summary of changed files or failure diagnostics, including any input repairs and execution warnings. Direct tool call only — not callable from codemode scripts: it is absent from the script's `tools` object.",
+      "Create, update, move, or delete files using a Codex-format patch. Returns a summary of changed files or failure diagnostics. Direct tool call only — not callable from codemode scripts: it is absent from the script's `tools` object.",
     parameters: schema,
     constrainedSampling: { type: "grammar", variants: { openai_lark: CODEX_APPLY_PATCH_GRAMMAR } },
     // Model-only: the tool is built around grammar-constrained patch generation by the

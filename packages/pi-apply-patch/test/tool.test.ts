@@ -7,7 +7,6 @@ import { makeApplyPatchTool } from "../src/tool.ts";
 import { renderRejection } from "../src/report.ts";
 import { MemoryFileSystem, ROOT } from "./memory-fs.ts";
 
-
 test("tool uses the execution workspace and returns plain text plus serializable details", async () => {
   const fs = new MemoryFileSystem();
   const tool = makeApplyPatchTool({ fs, withFileQueue: fs.context().withFileQueue });
@@ -35,10 +34,10 @@ test("the tool passes workspaceOnly to the executor", async () => {
   const fs = new MemoryFileSystem();
   const target = resolve("/outside", "created.txt");
   fs.addDir(resolve("/outside"));
-  const tool = makeApplyPatchTool(
-    { fs, withFileQueue: fs.context().withFileQueue },
-    () => ({ ...DEFAULT_CONFIG, workspaceOnly: false }),
-  );
+  const tool = makeApplyPatchTool({ fs, withFileQueue: fs.context().withFileQueue }, () => ({
+    ...DEFAULT_CONFIG,
+    workspaceOnly: false,
+  }));
   await tool.execute(
     "call",
     { input: `*** Begin Patch\n*** Add File: ${target}\n+new\n*** End Patch` },
@@ -110,9 +109,7 @@ test("Responses protocol supports freeform, fallback, streaming escapes, and pai
     createGrammarToolInputProperties,
     appendGrammarToolInputJsonDelta,
     closeGrammarToolInputJson,
-  } = await import(
-    new URL("./api/constrained-sampling.js", ai).href
-  );
+  } = await import(new URL("./api/constrained-sampling.js", ai).href);
   const tool = makeApplyPatchTool();
   const custom = convertResponsesTools([tool], { supportsOpenAIGrammarTools: true })[0];
   assert.equal(custom.type, "custom");
@@ -186,4 +183,20 @@ test("Responses protocol supports freeform, fallback, streaming escapes, and pai
       input,
     });
   }
+});
+
+test("model-facing instructions teach canonical input without advertising input repairs", () => {
+  const tool = makeApplyPatchTool();
+  const instructions = [
+    tool.description,
+    tool.promptSnippet,
+    ...(tool.promptGuidelines ?? []),
+    JSON.stringify(tool.parameters),
+  ].join("\n");
+  assert.doesNotMatch(instructions, /self[- ]heal|input repairs|automatic repairs|fallback/i);
+  assert.ok(
+    tool.promptGuidelines?.includes(
+      "apply_patch format: send patch text without markdown fences, commentary, or unified-diff headers ('---', '+++', '@@ -N,M +N,M @@').",
+    ),
+  );
 });

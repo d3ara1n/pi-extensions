@@ -1,3 +1,15 @@
+/** Facts shared by model-facing text and terminal rendering. */
+export interface PatchNotice {
+  readonly kind: "repair" | "warning";
+  readonly code: string;
+  readonly message: string;
+  readonly path?: string;
+  /** Original patch line for repairs; source line for match warnings. */
+  readonly line?: number;
+  readonly hunk?: number;
+  readonly count?: number;
+}
+
 /** A Codex update chunk with LF-separated patch text. */
 export interface Chunk {
   readonly anchor?: string;

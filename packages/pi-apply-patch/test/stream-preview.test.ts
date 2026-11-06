@@ -224,3 +224,33 @@ test("streaming preview sanitizes source text before applying theme styles", () 
   assert.match(rows, /a\.txt/);
   assert.match(rows, /value/);
 });
+
+test("completed previews use the same format repairs as execution", () => {
+  const { fs } = fixture({ a: "anchor\nold\n", b: "old\n" });
+  const blocks = buildPreview(
+    patch(
+      "*** Add File: new",
+      "raw",
+      "",
+      "*** Update File: a",
+      "@@anchor",
+      "-old",
+      "+new",
+      "*** Update File: b",
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+      "*** Update File: skipped",
+    ),
+    ROOT,
+    emptyPreviewState(),
+    fs,
+  );
+  assert.deepEqual(
+    blocks.map((block) => block.state),
+    ["ready", "ready", "ready", "skipped"],
+  );
+  assert.equal(blocks[0].diff, generateDiffString("", "raw\n\n").diff);
+  assert.equal(blocks[1].diff, generateDiffString("anchor\nold\n", "anchor\nnew\n").diff);
+  assert.equal(blocks[2].diff, generateDiffString("old\n", "new\n").diff);
+});

@@ -7,6 +7,7 @@
 import { generateDiffString } from "@earendil-works/pi-coding-agent";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import { normalizePatchInput } from "./core/normalize.ts";
 import { parsePatch } from "./core/parser.ts";
 import { applyReplacements, planUpdate } from "./core/update.ts";
 import { resolvePatchPath, within } from "./workspace.ts";
@@ -15,7 +16,7 @@ export interface PreviewBlock {
   readonly kind: "add" | "update" | "delete";
   readonly path: string;
   readonly moveTo?: string;
-  readonly state: "ready" | "partial" | "unmatched" | "noread" | "invalid";
+  readonly state: "ready" | "partial" | "unmatched" | "noread" | "invalid" | "skipped";
   readonly diff?: string;
   readonly glimpse?: readonly string[];
   readonly warning?: string;
@@ -110,11 +111,7 @@ function readPreviewFile(
     const absolute = resolvePatchPath(directory, path);
     if (workspaceOnly && !within(absolute, directory) && !within(absolute, root)) return undefined;
     const canonical = fs.realpath(absolute);
-    if (
-      canonical === root ||
-      (workspaceOnly && !within(canonical, root)) ||
-      !fs.isFile(canonical)
-    )
+    if (canonical === root || (workspaceOnly && !within(canonical, root)) || !fs.isFile(canonical))
       return undefined;
     return fs.readFile(canonical);
   } catch {
@@ -138,7 +135,11 @@ function completedBlock(
   const base = { kind: section.kind, path: section.path, moveTo: section.moveTo };
   let operation;
   try {
-    operation = parsePatch(patch).operations[0];
+    const normalized = normalizePatchInput(patch);
+    operation = parsePatch(normalized.input, normalized.sourceLines).operations[0];
+    if (!operation) {
+      return { ...base, state: "skipped", warning: "Empty Update block: no changes." };
+    }
   } catch {
     return { ...base, state: "invalid", warning: "Preview unavailable: invalid patch section." };
   }

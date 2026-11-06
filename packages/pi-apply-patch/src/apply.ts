@@ -1,5 +1,7 @@
 import * as fs from "node:fs/promises";
 import { dirname } from "node:path";
+import { normalizePatchInput, type NormalizedPatch } from "./core/normalize.ts";
+import { fileWarnings, PatchApplicationError, withNotices, type PatchNotice } from "./notices.ts";
 import { parsePatch } from "./core/parser.ts";
 import type { FileOperation, HunkMatchInfo, HunkOutcome } from "./core/types.ts";
 import { applyReplacements, planUpdate } from "./core/update.ts";
@@ -57,6 +59,7 @@ export interface FileChange {
 }
 export interface ApplyResult {
   readonly files: readonly FileChange[];
+  readonly notices: readonly PatchNotice[];
 }
 
 interface ResolvedOperation {
@@ -86,7 +89,11 @@ class UnmatchedUpdateError extends Error {
 
 /** @internal */
 export function formatSummary(
-  files: readonly Pick<FileChange, "kind" | "path" | "moveTo" | "hunks">[],
+  files: readonly Pick<
+    FileChange,
+    "kind" | "path" | "moveTo" | "hunks" | "overwrites" | "rematched"
+  >[],
+  notices: readonly PatchNotice[] = files.flatMap(fileWarnings),
 ): string {
   const rows = (
     [
@@ -99,30 +106,7 @@ export function formatSummary(
       .filter((file) => file.kind === kind)
       .map((file) => `${prefix} ${file.moveTo ?? file.path}`),
   );
-  const notes = files.flatMap((file) => matchNotes(file.moveTo ?? file.path, file.hunks ?? []));
-  return [
-    `Success. Updated the following files:\n${rows.join("\n")}`,
-    ...(notes.length ? ["", "Match notes (the patch was applied; verify these locations):", ...notes] : []),
-  ].join("\n");
-}
-
-/**
- * Successful matches the model may not have intended: the context also occurs
- * elsewhere, or it matched only after ignoring leading whitespace or folding
- * Unicode punctuation, so added lines keep the patch's own indentation.
- */
-function matchNotes(path: string, hunks: readonly HunkMatchInfo[]): string[] {
-  return hunks.flatMap((hunk) => {
-    const where = `${path} hunk ${hunk.hunk} at line ${hunk.line}`;
-    const notes: string[] = [];
-    if (hunk.occurrences > 1)
-      notes.push(`- ${where}: context occurs ${hunk.occurrences} times in the file; this occurrence was edited`);
-    if (hunk.strategy === "trim" || hunk.strategy === "unicode")
-      notes.push(
-        `- ${where}: matched only after ${hunk.strategy === "trim" ? "ignoring leading and trailing whitespace" : "normalizing whitespace and Unicode punctuation"}; check the indentation and characters of added lines`,
-      );
-    return notes;
-  });
+  return withNotices(`Success. Updated the following files:\n${rows.join("\n")}`, notices);
 }
 
 async function verifyTarget(
@@ -298,13 +282,28 @@ async function writeTarget(
   }
 }
 
-/** Verify the whole patch before applying it, reporting every failed hunk. @internal */
+/** Normalize once, then verify the entire patch before writing. @internal */
 export async function applyPatch(input: string, context: ApplyContext): Promise<ApplyResult> {
+  checkAbort(context.signal);
+  const normalized = normalizePatchInput(input);
+  const notices = [...normalized.notices];
+  try {
+    return await applyCanonicalPatch(normalized, context, notices);
+  } catch (error) {
+    throw new PatchApplicationError(error, notices);
+  }
+}
+
+async function applyCanonicalPatch(
+  normalized: NormalizedPatch,
+  context: ApplyContext,
+  notices: PatchNotice[],
+): Promise<ApplyResult> {
   checkAbort(context.signal);
   let workspace: Workspace;
   let resolved: ResolvedOperation[];
   try {
-    const { operations } = parsePatch(input);
+    const { operations } = parsePatch(normalized.input, normalized.sourceLines);
     if (!operations.length) throw new Error("empty patch");
     workspace = await openWorkspace(context.cwd, context.fs, context.workspaceOnly ?? true);
     resolved = [];
@@ -403,11 +402,14 @@ export async function applyPatch(input: string, context: ApplyContext): Promise<
             await workspace.fs.unlink(source.path);
           }
         }
-        files.push(change.before !== pending.change.before ? { ...change, rematched: true } : change);
+        const completed =
+          change.before !== pending.change.before ? { ...change, rematched: true } : change;
+        files.push(completed);
+        notices.push(...fileWarnings(completed));
       }
     } catch (error) {
       const partial = writesStarted
-        ? `\nFilesystem changes may be partial; inspect ${currentPath} before retrying.${files.length ? `\nCompleted operations:\n${formatSummary(files).split("\n").slice(1).join("\n")}` : ""}`
+        ? `\nFilesystem changes may be partial; inspect ${currentPath} before retrying.${files.length ? `\nCompleted operations:\n${formatSummary(files, []).split("\n").slice(1).join("\n")}` : ""}`
         : "";
       const notApplied = prepared
         .slice(files.length)
@@ -415,6 +417,6 @@ export async function applyPatch(input: string, context: ApplyContext): Promise<
       const skipped = notApplied.length ? `\nNot applied: ${notApplied.join(", ")}` : "";
       throw new Error(`apply_patch failed: ${errorText(error)}${partial}${skipped}`);
     }
-    return { files };
+    return { files, notices };
   });
 }

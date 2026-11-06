@@ -97,7 +97,7 @@ Send the patch itself without Markdown fences or commentary. Function calls use 
 
 - **Add:** every content line starts with `+`, including blank lines (written as `+`).
 - **Delete:** the file header has no body.
-- **Update:** use nonempty hunks starting with `@@` or `@@ <existing line>`. Prefix unchanged context with a space, removals with `-`, and additions with `+`, before the original indentation. Blank lines also need their corresponding prefix. Unified-diff headers such as `@@ -N,M +N,M @@` are not supported.
+- **Update:** use nonempty hunks starting with `@@` or `@@ <existing line>`. Prefix unchanged context with a space, removals with `-`, and additions with `+`, before the original indentation. Blank lines also need their corresponding prefix. Use literal locators rather than unified-diff numeric headers such as `@@ -N,M +N,M @@`.
 - **Operation order:** blocks execute in patch order. A path may appear in multiple blocks; each uses the content left by earlier operations, including Add, Delete, and Move.
 - **Hunk order:** within one Update block, keep hunks in file order with no overlapping context. Every hunk matches the file's content at the start of that block; later hunks cannot match text inserted by earlier ones in the same block. Combine nearby edits into one hunk.
 - **Locators:** `@@ text` locates a source line and searches after it. Do not repeat that line as the first context or removed line. To edit the locator line itself, use bare `@@` with surrounding context or locate an earlier line.
@@ -115,6 +115,24 @@ Unchanged context lines retain their original text and line endings, even when m
 Add overwrites existing files. Move writes the destination, overwriting it if necessary, then removes the source. Overwriting does not require the previous target contents to be readable as UTF-8; when an Add target cannot be read, its diff is unavailable. Missing destination directories are created.
 
 In source paths and Move destinations, a leading `~/` expands to the current user's home directory, obtained from `os.homedir()`. Use `./~/file` for a literal `~` directory. Only the leading `~/` expands; `~user` and environment variables such as `$HOME` stay literal. Quotes are part of a filename rather than shell quoting. Execution and streaming preview apply the same expansion before workspace checks, so `workspaceOnly: true` still rejects expanded paths outside the workspace.
+
+## Input normalization and notices
+
+Execution first normalizes deterministic format variations, then strictly parses the canonical patch and runs the usual whole-patch verification. Normalization does not read source files or change the matching, path, or write policy.
+
+The normalizer repairs:
+
+- missing `+` prefixes on Add File content lines, including blank lines;
+- a missing separator space after `@@` in an Update locator;
+- an empty Update header with no body and no Move destination (the block is discarded and makes no changes);
+- a matching outer Markdown fence enclosing a complete Begin/End patch;
+- unified-diff numeric hunk headers, replacing them with bare `@@` only when that hunk has context or removed lines to locate. Pure-addition hunks retain the header and go through normal locator verification.
+
+Existing format compatibility uses the same normalization path: specific heredoc wrappers, structural marker padding, an omitted first hunk marker, blank Update context lines without a prefix, ignored padding after End of File, and one extra final End marker. Payload whitespace and explicit content prefixes remain literal. Unknown control markers and Update lines with an unknown operation prefix are not guessed. Missing patch boundaries are never invented, and commentary outside an enclosing fence is not discarded. A patch left with no operations is rejected, not reported as a successful edit.
+
+Every repair is reported in the plain text tool result, including when later parsing, verification, or writing fails. Repair notices identify the original patch line and affected path when available; repeated repairs of the same kind and path are counted. A repair means the supplied input was noncanonical, not that a file was successfully modified.
+
+Execution warnings share the same notice channel: repeated context, non-exact context matching (including trailing-whitespace matching), overwrites, and rematching against changed source content. Warnings describe permitted behavior; they do not relax verification. Results retain structured notices in `details.notices`; failures with notices use an explicit error result so both the error flag and the notices survive the framework boundary. Plain text and TUI rendering use the same notice formatter, with at most 20 entries per category and an omitted-entry count; structured notices remain complete.
 
 ## Workspace and failure behavior
 
@@ -163,14 +181,14 @@ M src/main.ts
 D obsolete.txt
 ```
 
-When a hunk's context occurs more than once in the file, or matched only after ignoring leading whitespace or normalizing Unicode punctuation, the summary appends match notes naming the file, hunk, and line so the model can verify the location and the indentation of added lines:
+When a hunk's context occurs more than once in the file, or matched only after whitespace or Unicode normalization, the summary appends warnings naming the file, hunk, and line so the model can verify the location and the indentation of added lines:
 
 ```text
-Match notes (the patch was applied; verify these locations):
+Warnings:
 - src/main.ts hunk 2 at line 40: context occurs 3 times in the file; this occurrence was edited
 ```
 
-Errors are thrown through pi's tool failure contract. In the TUI the tool row header carries the file count and the aggregate `+N/-M` (omitted when a file's previous content could not be read, so no diff exists for it); the result body lists the affected files and their diffs, cropped to the configured context and changed-line budget, with every cropped region marked by a hint line. `ctrl+o` shows the diffs whole; folded results list up to eight files at a time. Complete diff details remain in the session. RPC, print, and JSON modes receive the same plain text tool results without relying on TUI components.
+Failures use pi's tool error contract: failures with notices return `isError: true` and structured details; failures without notices are thrown. In the TUI the tool row header carries the file count and the aggregate `+N/-M` (omitted when a file's previous content could not be read, so no diff exists for it); the result body lists the affected files and their diffs, cropped to the configured context and changed-line budget, with every cropped region marked by a hint line. `ctrl+o` shows the diffs whole; folded results list up to eight files at a time. Complete diff details remain in the session. RPC, print, and JSON modes receive the same plain text tool results without relying on TUI components.
 
 ## Compatibility baseline
 
@@ -178,7 +196,7 @@ The grammar, parser, matching passes, and fixtures are based on [OpenAI Codex `b
 
 Updates preserve a leading BOM, unchanged context text, existing blank lines, and LF/CRLF endings as described above. These are local adaptations rather than the pinned revision's default **NormalizeToLf** behavior or its experimental `PreserveLineEndings` implementation. A trailing newline is still added to nonempty text when needed. A BOM-only result retains its BOM without adding a newline. CR-only separators are not recognized as source line boundaries.
 
-The parser accepts upstream's lenient boundary whitespace and specific `<<EOF` wrappers, while the advertised grammar describes the normal freeform format. Empty Add operations are accepted by the parser. Empty patches and empty Update operations fail. Multi-environment `*** Environment ID:` routing is unsupported.
+The advertised grammar describes the normal freeform format. Upstream's lenient format variations pass through the explicit input normalizer before strict parsing; the local repairs are described above. Empty Add operations remain accepted. Empty patches fail, and empty Update headers without a Move are discarded with a repair notice. Empty explicit hunks and empty Move operations still fail. Multi-environment `*** Environment ID:` routing is unsupported.
 
 Workspace confinement and rejecting non-file targets are explicit host restrictions.
 

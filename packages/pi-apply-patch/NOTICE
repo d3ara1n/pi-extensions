@@ -15,5 +15,7 @@ TypeScript functions. Local adaptations preserve a file-leading BOM, unchanged
 context text, blank lines, and LF/CRLF endings, and provide bounded diagnostics
 for Unicode, whitespace, and blank-line differences. Execution is adapted to pi,
 with workspace boundary checks, filesystem injection, mutation queues, and
-plain tool results. Multi-environment routing and the upstream experimental
+plain tool results. Deterministic format normalization precedes strict parsing;
+input repairs and execution warnings share a model-visible notice channel.
+Multi-environment routing and the upstream experimental
 PreserveLineEndings implementation are not included.

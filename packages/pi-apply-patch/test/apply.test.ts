@@ -16,7 +16,7 @@ test("returns Codex summaries grouped by operation with actual before/after cont
     fs.context(),
   );
   assert.equal(
-    formatSummary(result.files),
+    formatSummary(result.files, []),
     "Success. Updated the following files:\nA existing\nM nested/b\nD d",
   );
   assert.equal(result.files[2].before, "before\n");
@@ -82,7 +82,9 @@ test("accepts expanded paths inside the workspace with the default boundary", as
 test("keeps escaped tilde directories, usernames, and environment variables literal", async () => {
   const fs = new MemoryFileSystem();
   await applyPatch(
-    patch("*** Add File: ./~/file\n+tilde\n*** Add File: ~someone/file\n+user\n*** Add File: $HOME/file\n+variable"),
+    patch(
+      "*** Add File: ./~/file\n+tilde\n*** Add File: ~someone/file\n+user\n*** Add File: $HOME/file\n+variable",
+    ),
     fs.context(),
   );
   assert.deepEqual(fs.snapshot(), {
@@ -271,7 +273,10 @@ test("rejections aggregate every failed operation and hunk without writing", asy
   );
   assert.match(error.message, /2 of 3 operations failed; no files were written/);
   assert.match(error.message, /a \(update\): 2 of 2 hunks did not match/);
-  assert.match(error.message, /hunk 1: context lines not found[\s\S]*hunk 2: context lines not found/);
+  assert.match(
+    error.message,
+    /hunk 1: context lines not found[\s\S]*hunk 2: context lines not found/,
+  );
   assert.match(error.message, /b \(update\): 1 of 1 hunks did not match/);
   assert.match(error.message, /verified but not written \(whole patch rejected\): c/);
   assert.equal(fs.writes.length, 0);
@@ -329,10 +334,22 @@ test("drift diagnostics report candidates, ordering, and re-application", async 
     () => assert.fail("expected rejection"),
     (error: Error) => error,
   );
-  assert.match(error.message, /closest match at line 1: 1 of 1 context lines changed \(whitespace-only drift\)/);
-  assert.match(error.message, /the replacement text already occurs at line 1; this hunk may already be applied/);
-  assert.match(error.message, /hunk 2: context lines not found \(search started at line 2\)[\s\S]*context matches at line 1, outside the searched range/);
-  assert.match(error.message, /anchored to the end of the file\)[\s\S]*context matches at line 1, outside the searched range/);
+  assert.match(
+    error.message,
+    /closest match at line 1: 1 of 1 context lines changed \(whitespace-only drift\)/,
+  );
+  assert.match(
+    error.message,
+    /the replacement text already occurs at line 1; this hunk may already be applied/,
+  );
+  assert.match(
+    error.message,
+    /hunk 2: context lines not found \(search started at line 2\)[\s\S]*context matches at line 1, outside the searched range/,
+  );
+  assert.match(
+    error.message,
+    /anchored to the end of the file\)[\s\S]*context matches at line 1, outside the searched range/,
+  );
 });
 
 test("write failures list the operations that were not applied", async () => {
@@ -353,9 +370,7 @@ test("write failures list the operations that were not applied", async () => {
 test("successful updates carry per-hunk match details", async () => {
   const fs = new MemoryFileSystem({ a: "one\n", b: "two\n" });
   const result = await applyPatch(
-    patch(
-      "*** Update File: a\n@@\n-one\n+ONE\n@@\n+tail\n*** Update File: b\n@@\n-two  \n+TWO",
-    ),
+    patch("*** Update File: a\n@@\n-one\n+ONE\n@@\n+tail\n*** Update File: b\n@@\n-two  \n+TWO"),
     fs.context(),
   );
   assert.deepEqual(result.files[0].hunks, [
@@ -385,9 +400,7 @@ test("overwrites are reported for adds and moves onto existing files", async () 
 test("an update on a move destination verifies against the moved content in verification", async () => {
   const fs = new MemoryFileSystem({ a: "same\nkeep A\n", b: "same\nkeep B\n" });
   const result = await applyPatch(
-    patch(
-      "*** Update File: a\n*** Move to: b\n@@\n same\n*** Update File: b\n@@\n-same\n+changed",
-    ),
+    patch("*** Update File: a\n*** Move to: b\n@@\n same\n*** Update File: b\n@@\n-same\n+changed"),
     fs.context(),
   );
   assert.equal(result.files[1].rematched, undefined);
@@ -486,35 +499,44 @@ test("a symlink workspace root supports both logical and canonical absolute path
 test("reports successful matches that may not be the intended location", async () => {
   const fs = new MemoryFileSystem({ dup: "x\ny\nx\n", indent: "  a\n", plain: "q\n" });
   const result = await applyPatch(
-    patch("*** Update File: dup\n@@\n-x\n+z\n*** Update File: indent\n@@\n-a\n+b\n*** Update File: plain\n@@\n-q\n+r"),
+    patch(
+      "*** Update File: dup\n@@\n-x\n+z\n*** Update File: indent\n@@\n-a\n+b\n*** Update File: plain\n@@\n-q\n+r",
+    ),
     fs.context(),
   );
   const summary = formatSummary(result.files);
-  assert.match(summary, /^Success\. Updated the following files:\nM dup\nM indent\nM plain\n\nMatch notes/);
-  assert.match(summary, /- dup hunk 1 at line 1: context occurs 2 times in the file; this occurrence was edited/);
-  assert.match(summary, /- indent hunk 1 at line 1: matched only after ignoring leading and trailing whitespace/);
+  assert.match(
+    summary,
+    /^Success\. Updated the following files:\nM dup\nM indent\nM plain\n\nWarnings:/,
+  );
+  assert.match(
+    summary,
+    /- dup hunk 1 at line 1: context occurs 2 times in the file; this occurrence was edited/,
+  );
+  assert.match(
+    summary,
+    /- indent hunk 1 at line 1: matched only after ignoring leading and trailing whitespace/,
+  );
   assert.doesNotMatch(summary, /plain hunk/);
 });
 
 test("sequential updates on one file: the second hunk matches the first one's result", async () => {
   const fs = new MemoryFileSystem({ a: "start\n" });
   const result = await applyPatch(
-    patch(
-      "*** Update File: a\n@@\n-start\n+middle\n*** Update File: a\n@@\n-middle\n+end",
-    ),
+    patch("*** Update File: a\n@@\n-start\n+middle\n*** Update File: a\n@@\n-middle\n+end"),
     fs.context(),
   );
   assert.deepEqual(fs.snapshot(), { a: "end\n" });
   assert.equal(result.files.length, 2);
-  assert.deepEqual(result.files.map((file) => file.after), ["middle\n", "end\n"]);
+  assert.deepEqual(
+    result.files.map((file) => file.after),
+    ["middle\n", "end\n"],
+  );
 });
 
 test("update after add on the same path operates on the added content", async () => {
   const fs = new MemoryFileSystem();
-  await applyPatch(
-    patch("*** Add File: a\n+v1\n*** Update File: a\n@@\n-v1\n+v2"),
-    fs.context(),
-  );
+  await applyPatch(patch("*** Add File: a\n+v1\n*** Update File: a\n@@\n-v1\n+v2"), fs.context());
   assert.deepEqual(fs.snapshot(), { a: "v2\n" });
 });
 
@@ -563,7 +585,9 @@ test("counts every operation in a rejected same-file chain and lists verified pa
   const fs = new MemoryFileSystem({ a: "start\n" });
   await assert.rejects(
     applyPatch(
-      patch("*** Update File: a\n@@\n-start\n+middle\n*** Update File: a\n@@\n-middle\n+end\n*** Update File: a\n@@\n-missing\n+final"),
+      patch(
+        "*** Update File: a\n@@\n-start\n+middle\n*** Update File: a\n@@\n-middle\n+end\n*** Update File: a\n@@\n-missing\n+final",
+      ),
       fs.context(),
     ),
     (error: Error) => {

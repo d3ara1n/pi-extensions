@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { countOccurrences, findAlreadyApplied, findCandidates } from "./diagnostics.ts";
-import { parsePatch } from "./parser.ts";
+import { parsePatch as parseCanonicalPatch } from "./parser.ts";
+import { normalizePatchInput } from "./normalize.ts";
 import { seekSequence } from "./matcher.ts";
 import { applyUpdate, planUpdate } from "./update.ts";
+
+function parsePatch(input: string) {
+  const normalized = normalizePatchInput(input);
+  return parseCanonicalPatch(normalized.input, normalized.sourceLines);
+}
 
 function update(source: string, body: string): string {
   const operation = parsePatch(`*** Begin Patch\n*** Update File: file.txt\n${body}\n*** End Patch`)
@@ -13,9 +19,8 @@ function update(source: string, body: string): string {
 }
 
 function chunks(body: string) {
-  const operation = parsePatch(
-    `*** Begin Patch\n*** Update File: file.txt\n${body}\n*** End Patch`,
-  ).operations[0];
+  const operation = parsePatch(`*** Begin Patch\n*** Update File: file.txt\n${body}\n*** End Patch`)
+    .operations[0];
   assert.equal(operation.kind, "update");
   return operation.chunks;
 }
@@ -49,7 +54,7 @@ test("accepts upstream lenient envelope forms and empty additions", () => {
 });
 
 test("rejects malformed patches and reports the source line", () => {
-  for (const body of ["", "@@", "*** Move to: other", "@@\n@@"]) {
+  for (const body of ["@@", "*** Move to: other", "@@\n@@"]) {
     assert.throws(
       () =>
         parsePatch(`*** Begin Patch\n*** Update File: a\n${body ? `${body}\n` : ""}*** End Patch`),
@@ -165,13 +170,28 @@ test("planUpdate reports match strategy, line, and occurrence counts", () => {
 test("candidate search classifies whitespace and content drift", () => {
   assert.deepEqual(findCandidates(["const  total = a;"], ["const total = a;"], 0), [
     {
-      line: 1, differing: 1, whitespace: 1, difference: "whitespace", beforeSearchStart: false,
-      details: [{ expectedLine: 1, actualLine: 1, expected: "const total = a;", actual: "const  total = a;" }],
+      line: 1,
+      differing: 1,
+      whitespace: 1,
+      difference: "whitespace",
+      beforeSearchStart: false,
+      details: [
+        {
+          expectedLine: 1,
+          actualLine: 1,
+          expected: "const total = a;",
+          actual: "const  total = a;",
+        },
+      ],
     },
   ]);
   assert.deepEqual(findCandidates(["keep", "other"], ["keep", "changed"], 0), [
     {
-      line: 1, differing: 1, whitespace: 0, difference: "content", beforeSearchStart: false,
+      line: 1,
+      differing: 1,
+      whitespace: 0,
+      difference: "content",
+      beforeSearchStart: false,
       details: [{ expectedLine: 2, actualLine: 2, expected: "changed", actual: "other" }],
     },
   ]);

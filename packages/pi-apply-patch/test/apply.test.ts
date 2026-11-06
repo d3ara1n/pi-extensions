@@ -502,14 +502,18 @@ test("update after delete on the same path is rejected without writes", async ()
   assert.deepEqual(fs.snapshot(), { a: "old\n" });
 });
 
-test("one failed operation in a same-file chain rejects the whole patch", async () => {
+test("counts every operation in a rejected same-file chain and lists verified paths once", async () => {
   const fs = new MemoryFileSystem({ a: "start\n" });
   await assert.rejects(
     applyPatch(
-      patch("*** Update File: a\n@@\n-start\n+middle\n*** Update File: a\n@@\n-missing\n+end"),
+      patch("*** Update File: a\n@@\n-start\n+middle\n*** Update File: a\n@@\n-middle\n+end\n*** Update File: a\n@@\n-missing\n+final"),
       fs.context(),
     ),
-    /1 of 2 operations failed; no files were written/,
+    (error: Error) => {
+      assert.match(error.message, /1 of 3 operations failed; no files were written/);
+      assert.match(error.message, /verified but not written \(whole patch rejected\): a$/);
+      return true;
+    },
   );
   assert.deepEqual(fs.snapshot(), { a: "start\n" });
   assert.equal(fs.writes.length, 0);

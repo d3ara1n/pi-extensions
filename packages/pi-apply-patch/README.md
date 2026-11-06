@@ -50,7 +50,7 @@ drops surrounding context.
 across removals and additions together. The rest collapse into one hint line.
 - `workspaceOnly` — keep patch paths inside the workspace. Default `true`. Set
 it to `false` to allow Add, Update, Delete, and Move outside the workspace;
-the same canonical-path, duplicate-target, and symlink checks still apply.
+the same canonical-path and symlink checks still apply.
 
 `contextLines` and `maxChangedLines` bound the folded view, which is what the
 TUI shows by default. `ctrl+o` expands the tool row to the full, uncropped
@@ -70,7 +70,7 @@ This uses the Codex custom-tool protocol, not the distinct OpenAI API built-in `
 
 The tool is registered with `model-only` exposure: it is declared to the model, but codemode scripts cannot call it — it is absent from the script's `tools` object, whose file edits go through pi's callable file tools instead.
 
-While the model streams the patch, the tool row previews the files it has parsed so far. Completed updates use the same parser and matcher as execution to show a diff against the file on disk; additions show their proposed content and deletions show the file name. Sections still being written appear as colored patch lines. Invalid or unmatched sections show a warning without hiding the rest of the patch. Preview reads follow the same path policy as execution, including symbolic links and `workspaceOnly`. The preview disappears when execution starts.
+While the model streams the patch, the tool row previews the files it has parsed so far. Completed updates use the same parser and matcher as execution to show a diff against the file on disk; additions show their proposed content and deletions show the file name. Each section previews independently against disk content, so later operations on the same file can differ from the final execution result. Sections still being written appear as colored patch lines. Invalid or unmatched sections show a warning without hiding the rest of the patch. Preview reads follow the same path policy as execution, including symbolic links and `workspaceOnly`. The preview disappears when execution starts.
 
 ## Patch format
 
@@ -98,7 +98,8 @@ Send the patch itself without Markdown fences or commentary. Function calls use 
 - **Add:** every content line starts with `+`, including blank lines (written as `+`).
 - **Delete:** the file header has no body.
 - **Update:** use nonempty hunks starting with `@@` or `@@ <existing line>`. Prefix unchanged context with a space, removals with `-`, and additions with `+`, before the original indentation. Blank lines also need their corresponding prefix. Unified-diff headers such as `@@ -N,M +N,M @@` are not supported.
-- **Multiple edits:** each source file appears once per patch. Keep all its hunks under one Update header, in file order, with no overlapping context. Every hunk matches the file's content before this update; later hunks cannot match text inserted by earlier ones. Combine nearby edits into one hunk.
+- **Operation order:** blocks execute in patch order. A path may appear in multiple blocks; each uses the content left by earlier operations, including Add, Delete, and Move.
+- **Hunk order:** within one Update block, keep hunks in file order with no overlapping context. Every hunk matches the file's content at the start of that block; later hunks cannot match text inserted by earlier ones in the same block. Combine nearby edits into one hunk.
 - **Locators:** `@@ text` locates a source line and searches after it. Do not repeat that line as the first context or removed line. To edit the locator line itself, use bare `@@` with surrounding context or locate an earlier line.
 - **Insertion:** include unchanged context to insert at a specific location. A hunk containing only additions appends to the file, even when it has a text locator. `*** End of File` after a hunk body anchors matching to the end of the file.
 - **Move:** place `*** Move to: destination` immediately after the Update header. A move requires a nonempty hunk; a context-only hunk preserves the content when renaming.
@@ -115,13 +116,13 @@ Add overwrites existing files. Move writes the destination, overwriting it if ne
 
 ## Workspace and failure behavior
 
-The workspace is `ctx.cwd` at execution time. With the default `workspaceOnly: true`, relative paths and absolute paths are accepted when both their resolved spelling and canonical location are within that workspace. Source paths, move destinations, existing symlinks, and the nearest existing ancestors of new files are checked. Dangling symlinks, non-file targets, and duplicate canonical source paths are rejected. The same boundary rule applies to Delete: a symlink pointing outside the workspace is rejected even when the operation would only unlink that symlink.
+The workspace is `ctx.cwd` at execution time. With the default `workspaceOnly: true`, relative paths and absolute paths are accepted when both their resolved spelling and canonical location are within that workspace. Source paths, move destinations, existing symlinks, and the nearest existing ancestors of new files are checked. Dangling symlinks and non-file targets are rejected. The same boundary rule applies to Delete: a symlink pointing outside the workspace is rejected even when the operation would only unlink that symlink.
 
-Set `applyPatch.workspaceOnly` to `false` to allow Add, Update, Delete, and Move outside the workspace. Relative and absolute paths are both accepted; the extension still resolves canonical paths, deduplicates targets, rejects dangling symlinks, and rejects directory targets. This is an explicit opt-in.
+Set `applyPatch.workspaceOnly` to `false` to allow Add, Update, Delete, and Move outside the workspace. Relative and absolute paths are both accepted; the extension still resolves canonical paths, rejects dangling symlinks, and rejects directory targets. This is an explicit opt-in.
 
 The extension performs these checks itself and does not integrate with a separate permission extension. Path checks are not an OS sandbox: they do not isolate other processes, eliminate filesystem races, or track hard-link destinations outside the workspace. With `workspaceOnly: false`, `apply_patch` can write or delete anywhere the pi process can access.
 
-All operations are parsed, paths are checked, and file changes are verified before the first write. Participating files share pi's mutation queues, acquired in a consistent order. Paths are rechecked after waiting and before mutations. For nonexistent targets beneath directory symlinks, pi's built-in tools can use a different queue key; concurrent creation through those aliases is not guaranteed to serialize across tools. If an earlier move changes a later source, the later update is matched against that source's current content.
+All operations are parsed, paths are checked, and file changes are verified before the first write. Verification tracks file content and existence across operations in patch order; it does not simulate the full directory and symlink topology. Participating files share pi's mutation queues, acquired in a consistent order. Paths are rechecked after waiting and before mutations. For nonexistent targets beneath directory symlinks, pi's built-in tools can use a different queue key; concurrent creation through those aliases is not guaranteed to serialize across tools. Each operation re-reads its live source before writing and rematches updates if the content differs from verification.
 
 A verification failure leaves files untouched. A failure during execution can leave partial changes; errors report completed operations, list the operations that were not applied, and identify the current target to inspect before retrying. Cancellation is checked between preparation and execution steps. An in-progress filesystem write is allowed to finish; there is no rollback.
 
@@ -177,7 +178,7 @@ Updates preserve a leading BOM, unchanged context text, existing blank lines, an
 
 The parser accepts upstream's lenient boundary whitespace and specific `<<EOF` wrappers, while the advertised grammar describes the normal freeform format. Empty Add operations are accepted by the parser. Empty patches and empty Update operations fail. Multi-environment `*** Environment ID:` routing is unsupported.
 
-Workspace confinement, canonical-source duplicate detection, and rejecting non-file targets are explicit host restrictions.
+Workspace confinement and rejecting non-file targets are explicit host restrictions.
 
 ## Development
 

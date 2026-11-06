@@ -373,7 +373,7 @@ export async function applyPatch(input: string, context: ApplyContext): Promise<
       throw new Error(
         renderRejection({
           rejected,
-          verified: [...new Set(prepared.map((pending) => pending.operation.path))],
+          verified: prepared.map((pending) => pending.operation.path),
         }),
       );
 

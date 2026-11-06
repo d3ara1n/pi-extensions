@@ -57,7 +57,10 @@ export class DiagnosticText {
     const chars = Array.from(text);
     // Lines up to the width cap show whole: long JSON/config lines fail as a
     // block, and excerpting them forces the model to re-read the file.
-    const start = focus + 1 <= EXCERPT_WIDTH ? 0 : Math.max(0, focus - FOCUS_CONTEXT);
+    const start =
+      chars.length <= EXCERPT_WIDTH || focus + 1 <= EXCERPT_WIDTH
+        ? 0
+        : Math.max(0, focus - FOCUS_CONTEXT);
     const end = Math.min(chars.length, Math.max(start + EXCERPT_WIDTH, focus + 1));
     const excerpt = chars.slice(start, end).map((char) => this.escapedChar(char)).join("");
     const range = start || end < chars.length ? ` (excerpt, columns ${start + 1}-${end})` : "";

@@ -228,6 +228,13 @@ test("shows JSON lines up to the width cap whole instead of excerpting them", as
   assert.ok(message.includes("customDomain"));
 });
 
+test("keeps a 500-code-point context line whole when the difference is at its end", async () => {
+  const head = "a".repeat(500);
+  const message = await rejection(`${head}tail\n`, [head]);
+  assert.ok(message.includes(`expected: "${head}"\n`));
+  assert.match(message, /column 501/);
+});
+
 test("keeps lines past the width cap readable from column 1 when the difference fits", async () => {
   const head = "a".repeat(300);
   const line = `${head}X${"b".repeat(300)}`;

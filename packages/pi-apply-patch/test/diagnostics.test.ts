@@ -208,7 +208,7 @@ test("tracks supplementary Unicode escapes without leaking state between reports
 });
 
 test("omits the escape notice when the escaped character is outside the displayed excerpt", async () => {
-  const message = await rejection("unrelated\n", ["x".repeat(100) + "\u200B"]);
+  const message = await rejection("unrelated\n", ["x".repeat(600) + "\u200B"]);
   assert.match(message, /excerpt, columns/);
   assert.doesNotMatch(message, /Quoted text uses diagnostic escapes/);
 });
@@ -217,4 +217,36 @@ test("includes the escape notice for a lone surrogate encoded by JSON", async ()
   const message = await rejection("unrelated\n", ["x\uD800"]);
   assert.ok(message.includes("\\ud800"));
   assert.match(message, /Quoted text uses diagnostic escapes/);
+});
+
+test("shows JSON lines up to the width cap whole instead of excerpting them", async () => {
+  const line =
+    '{"routes": [{ "pattern": "a.example.com", "custom_domain": true }, { "pattern": "b.example.com", "custom_domain": true }, { "pattern": "c.example.com", "custom_domain": true }]}';
+  const message = await rejection(`${line}\n`, [line.replace("custom_domain", "customDomain")]);
+  assert.doesNotMatch(message, /excerpt, columns/);
+  assert.ok(message.includes("custom_domain"));
+  assert.ok(message.includes("customDomain"));
+});
+
+test("keeps a 500-code-point context line whole when the difference is at its end", async () => {
+  const head = "a".repeat(500);
+  const message = await rejection(`${head}tail\n`, [head]);
+  assert.ok(message.includes(`expected: "${head}"\n`));
+  assert.match(message, /column 501/);
+});
+
+test("keeps lines past the width cap readable from column 1 when the difference fits", async () => {
+  const head = "a".repeat(300);
+  const line = `${head}X${"b".repeat(300)}`;
+  const message = await rejection(`${line}\n`, [`${head}Y${"b".repeat(300)}`]);
+  assert.match(message, /excerpt, columns 1-500/);
+  assert.ok(message.includes(`"${head.slice(0, 50)}`));
+});
+
+test("falls back to a focused window when the difference sits beyond the width cap", async () => {
+  const head = "a".repeat(600);
+  const message = await rejection(`${head}tail\n`, [head]);
+  assert.match(message, /column 601/);
+  assert.match(message, /excerpt, columns 566-600/);
+  assert.match(message, /which continues for 4 more code points/);
 });

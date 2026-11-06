@@ -2,6 +2,10 @@ import { trimEnd } from "./core/text.ts";
 import type { HunkLineDifference } from "./core/types.ts";
 
 const INVISIBLE = /[\p{White_Space}\p{Default_Ignorable_Code_Point}\p{Cf}\p{Cc}\p{M}]/u;
+/** Longest line shown whole; longer lines fall back to a window around the difference. */
+const EXCERPT_WIDTH = 500;
+/** Context columns kept before the difference when the line exceeds the width cap. */
+const FOCUS_CONTEXT = 35;
 const NAMES: Readonly<Record<number, string>> = {
   0x09: "TAB", 0x0a: "LINE FEED", 0x0d: "CARRIAGE RETURN", 0x20: "SPACE",
   0xa0: "NO-BREAK SPACE", 0x200b: "ZERO WIDTH SPACE", 0x200c: "ZERO WIDTH NON-JOINER",
@@ -51,8 +55,13 @@ export class DiagnosticText {
   /** Bounded, visibly escaped text for model-facing errors. */
   visibleText(text: string, focus = 0): string {
     const chars = Array.from(text);
-    const start = Math.max(0, focus - 35);
-    const end = Math.min(chars.length, Math.max(start + 80, focus + 1));
+    // Lines up to the width cap show whole: long JSON/config lines fail as a
+    // block, and excerpting them forces the model to re-read the file.
+    const start =
+      chars.length <= EXCERPT_WIDTH || focus + 1 <= EXCERPT_WIDTH
+        ? 0
+        : Math.max(0, focus - FOCUS_CONTEXT);
+    const end = Math.min(chars.length, Math.max(start + EXCERPT_WIDTH, focus + 1));
     const excerpt = chars.slice(start, end).map((char) => this.escapedChar(char)).join("");
     const range = start || end < chars.length ? ` (excerpt, columns ${start + 1}-${end})` : "";
     return `"${excerpt}"${range}`;

@@ -7,6 +7,7 @@ import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { applyPatch, formatSummary, nodeFileSystem, type ApplyContext } from "./apply.ts";
 import { DEFAULT_CONFIG, type PatchConfig } from "./config.ts";
+import { PatchApplicationError } from "./notices.ts";
 import { CODEX_APPLY_PATCH_GRAMMAR } from "./grammar.ts";
 import {
   countPatchFiles,
@@ -112,15 +113,27 @@ export function makeApplyPatchTool(
     exposure: "model-only",
     renderShell: "default",
     async execute(_id, { input }, signal, _onUpdate, ctx) {
-      const result = await applyPatch(input, {
-        ...dependencies,
-        cwd: ctx.cwd,
-        signal,
-        workspaceOnly: getConfig().workspaceOnly,
-      });
+      let result;
+      try {
+        result = await applyPatch(input, {
+          ...dependencies,
+          cwd: ctx.cwd,
+          signal,
+          workspaceOnly: getConfig().workspaceOnly,
+        });
+      } catch (error) {
+        // Returning an explicit error result retains structured notices through
+        // the framework. Throwing alone preserves text but drops error details.
+        if (!(error instanceof PatchApplicationError) || !error.notices.length) throw error;
+        return {
+          isError: true,
+          content: [{ type: "text", text: error.message }],
+          details: { files: [], notices: error.notices },
+        };
+      }
       return {
-        content: [{ type: "text", text: formatSummary(result.files) }],
-        details: makeDetails(result.files),
+        content: [{ type: "text", text: formatSummary(result.files, result.notices) }],
+        details: makeDetails(result.files, result.notices),
       };
     },
     renderCall(args, theme, context) {

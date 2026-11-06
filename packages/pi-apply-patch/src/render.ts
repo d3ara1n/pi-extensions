@@ -1,6 +1,7 @@
 import { generateDiffString, renderDiff, type Theme } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences, Text } from "@earendil-works/pi-tui";
 import type { FileChange } from "./apply.ts";
+import { fileWarnings, formatNotices, type PatchNotice } from "./notices.ts";
 import type { PatchRenderConfig } from "./config.ts";
 import { cropDiff } from "./crop.ts";
 import type { HunkMatchInfo } from "./core/types.ts";
@@ -21,6 +22,7 @@ export interface FileDetails {
 }
 export interface PatchDetails {
   readonly files: readonly FileDetails[];
+  readonly notices?: readonly PatchNotice[];
 }
 
 /**
@@ -37,8 +39,12 @@ export interface PatchSummary {
 }
 
 /** @internal */
-export function makeDetails(files: readonly FileChange[]): PatchDetails {
+export function makeDetails(
+  files: readonly FileChange[],
+  notices: readonly PatchNotice[] = files.flatMap(fileWarnings),
+): PatchDetails {
   return {
+    ...(notices.length ? { notices } : {}),
     files: files.map((file) => {
       const identity = { kind: file.kind, path: file.path, moveTo: file.moveTo };
       const annotations = {
@@ -107,6 +113,10 @@ export function renderPreviewBlock(block: PreviewBlock, theme: Theme): string[] 
     if (block.diff) rows.push(renderDiff(safe(block.diff)));
     return rows;
   }
+  if (block.state === "skipped") {
+    rows.push(theme.fg("dim", safe(block.warning ?? "No changes.")));
+    return rows;
+  }
   if (block.state === "partial") {
     for (const line of block.glimpse ?? []) {
       const color = line.startsWith("+")
@@ -137,7 +147,9 @@ export function renderPatchResult(
   config: PatchRenderConfig,
 ): Text {
   if (isError || !Array.isArray(details?.files)) {
-    const output = expanded ? text : text.split("\n")[0];
+    const output = expanded
+      ? text
+      : [text.split("\n")[0], formatNotices(details?.notices ?? [])].filter(Boolean).join("\n\n");
     return new Text(theme.fg(isError ? "error" : "muted", safe(output)), 0, 0);
   }
   const files: readonly FileDetails[] = details.files;
@@ -152,19 +164,6 @@ export function renderPatchResult(
       " ",
     );
     rows.push(theme.fg("accent", `${marker} ${path}`));
-    if (file.overwrites) rows.push(dim("overwrote an existing file"));
-    if (file.rematched) rows.push(dim("rematched against content that changed while queued"));
-    if (expanded && file.hunks?.length) {
-      const normalized = file.hunks.filter((hunk) => hunk.strategy !== "exact").length;
-      if (normalized)
-        rows.push(
-          dim(
-            `${normalized} hunk${normalized === 1 ? "" : "s"} matched after whitespace or Unicode normalization`,
-          ),
-        );
-      for (const hunk of file.hunks.filter((hunk) => hunk.occurrences > 1))
-        rows.push(dim(`hunk ${hunk.hunk} matched the first of ${hunk.occurrences} occurrences`));
-    }
     if (file.diff === undefined)
       rows.push(dim("Diff unavailable: previous content could not be read."));
     if (file.diff) {
@@ -177,5 +176,9 @@ export function renderPatchResult(
     }
   }
   if (!expanded && files.length > 8) rows.push(theme.fg("dim", `… ${files.length - 8} more files`));
+  // Old history entries have per-file annotations but no unified notice list.
+  const notices = details.notices ?? files.flatMap(fileWarnings);
+  const noticeText = formatNotices(notices);
+  if (noticeText) rows.push(theme.fg("warning", safe(noticeText)));
   return new Text(rows.join("\n"), 0, 0);
 }

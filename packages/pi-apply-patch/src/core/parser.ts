@@ -1,14 +1,6 @@
 // Adapted from openai/codex apply-patch at b04a2c2645. See NOTICE.
-import { trim, trimEnd } from "./text.ts";
+import { BEGIN, END, MOVE, EOF, operationHeader } from "./syntax.ts";
 import type { Chunk, FileOperation, ParsedPatch } from "./types.ts";
-
-const BEGIN = "*** Begin Patch";
-const END = "*** End Patch";
-const ADD = "*** Add File: ";
-const DELETE = "*** Delete File: ";
-const UPDATE = "*** Update File: ";
-const MOVE = "*** Move to: ";
-const EOF = "*** End of File";
 
 type MutableChunk = {
   anchor?: string;
@@ -38,23 +30,13 @@ function unexpected(line: number, text: string): never {
   );
 }
 function boundaries(lines: readonly string[]): void {
-  if (trim(lines[0] ?? "") !== BEGIN)
-    invalidPatch(`The first line of the patch must be '${BEGIN}'`);
-  if (trim(lines.at(-1) ?? "") !== END) invalidPatch(`The last line of the patch must be '${END}'`);
+  if (lines[0] !== BEGIN) invalidPatch(`The first line of the patch must be '${BEGIN}'`);
+  if (lines.at(-1) !== END) invalidPatch(`The last line of the patch must be '${END}'`);
 }
 
-/** Parse the single-workspace Codex patch format. @internal */
-export function parsePatch(input: string): ParsedPatch {
-  let lines = trim(input).split(/\r?\n/);
-  if (trim(lines[0] ?? "") !== BEGIN || trim(lines.at(-1) ?? "") !== END) {
-    if (
-      ["<<EOF", "<<'EOF'", '<<"EOF"'].includes(lines[0]) &&
-      lines.length >= 4 &&
-      lines.at(-1)!.endsWith("EOF")
-    ) {
-      lines = lines.slice(1, -1);
-    }
-  }
+/** Parse canonical single-workspace Codex patches; normalize input first. @internal */
+export function parsePatch(input: string, sourceLines?: readonly number[]): ParsedPatch {
+  const lines = input.split("\n");
   boundaries(lines);
   const operations: FileOperation[] = [];
   let current: PendingOperation | undefined;
@@ -78,31 +60,16 @@ export function parsePatch(input: string): ParsedPatch {
   }
 
   for (let index = 1; index < lines.length; index++) {
-    // The upstream batch entrypoint feeds normalized lines through its stream parser.
-    const line = index < lines.length - 1 ? lines[index].replace(/\r$/, "") : lines[index];
-    const number = index + 1;
-    const marker =
-      current?.kind === "update" && index < lines.length - 1 ? trimEnd(line) : trim(line);
-    if (ended) {
-      // Upstream finish() accepts an additional final End marker, although an
-      // earlier duplicate is rejected by its streaming parser.
-      if (trim(line) && !(index === lines.length - 1 && trim(line) === END)) {
-        invalidPatch(`The last line of the patch must be '${END}'`);
-      }
-      continue;
-    }
+    const line = lines[index];
+    const number = sourceLines?.[index] ?? index + 1;
+    const marker = line;
+    if (ended) invalidPatch(`The last line of the patch must be '${END}'`);
     if (marker === END) {
       finish(number, marker);
       ended = true;
       continue;
     }
-    const header = (
-      [
-        [ADD, "add"],
-        [DELETE, "delete"],
-        [UPDATE, "update"],
-      ] as const
-    ).find(([prefix]) => marker.startsWith(prefix));
+    const header = operationHeader(marker);
     if (header) {
       finish(number, marker);
       const [prefix, kind] = header;
@@ -127,14 +94,13 @@ export function parsePatch(input: string): ParsedPatch {
     if (current?.kind !== "update") {
       invalidHunk(
         number,
-        `'${trim(line)}' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {path}', '*** Update File: {path}'`,
+        `'${line}' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {path}', '*** Update File: {path}'`,
       );
     }
 
     const last = current.chunks.at(-1);
     const isAnchor = marker === "@@" || marker.startsWith("@@ ");
     if (last?.endOfFile) {
-      if (!marker) continue;
       if (!isAnchor)
         invalidHunk(
           number,
@@ -162,9 +128,9 @@ export function parsePatch(input: string): ParsedPatch {
       continue;
     }
     const prefix = line[0];
-    if (line === "" || prefix === " " || prefix === "+" || prefix === "-") {
-      const chunk = last ?? { oldLines: [], newLines: [], newLineSources: [], endOfFile: false };
-      if (!last) current.chunks.push(chunk);
+    if (prefix === " " || prefix === "+" || prefix === "-") {
+      if (!last) invalidHunk(number, "Expected update hunk to start with a @@ context marker");
+      const chunk = last;
       const text = line.slice(1);
       if (prefix !== "+") chunk.oldLines.push(text);
       if (prefix !== "-") {

@@ -131,17 +131,15 @@ test("preserves internal symlink update and delete semantics", async () => {
   assert.equal(fs.links.size, 0);
 });
 
-test("rejects duplicate resolved sources before writes and deduplicates queue keys", async () => {
+test("applies operations sharing a path sequentially and deduplicates queue keys", async () => {
   const fs = new MemoryFileSystem({ a: "old\n" });
-  await assert.rejects(
-    applyPatch(patch("*** Add File: a\n+one\n*** Add File: ./a\n+two"), fs.context()),
-    /multiple operations target/,
-  );
-  assert.equal(fs.writes.length, 0);
+  await applyPatch(patch("*** Add File: a\n+one\n*** Add File: ./a\n+two"), fs.context());
+  assert.deepEqual(fs.snapshot(), { a: "two\n" });
   const keys: string[] = [];
+  const moved = new MemoryFileSystem({ a: "old\n" });
   await applyPatch(
     patch("*** Update File: a\n*** Move to: z\n@@\n-old\n+new\n*** Add File: b\n+b"),
-    fs.context({
+    moved.context({
       withFileQueue: async (path, action) => {
         keys.push(path);
         return action();
@@ -327,7 +325,7 @@ test("overwrites are reported for adds and moves onto existing files", async () 
   assert.deepEqual(fs.snapshot(), { fresh: "n\n", dup: "new\n", dest: "m\n" });
 });
 
-test("a source rewritten by an earlier move is rematched and flagged", async () => {
+test("an update on a move destination verifies against the moved content in verification", async () => {
   const fs = new MemoryFileSystem({ a: "same\nkeep A\n", b: "same\nkeep B\n" });
   const result = await applyPatch(
     patch(
@@ -335,7 +333,7 @@ test("a source rewritten by an earlier move is rematched and flagged", async () 
     ),
     fs.context(),
   );
-  assert.equal(result.files[1].rematched, true);
+  assert.equal(result.files[1].rematched, undefined);
   assert.deepEqual(result.files[1].hunks, [
     { hunk: 1, line: 1, strategy: "exact", occurrences: 1 },
   ]);
@@ -439,4 +437,80 @@ test("reports successful matches that may not be the intended location", async (
   assert.match(summary, /- dup hunk 1 at line 1: context occurs 2 times in the file; this occurrence was edited/);
   assert.match(summary, /- indent hunk 1 at line 1: matched only after ignoring leading and trailing whitespace/);
   assert.doesNotMatch(summary, /plain hunk/);
+});
+
+test("sequential updates on one file: the second hunk matches the first one's result", async () => {
+  const fs = new MemoryFileSystem({ a: "start\n" });
+  const result = await applyPatch(
+    patch(
+      "*** Update File: a\n@@\n-start\n+middle\n*** Update File: a\n@@\n-middle\n+end",
+    ),
+    fs.context(),
+  );
+  assert.deepEqual(fs.snapshot(), { a: "end\n" });
+  assert.equal(result.files.length, 2);
+  assert.deepEqual(result.files.map((file) => file.after), ["middle\n", "end\n"]);
+});
+
+test("update after add on the same path operates on the added content", async () => {
+  const fs = new MemoryFileSystem();
+  await applyPatch(
+    patch("*** Add File: a\n+v1\n*** Update File: a\n@@\n-v1\n+v2"),
+    fs.context(),
+  );
+  assert.deepEqual(fs.snapshot(), { a: "v2\n" });
+});
+
+test("delete then add on the same path replaces the file as a new file", async () => {
+  const fs = new MemoryFileSystem({ a: "old\n" });
+  const result = await applyPatch(
+    patch("*** Delete File: a\n*** Add File: a\n+fresh"),
+    fs.context(),
+  );
+  assert.deepEqual(fs.snapshot(), { a: "fresh\n" });
+  assert.ok(result.files.every((file) => !file.overwrites));
+});
+
+test("update with move feeds the moved destination to a later update", async () => {
+  const fs = new MemoryFileSystem({ a: "old\n" });
+  await applyPatch(
+    patch(
+      "*** Update File: a\n*** Move to: b\n@@\n-old\n+moved\n*** Update File: b\n@@\n-moved\n+final",
+    ),
+    fs.context(),
+  );
+  assert.deepEqual(fs.snapshot(), { b: "final\n" });
+});
+
+test("interleaved operations on two files stay ordered", async () => {
+  const fs = new MemoryFileSystem({ a: "a1\n", b: "b1\n" });
+  await applyPatch(
+    patch(
+      "*** Update File: a\n@@\n-a1\n+a2\n*** Update File: b\n@@\n-b1\n+b2\n*** Update File: a\n@@\n-a2\n+a3",
+    ),
+    fs.context(),
+  );
+  assert.deepEqual(fs.snapshot(), { a: "a3\n", b: "b2\n" });
+});
+
+test("update after delete on the same path is rejected without writes", async () => {
+  const fs = new MemoryFileSystem({ a: "old\n" });
+  await assert.rejects(
+    applyPatch(patch("*** Delete File: a\n*** Update File: a\n@@\n-old\n+new"), fs.context()),
+    /removed by an earlier operation in this patch/,
+  );
+  assert.deepEqual(fs.snapshot(), { a: "old\n" });
+});
+
+test("one failed operation in a same-file chain rejects the whole patch", async () => {
+  const fs = new MemoryFileSystem({ a: "start\n" });
+  await assert.rejects(
+    applyPatch(
+      patch("*** Update File: a\n@@\n-start\n+middle\n*** Update File: a\n@@\n-missing\n+end"),
+      fs.context(),
+    ),
+    /1 of 2 operations failed; no files were written/,
+  );
+  assert.deepEqual(fs.snapshot(), { a: "start\n" });
+  assert.equal(fs.writes.length, 0);
 });

@@ -179,26 +179,60 @@ function matchedHunks(outcomes: readonly HunkOutcome[]): readonly HunkMatchInfo[
   );
 }
 
+/**
+ * Simulated state of one path after the operations earlier in the patch touched
+ * it. Later operations read this instead of the disk, mirroring Codex's
+ * sequential read-modify-write per operation.
+ */
+interface PriorState {
+  readonly exists: boolean;
+  readonly content: string;
+}
+
 async function prepare(
   workspace: Workspace,
   resolved: ResolvedOperation,
   previous?: PreparedChange,
+  prior?: PriorState,
+  destinationPrior?: PriorState,
 ): Promise<PreparedChange> {
   const { operation, source, destination } = resolved;
   let content: string | undefined;
   let existed = true;
-  try {
-    ({ content, existed } = await readTarget(workspace, source, operation.kind === "add"));
-  } catch (error) {
-    const action =
-      operation.kind === "update"
-        ? "file to update"
-        : operation.kind === "delete"
-          ? "file to delete"
-          : "file to add";
-    throw new Error(`Failed to read ${action} ${source.path}: ${errorText(error)}`);
+  if (prior) {
+    // Verification runs against the simulated state earlier operations left
+    // behind, so the disk is only read when this is the first operation on the
+    // path. Write-time matching re-reads the live file either way.
+    if (prior.exists) {
+      content = prior.content;
+      existed = true;
+    } else if (operation.kind === "add") {
+      content = "";
+      existed = false;
+    } else {
+      const action = operation.kind === "update" ? "file to update" : "file to delete";
+      throw new Error(
+        `Failed to read ${action} ${source.path}: removed by an earlier operation in this patch`,
+      );
+    }
+  } else {
+    try {
+      ({ content, existed } = await readTarget(workspace, source, operation.kind === "add"));
+    } catch (error) {
+      const action =
+        operation.kind === "update"
+          ? "file to update"
+          : operation.kind === "delete"
+            ? "file to delete"
+            : "file to add";
+      throw new Error(`Failed to read ${action} ${source.path}: ${errorText(error)}`);
+    }
   }
-  const destinationExists = destination !== undefined && (await verifyTarget(workspace, destination, true));
+  const destinationExists = destination
+    ? destinationPrior
+      ? destinationPrior.exists
+      : await verifyTarget(workspace, destination, true)
+    : false;
   if (operation.kind !== "update") {
     return {
       ...resolved,
@@ -274,13 +308,9 @@ export async function applyPatch(input: string, context: ApplyContext): Promise<
     if (!operations.length) throw new Error("empty patch");
     workspace = await openWorkspace(context.cwd, context.fs, context.workspaceOnly ?? true);
     resolved = [];
-    const sources = new Set<string>();
     for (const operation of operations) {
       checkAbort(context.signal);
       const source = await resolveWorkspacePath(workspace, operation.path);
-      if (sources.has(source.key))
-        throw new Error(`invalid patch: multiple operations target ${source.path}`);
-      sources.add(source.key);
       const destination =
         operation.kind === "update" && operation.moveTo !== undefined
           ? await resolveWorkspacePath(workspace, operation.moveTo)
@@ -299,13 +329,33 @@ export async function applyPatch(input: string, context: ApplyContext): Promise<
   ].sort();
   return withQueues(keys, context.withFileQueue, async () => {
     // Verify every operation before writing any, collecting all failures so the
-    // model sees the complete rejection in one round trip.
+    // model sees the complete rejection in one round trip. Operations sharing a
+    // path verify sequentially: each sees the content the earlier ones leave
+    // behind, matching Codex's per-operation read-modify-write order.
     const prepared: PreparedChange[] = [];
     const rejected: RejectedFile[] = [];
+    const simulated = new Map<string, PriorState>();
     for (const entry of resolved) {
       checkAbort(context.signal);
       try {
-        prepared.push(await prepare(workspace, entry));
+        const change = await prepare(
+          workspace,
+          entry,
+          undefined,
+          simulated.get(entry.source.key),
+          entry.destination ? simulated.get(entry.destination.key) : undefined,
+        );
+        prepared.push(change);
+        const { operation } = entry;
+        if (operation.kind === "delete") {
+          simulated.set(entry.source.key, { exists: false, content: "" });
+        } else if (operation.kind === "update" && operation.moveTo !== undefined) {
+          simulated.set(entry.source.key, { exists: false, content: "" });
+          if (entry.destination)
+            simulated.set(entry.destination.key, { exists: true, content: change.change.after });
+        } else {
+          simulated.set(entry.source.key, { exists: true, content: change.change.after });
+        }
       } catch (error) {
         rejected.push(
           error instanceof UnmatchedUpdateError
@@ -323,7 +373,7 @@ export async function applyPatch(input: string, context: ApplyContext): Promise<
       throw new Error(
         renderRejection({
           rejected,
-          verified: prepared.map((pending) => pending.operation.path),
+          verified: [...new Set(prepared.map((pending) => pending.operation.path))],
         }),
       );
 

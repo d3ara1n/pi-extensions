@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/@d3ara1n/pi-provider-unisound)](https://www.npmjs.com/package/@d3ara1n/pi-provider-unisound) [![npm downloads](https://img.shields.io/npm/dm/@d3ara1n/pi-provider-unisound)](https://www.npmjs.com/package/@d3ara1n/pi-provider-unisound) [![license](https://img.shields.io/npm/l/@d3ara1n/pi-provider-unisound)](https://www.npmjs.com/package/@d3ara1n/pi-provider-unisound)
 
-Unisound (云知声) MaaS provider for [Pi Coding Agent](https://pi.dev) — registers the U2 model family (plus plan-hosted GLM/Kimi) via the platform's OpenAI-compatible API.
+Unisound (云知声) MaaS provider for [Pi Coding Agent](https://pi.dev) — registers the full platform model catalog (U2 family plus hosted DeepSeek, Doubao, Hunyuan, MiMo, GLM, Kimi, MiniMax and Qwen models) via the platform's OpenAI-compatible API.
 
 ## Providers
 
@@ -43,15 +43,22 @@ update:
 
 | Family | Thinking levels |
 |---|---|
-| U2 Flash | on/off (`thinking.type`) |
+| U2 Flash | on/off (`thinking.type`) — `reasoning_effort` accepted but ignored |
 | U2 | always on (cannot disable) |
-| U2 Med | off / low / medium / high (`reasoning_effort`) |
-| GLM-5.2, DeepSeek V4 family | off / high / max (`reasoning_effort`) |
-| GLM-5.3 / 5.3 Flash | off / low / high / max (`reasoning_effort`) |
-| Kimi K3 | low / high / max, always on (`reasoning_effort`) |
+| U2 Med, Doubao Seed 2.1 | off / low / medium / high (`reasoning_effort`) |
+| GLM-5.2, GLM-5.1, GLM-5, DeepSeek V4 Pro | off / high / max (`reasoning_effort`) |
+| DeepSeek V4 Flash 0731, V4.1 Flash | off / low / high / max (`reasoning_effort`) |
+| Hy3 | off / low / high (`reasoning_effort`) |
+| Hy4 Preview | off / high (`reasoning_effort`) |
+| MiMo V2.6 | on/off (`thinking.type`) — effort levels indistinguishable |
+| Qwen3.8 Max / Flash | off (`reasoning_effort: none`) / low / medium / xhigh |
+| GLM-5.3 / 5.3 Flash, Kimi K3 | low / high / max, always on (`reasoning_effort`) |
+| MiniMax M2.5 | always on (cannot disable) |
 | others | on/off (`thinking.type`) — levels unverified |
 
-`u2-radimed` (medical imaging) is no longer listed by the live catalog
+`u2-radimed` (medical imaging) left the live catalog in 2026-10 and returned
+2026-11; it is registered without thinking (the API cannot enable it for this
+model). Pay-as-you-go U2 pricing is in [Pricing](#pricing); every model on the
 and was removed (2026-10); it re-registers automatically if it returns.
 Pay-as-you-go U2 pricing is in [Pricing](#pricing); every model on the
 Token Plan and unpublished-price third-party models cost 0.

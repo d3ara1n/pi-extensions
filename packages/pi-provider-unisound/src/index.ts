@@ -31,10 +31,13 @@
  * endpoint and fall back to the shipped specs below per model id.
  *
  * Compat: `u2-flash` was verified against the live API (see README and
- * ../../PROVIDER.md; re-checked 2026-09-30 after the U2-Flash release).
- * The remaining models follow the same wire contract per official docs but
- * were NOT live-tested — per-model thinking behavior still differs and is
- * encoded from the documented constraints below.
+ * ../../PROVIDER.md; re-checked 2026-09-30 after the U2-Flash release, and
+ * 2026-11-06 — reasoning_effort is still ignored despite the docs effort
+ * table now listing u2/u2-flash). The remaining models follow the same
+ * wire contract per official docs but were NOT live-tested (the dev key
+ * only has u2-flash permission) — per-model thinking behavior is encoded
+ * from the platform docs' per-model tables and pi's built-in native
+ * entries below.
  *
  * Usage quota/balance reporting is not yet implemented — Unisound MaaS does
  * not currently expose a public quota or balance API (dashboard/billing,
@@ -79,11 +82,11 @@ const UNISOUND_COMPAT: OpenAICompletionsCompat = {
 	supportsDeveloperRole: false,
 	// The gateway enum-validates reasoning_effort platform-wide (none/minimal/
 	// low/medium/high/xhigh/max), but validating ≠ honoring: u2-flash ignores
-	// it (re-verified live 2026-09-30 — effort high/low/none leave reasoning
-	// unchanged; the "four-level reasoning intensity" touted in the U2-Flash
-	// launch announcement is not exposed through this API), and u2 is absent
-	// from the docs effort table. Models that honor it (u2-med, plus glm-5.2 /
-	// kimi-k3 in the Token Plan) override this per model.
+	// it (re-verified live 2026-11-06 — effort high vs none leave reasoning
+	// unchanged, despite the docs effort table now listing u2/u2-flash), and
+	// u2 cannot disable thinking at all. Models documented to honor it
+	// (u2-med, glm-5.x, deepseek, kimi-k3, doubao, hy, qwen3.8) override this
+	// per model.
 	supportsReasoningEffort: false,
 	maxTokensField: "max_tokens",
 	thinkingFormat: "deepseek",
@@ -120,7 +123,8 @@ const THINKING_EFFORT_HIGH_MAX: ThinkingLevelMap = {
 	max: "max",
 };
 
-// glm-5.3 family (opencode-go reference entry): low/high/max.
+// DeepSeek V4 family (docs effort table + deepseek.json / zai.json native
+// entries): low/high/max. Thinking can be disabled via thinking.type.
 const THINKING_EFFORT_LOW_HIGH_MAX: ThinkingLevelMap = {
 	off: "disabled",
 	minimal: null, // alias of low
@@ -143,27 +147,101 @@ const THINKING_KIMI: ThinkingLevelMap = {
 	max: "max",
 };
 
+// hy3 (docs effort table): none/low/high; thinking.type toggles.
+const THINKING_EFFORT_LOW_HIGH: ThinkingLevelMap = {
+	off: "disabled",
+	minimal: null,
+	low: "low",
+	medium: null,
+	high: "high",
+	xhigh: null,
+	max: null,
+};
+
+// hy4-preview (docs effort table): none/high only.
+const THINKING_EFFORT_HIGH_ONLY: ThinkingLevelMap = {
+	off: "disabled",
+	minimal: null,
+	low: null,
+	medium: null,
+	high: "high",
+	xhigh: null,
+	max: null,
+};
+
+// u2-med + Doubao Seed 2.1 (docs effort table): native low/medium/high —
+// minimal/xhigh/max are aliases (minimal maps to low / disabling thinking
+// for the two families respectively), hidden per repo convention.
+const THINKING_EFFORT_LOW_MEDIUM_HIGH: ThinkingLevelMap = {
+	off: "disabled",
+	minimal: null, // alias
+	low: "low",
+	medium: "medium",
+	high: "high",
+	xhigh: null, // alias of high
+	max: null, // alias of high
+};
+
+// kimi-k3 + glm-5.3 family (moonshotai.json / zai.json natives + platform
+// docs agree): low/high/max, always thinking — off is null; passing
+// thinking.type=disabled makes the API request fail.
+const THINKING_ALWAYS_LOW_HIGH_MAX: ThinkingLevelMap = {
+	off: null,
+	minimal: null,
+	low: "low",
+	medium: null,
+	high: "high",
+	xhigh: null,
+	max: "max",
+};
+
+// qwen3.8 (docs effort table): native low/medium/xhigh — minimal is an
+// alias of low, high/max of xhigh; "none" disables thinking. thinking.type
+// is undocumented for this model, so off rides the effort field (see
+// QWEN38_COMPAT).
+const THINKING_QWEN38: ThinkingLevelMap = {
+	off: "none",
+	minimal: null, // alias of low
+	low: "low",
+	medium: "medium",
+	high: null, // alias of xhigh
+	xhigh: "xhigh",
+	max: null, // alias of xhigh
+};
+
 const EFFORT_COMPAT: OpenAICompletionsCompat = { ...UNISOUND_COMPAT, supportsReasoningEffort: true };
+
+// qwen3.8: no thinkingFormat — off is emitted as reasoning_effort: "none"
+// (its documented disable path), never as thinking.type (undocumented for
+// this model).
+const QWEN38_COMPAT: OpenAICompletionsCompat = {
+	supportsDeveloperRole: false,
+	supportsReasoningEffort: true,
+	maxTokensField: "max_tokens",
+};
 
 // ── Model specs ───────────────────────────────────────────────────────────
 //
 // One shared spec table for both channels (same platform model set,
-// verified against `GET /v1/models` 2026-10-10). Third-party model-level
-// truth (modalities, thinking levels) is cross-referenced from pi's
-// built-in catalog entries per ../../PROVIDER.md; entries without a usable
-// reference default to the u2-flash-verified toggle contract.
+// verified against `GET /v1/models` 2026-11-06 — 30 models). Third-party
+// model-level truth (modalities, thinking levels) is cross-referenced from
+// pi's built-in catalog entries and the platform docs' per-model tables
+// per ../../PROVIDER.md; entries without a usable reference default to the
+// u2-flash-verified toggle contract.
 
 // pi tracks cost in USD; Unisound lists CNY per million tokens (u2-flash
 // has run launch discounts and a 2026-09/10 free month, all excluded per
 // repo pricing rules). Converted at ~7.1 CNY/USD for display estimates
 // only — not real billing. List prices incl. cache-hit (re-checked on the
-// model hub 2026-09-30): flash ¥1/0.2/2, u2 ¥1/0.02/2, u2-med ¥8/2/28
-// (input/cache/output). Cache-write pricing is not published anywhere.
+// model hub 2026-09-30): flash ¥1/0.2/2, u2 ¥1/0.02/2, u2-med ¥8/2/28,
+// u2-radimed ¥15/4/20 (input/cache/output). Cache-write pricing is not
+// published anywhere.
 // Third-party model pricing on this gateway is unpublished → 0 per rules.
 const PAYG_COSTS: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }> = {
 	"u2-flash": { input: 0.14, output: 0.28, cacheRead: 0.03, cacheWrite: 0 },
 	u2: { input: 0.14, output: 0.28, cacheRead: 0.003, cacheWrite: 0 },
 	"u2-med": { input: 1.13, output: 3.94, cacheRead: 0.28, cacheWrite: 0 },
+	"u2-radimed": { input: 2.11, output: 2.82, cacheRead: 0.56, cacheWrite: 0 },
 };
 
 // Subscription billing → cost 0 per repo pricing rules.
@@ -182,15 +260,15 @@ interface ModelSpec {
 
 const MODEL_SPECS: Record<string, ModelSpec> = {
 	"u2-flash": {
-		// Verified live (last re-checked 2026-09-30): thinking toggles,
+		// Verified live (last re-checked 2026-11-06): thinking toggles,
 		// reasoning_effort is accepted but ignored, text-only.
-		// /v1/models reports contextWindow/maxOutput = 524288/131072; the
-		// gateway actually admits inputs up to 1,024,000 tokens, but the
-		// advertised spec is declared so pi compacts conservatively.
+		// /v1/models now advertises contextWindow 1,048,576 — matching the
+		// gateway's actual admission limit (earlier it reported 524,288 while
+		// the gateway already admitted 1,024,000 tokens).
 		name: "U2 Flash",
 		reasoning: true,
 		input: ["text"],
-		contextWindow: 524_288,
+		contextWindow: 1_048_576,
 		maxTokens: 131_072,
 		thinkingLevelMap: THINKING_TOGGLE,
 		compat: UNISOUND_COMPAT,
@@ -219,20 +297,21 @@ const MODEL_SPECS: Record<string, ModelSpec> = {
 		input: ["text", "image"],
 		contextWindow: 262_144,
 		maxTokens: 65_536,
-		thinkingLevelMap: {
-			off: "disabled",
-			minimal: null, // alias of low
-			low: "low",
-			medium: "medium",
-			high: "high",
-			xhigh: null, // alias of high
-			max: null, // alias of high
-		},
+		thinkingLevelMap: THINKING_EFFORT_LOW_MEDIUM_HIGH,
 		compat: EFFORT_COMPAT,
 	},
-	// u2-radimed: absent from /v1/models since at least 2026-10-10 — removed
-	// (catalog is authoritative). If it returns, refresh re-registers it with
-	// the generic u2 defaults.
+	"u2-radimed": {
+		// Back in /v1/models since 2026-11 (was delisted 2026-10). Docs:
+		// thinking is disabled by default and cannot be enabled → no
+		// thinkingLevelMap. Medical imaging model: image+text input.
+		// max_output is unpublished (null in the catalog) — 8K per model hub.
+		name: "U2 RadiMed",
+		reasoning: false,
+		input: ["text", "image"],
+		contextWindow: 40_960,
+		maxTokens: 8_192,
+		compat: UNISOUND_COMPAT,
+	},
 	"glm-5.2": {
 		// Docs + pi built-in native entries (zai.json) agree on high/max only;
 		// reasoning_effort honored per Token Plan docs.
@@ -245,44 +324,45 @@ const MODEL_SPECS: Record<string, ModelSpec> = {
 		compat: EFFORT_COMPAT,
 	},
 	"glm-5.3": {
-		// opencode-go reference: low/high/max; catalog 1M/131072.
+		// Docs + zai.json native: low/high/max, always thinking (off: null —
+		// thinking.type=disabled makes the request fail); catalog 1M/131072.
 		name: "GLM-5.3",
 		reasoning: true,
 		input: ["text"],
 		contextWindow: 1_048_576,
 		maxTokens: 131_072,
-		thinkingLevelMap: THINKING_EFFORT_LOW_HIGH_MAX,
+		thinkingLevelMap: THINKING_ALWAYS_LOW_HIGH_MAX,
 		compat: EFFORT_COMPAT,
 	},
 	"glm-5.3-flash": {
-		// opencode-go reference: low/high/max, image input.
+		// Docs + zai.json native: low/high/max, always thinking; image input.
 		name: "GLM-5.3 Flash",
 		reasoning: true,
 		input: ["text", "image"],
 		contextWindow: 1_048_576,
 		maxTokens: 131_072,
-		thinkingLevelMap: THINKING_EFFORT_LOW_HIGH_MAX,
+		thinkingLevelMap: THINKING_ALWAYS_LOW_HIGH_MAX,
 		compat: EFFORT_COMPAT,
 	},
 	"glm-5.1": {
-		// No usable thinking-level reference → conservative toggle contract.
+		// Docs effort table: high/max (low/medium are aliases of high).
 		name: "GLM-5.1",
 		reasoning: true,
 		input: ["text"],
 		contextWindow: 202_000,
 		maxTokens: 131_072,
-		thinkingLevelMap: THINKING_TOGGLE,
-		compat: UNISOUND_COMPAT,
+		thinkingLevelMap: THINKING_EFFORT_HIGH_MAX,
+		compat: EFFORT_COMPAT,
 	},
 	"glm-5": {
-		// No usable thinking-level reference → conservative toggle contract.
+		// Docs effort table: high/max (low/medium are aliases of high).
 		name: "GLM-5",
 		reasoning: true,
 		input: ["text"],
 		contextWindow: 202_000,
 		maxTokens: 16_000,
-		thinkingLevelMap: THINKING_TOGGLE,
-		compat: UNISOUND_COMPAT,
+		thinkingLevelMap: THINKING_EFFORT_HIGH_MAX,
+		compat: EFFORT_COMPAT,
 	},
 	"kimi-k3": {
 		// moonshotai.json native: low/high/max, always thinking; image input.
@@ -291,7 +371,7 @@ const MODEL_SPECS: Record<string, ModelSpec> = {
 		input: ["text", "image"],
 		contextWindow: 1_048_576,
 		maxTokens: 1_048_576,
-		thinkingLevelMap: THINKING_KIMI,
+		thinkingLevelMap: THINKING_ALWAYS_LOW_HIGH_MAX,
 		compat: EFFORT_COMPAT,
 	},
 	"kimi-k2.5": {
@@ -315,13 +395,14 @@ const MODEL_SPECS: Record<string, ModelSpec> = {
 		compat: UNISOUND_COMPAT,
 	},
 	"deepseek-v4-flash-0731": {
-		// qwen-token-plan-cn reference: high/max.
+		// Docs effort table: low/high/max (low was already native before the
+		// table listed it — the qwen-token-plan-cn reference said high/max).
 		name: "DeepSeek V4 Flash 0731",
 		reasoning: true,
 		input: ["text"],
 		contextWindow: 1_048_576,
 		maxTokens: 393_216,
-		thinkingLevelMap: THINKING_EFFORT_HIGH_MAX,
+		thinkingLevelMap: THINKING_EFFORT_LOW_HIGH_MAX,
 		compat: EFFORT_COMPAT,
 	},
 	"deepseek-v4-pro": {
@@ -334,16 +415,91 @@ const MODEL_SPECS: Record<string, ModelSpec> = {
 		thinkingLevelMap: THINKING_EFFORT_HIGH_MAX,
 		compat: EFFORT_COMPAT,
 	},
+	"deepseek-v4.1-flash": {
+		// Hosted here since 2026-11 (delisted from SenseNova the same month).
+		// Docs effort table: low/high/max, disable via thinking.type.
+		// deepseek.json native (deepseek-flash) + two gateway refs agree on
+		// image input.
+		name: "DeepSeek V4.1 Flash",
+		reasoning: true,
+		input: ["text", "image"],
+		contextWindow: 1_048_576,
+		maxTokens: 393_216,
+		thinkingLevelMap: THINKING_EFFORT_LOW_HIGH_MAX,
+		compat: EFFORT_COMPAT,
+	},
+	"doubao-seed-2.1-pro": {
+		// Volcengine-native multimodal model; docs effort table: native
+		// low/medium/high (minimal/xhigh/max are aliases).
+		name: "Doubao Seed 2.1 Pro",
+		reasoning: true,
+		input: ["text", "image"],
+		contextWindow: 1_048_576,
+		maxTokens: 262_144,
+		thinkingLevelMap: THINKING_EFFORT_LOW_MEDIUM_HIGH,
+		compat: EFFORT_COMPAT,
+	},
+	"doubao-seed-2.1-turbo": {
+		name: "Doubao Seed 2.1 Turbo",
+		reasoning: true,
+		input: ["text", "image"],
+		contextWindow: 262_144,
+		maxTokens: 262_144,
+		thinkingLevelMap: THINKING_EFFORT_LOW_MEDIUM_HIGH,
+		compat: EFFORT_COMPAT,
+	},
+	hy3: {
+		// Tencent Hunyuan — no native entry in pi data; docs effort table:
+		// none/low/high, toggleable.
+		name: "Hy3",
+		reasoning: true,
+		input: ["text"],
+		contextWindow: 262_144,
+		maxTokens: 131_072,
+		thinkingLevelMap: THINKING_EFFORT_LOW_HIGH,
+		compat: EFFORT_COMPAT,
+	},
+	"hy4-preview": {
+		// Docs effort table: none/high only, toggleable.
+		name: "Hy4 Preview",
+		reasoning: true,
+		input: ["text"],
+		contextWindow: 1_048_576,
+		maxTokens: 65_536,
+		thinkingLevelMap: THINKING_EFFORT_HIGH_ONLY,
+		compat: EFFORT_COMPAT,
+	},
+	"mimo-v2.6-pro": {
+		// xiaomi.json native: text+image, two-state thinking (off/high).
+		// Docs: effort levels exist but are indistinguishable ("no strength
+		// distinction for now") → toggle, no effort.
+		name: "MiMo V2.6 Pro",
+		reasoning: true,
+		input: ["text", "image"],
+		contextWindow: 1_048_576,
+		maxTokens: 134_144,
+		thinkingLevelMap: THINKING_TOGGLE,
+		compat: UNISOUND_COMPAT,
+	},
+	"mimo-v2.6-flash": {
+		name: "MiMo V2.6 Flash",
+		reasoning: true,
+		input: ["text", "image"],
+		contextWindow: 1_048_576,
+		maxTokens: 134_144,
+		thinkingLevelMap: THINKING_TOGGLE,
+		compat: UNISOUND_COMPAT,
+	},
 	"qwen3.8-max": {
-		// opencode-go reference lists low/medium/xhigh — an inconsistent level
-		// set; treat levels as unknown → toggle.
+		// Docs effort table (matches the opencode-go reference's low/medium/
+		// xhigh — previously treated as inconsistent): off via effort "none".
 		name: "Qwen3.8 Max",
 		reasoning: true,
 		input: ["text", "image"],
 		contextWindow: 1_048_576,
 		maxTokens: 131_072,
-		thinkingLevelMap: THINKING_TOGGLE,
-		compat: UNISOUND_COMPAT,
+		thinkingLevelMap: THINKING_QWEN38,
+		compat: QWEN38_COMPAT,
 	},
 	"qwen3.8-flash": {
 		name: "Qwen3.8 Flash",
@@ -351,8 +507,8 @@ const MODEL_SPECS: Record<string, ModelSpec> = {
 		input: ["text", "image"],
 		contextWindow: 1_048_576,
 		maxTokens: 131_072,
-		thinkingLevelMap: THINKING_TOGGLE,
-		compat: UNISOUND_COMPAT,
+		thinkingLevelMap: THINKING_QWEN38,
+		compat: QWEN38_COMPAT,
 	},
 	"qwen3.7-max": {
 		name: "Qwen3.7 Max",
@@ -406,7 +562,8 @@ const MODEL_SPECS: Record<string, ModelSpec> = {
 		input: ["text"],
 		contextWindow: 204_800,
 		maxTokens: 131_072,
-		thinkingLevelMap: THINKING_TOGGLE,
+		// Docs: always thinking, cannot disable — off is null.
+		thinkingLevelMap: THINKING_ALWAYS_ON,
 		compat: UNISOUND_COMPAT,
 	},
 	"MiniMax-M3": {

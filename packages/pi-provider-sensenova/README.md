@@ -22,7 +22,7 @@ The model catalog is **refreshed from the live SenseNova API** (`GET /v1/models`
 
 Image-generation models (e.g. `sensenova-u1.5-lite`, `sensenova-u1-fast`) are intentionally not registered — their output modality is image, not chat.
 
-The chat models run over an OpenAI-compatible chat/completions API — tool calling, streaming, and usage reporting are verified against the live API. Reasoning accepts only `low` / `medium` / `high` / `none`, so pi's `minimal` thinking level is not offered for these models.
+The chat models run over an OpenAI-compatible chat/completions API — tool calling, streaming, and usage reporting are verified against the live API. Reasoning accepts only `low` / `medium` / `high` / `none`, so pi's `minimal` thinking level is not offered for these models. Exception: `glm-5.3` accepts only `low` / `high` / `max` and cannot turn thinking off, so it exposes exactly those three levels.
 
 ## Installation
 

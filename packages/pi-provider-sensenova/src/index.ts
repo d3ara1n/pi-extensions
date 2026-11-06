@@ -51,12 +51,27 @@ const REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } as const;
 
 const REASONING = {
+	// Gateway-default enum, live-verified for every model except glm-5.3:
 	// SenseNova rejects pi's `minimal` level. The API accepts low/medium/high/none.
 	off: "none",
 	minimal: null,
 	low: "low",
 	medium: "medium",
 	high: "high",
+} as const;
+
+// glm-5.3 deviates: live-verified 2026-11-06, its reasoning_effort enum is
+// low/high/max only — `none` and `medium` are rejected with HTTP 400 — so
+// thinking cannot be turned off (off: null). Matches zai.json native and
+// Unisound's per-model docs for the same model.
+const REASONING_GLM_53 = {
+	off: null,
+	minimal: null,
+	low: "low",
+	medium: null,
+	high: "high",
+	xhigh: null,
+	max: "max",
 } as const;
 
 const CHAT_COMPAT = {
@@ -68,13 +83,29 @@ const CHAT_COMPAT = {
 // whenever the live catalog cannot be fetched (offline, HTTP errors, aborts).
 const FALLBACK_MODELS: ChatModel[] = [
 	{
-		// Listed by the live catalog (re-checked 2026-10-10).
-		// re-registers automatically if it returns.
+		// In the live catalog since 2026-10 (re-checked 2026-11-06).
 		id: "sensenova-6.8-flash-lite",
 		provider: PROVIDER_ID,
 		api: "openai-completions",
 		baseUrl: BASE_URL,
 		name: "SenseNova 6.8 Flash Lite",
+		reasoning: true,
+		input: ["text", "image"],
+		cost: ZERO_COST,
+		contextWindow: 262_144,
+		maxTokens: 65_536,
+		thinkingLevelMap: REASONING,
+		compat: CHAT_COMPAT,
+	},
+	{
+		// New in the live catalog (first seen 2026-11); same family contract
+		// as 6.8-flash-lite (text+image, 256K/64K, gateway effort enum
+		// verified live — none/low accepted).
+		id: "sensenova-6.8-flash",
+		provider: PROVIDER_ID,
+		api: "openai-completions",
+		baseUrl: BASE_URL,
+		name: "SenseNova 6.8 Flash",
 		reasoning: true,
 		input: ["text", "image"],
 		cost: ZERO_COST,
@@ -113,21 +144,6 @@ const FALLBACK_MODELS: ChatModel[] = [
 		compat: CHAT_COMPAT,
 	},
 	{
-		// New in the live catalog (first seen 2026-10).
-		id: "deepseek-v4.1-flash",
-		provider: PROVIDER_ID,
-		api: "openai-completions",
-		baseUrl: BASE_URL,
-		name: "DeepSeek V4.1 Flash",
-		reasoning: true,
-		input: ["text"],
-		cost: ZERO_COST,
-		contextWindow: 1_048_576,
-		maxTokens: 65_536,
-		thinkingLevelMap: REASONING,
-		compat: CHAT_COMPAT,
-	},
-	{
 		id: "glm-5.2",
 		provider: PROVIDER_ID,
 		api: "openai-completions",
@@ -139,6 +155,22 @@ const FALLBACK_MODELS: ChatModel[] = [
 		contextWindow: 1_048_576,
 		maxTokens: 131_072,
 		thinkingLevelMap: REASONING,
+		compat: CHAT_COMPAT,
+	},
+	{
+		// New in the live catalog (first seen 2026-11). Per-model effort enum
+		// low/high/max (see REASONING_GLM_53); catalog 1M/128K.
+		id: "glm-5.3",
+		provider: PROVIDER_ID,
+		api: "openai-completions",
+		baseUrl: BASE_URL,
+		name: "GLM-5.3",
+		reasoning: true,
+		input: ["text"],
+		cost: ZERO_COST,
+		contextWindow: 1_048_576,
+		maxTokens: 131_072,
+		thinkingLevelMap: REASONING_GLM_53,
 		compat: CHAT_COMPAT,
 	},
 	{
@@ -157,9 +189,9 @@ const FALLBACK_MODELS: ChatModel[] = [
 		thinkingLevelMap: REASONING,
 		compat: CHAT_COMPAT,
 	},
-	// sensenova-6.7-flash-lite and deepseek-v4-pro are delisted (absent from
-	// the live catalog since 2026-10) — removed; they re-register
-	// automatically if they return.
+	// sensenova-6.7-flash-lite, deepseek-v4-pro and deepseek-v4.1-flash are
+	// delisted (absent from the live catalog since 2026-10/2026-11) — removed;
+	// they re-register automatically if they return.
 ];
 
 /** Shipped specs by model id, used to fill gaps in live catalog entries. */

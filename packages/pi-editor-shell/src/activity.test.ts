@@ -3,6 +3,7 @@ import { test, type TestContext } from "node:test";
 import {
   ActivityIndicator,
   formatIdleDuration,
+  formatWorkingDuration,
   idleTimerToken,
   lastActivityFromEntries,
   promptCacheTtlMs,
@@ -32,6 +33,25 @@ test("formatIdleDuration clamps negative and non-finite input to 0m", () => {
   assert.equal(formatIdleDuration(-MIN), "0m");
   assert.equal(formatIdleDuration(Number.NaN), "0m");
   assert.equal(formatIdleDuration(Number.POSITIVE_INFINITY), "0m");
+});
+
+test("formatWorkingDuration pads minutes and seconds and never switches to hours", () => {
+  assert.equal(formatWorkingDuration(0), "00:00");
+  assert.equal(formatWorkingDuration(999), "00:00");
+  assert.equal(formatWorkingDuration(1_000), "00:01");
+  assert.equal(formatWorkingDuration(59_999), "00:59");
+  assert.equal(formatWorkingDuration(MIN), "01:00");
+  assert.equal(formatWorkingDuration(4 * MIN + 59_999), "04:59");
+  // Minutes keep growing past an hour.
+  assert.equal(formatWorkingDuration(60 * MIN), "60:00");
+  assert.equal(formatWorkingDuration(61 * MIN + 23_000), "61:23");
+  assert.equal(formatWorkingDuration(100 * MIN), "100:00");
+});
+
+test("formatWorkingDuration clamps negative and non-finite input to 00:00", () => {
+  assert.equal(formatWorkingDuration(-MIN), "00:00");
+  assert.equal(formatWorkingDuration(Number.NaN), "00:00");
+  assert.equal(formatWorkingDuration(Number.POSITIVE_INFINITY), "00:00");
 });
 
 test("idleTimerToken stays muted while fresh and when the TTL is unknown", () => {
@@ -132,9 +152,9 @@ test("a fresh session stays hidden until a run, then starts idle time at settlem
   assert.equal(paints.length, 0);
 
   activity.setPhase("exec");
-  assert.deepEqual(activity.read(), { kind: "busy", glyph: "◜" });
+  assert.deepEqual(activity.read(), { kind: "busy", glyph: "◜", label: "00:00" });
   t.mock.timers.tick(100);
-  assert.deepEqual(activity.read(), { kind: "busy", glyph: "◝" });
+  assert.deepEqual(activity.read(), { kind: "busy", glyph: "◝", label: "00:00" });
   // Even a run lasting longer than the cache TTL remains busy.
   t.mock.timers.tick(6 * MIN);
   assert.equal(activity.read().kind, "busy");
@@ -156,18 +176,18 @@ test("repeated phase events preserve animation timing and phase transitions rest
   const count = paints.length;
   t.mock.timers.tick(50);
   assert.equal(paints.length, count + 1);
-  assert.deepEqual(activity.read(), { kind: "busy", glyph: "◞" });
+  assert.deepEqual(activity.read(), { kind: "busy", glyph: "◞", label: "00:00" });
 
   activity.setPhase("outputting");
-  assert.deepEqual(activity.read(), { kind: "busy", glyph: "⡀" });
+  assert.deepEqual(activity.read(), { kind: "busy", glyph: "⡀", label: "00:00" });
   t.mock.timers.tick(100);
-  assert.deepEqual(activity.read(), { kind: "busy", glyph: "⣀" });
+  assert.deepEqual(activity.read(), { kind: "busy", glyph: "⣀", label: "00:00" });
   activity.setPhase("thinking");
   const thinkingPaints = paints.length;
   t.mock.timers.tick(100);
   assert.equal(paints.length, thinkingPaints);
   t.mock.timers.tick(100);
-  assert.deepEqual(activity.read(), { kind: "busy", glyph: "○" });
+  assert.deepEqual(activity.read(), { kind: "busy", glyph: "○", label: "00:00" });
 });
 
 test("restored idle time repaints on TTL transitions even within the same minute", (t) => {
@@ -188,7 +208,7 @@ test("resuming replaces the idle clock and settling starts a fresh interval", (t
   t.mock.timers.tick(500);
   activity.setPhase("toolcall");
   t.mock.timers.tick(100);
-  assert.deepEqual(activity.read(), { kind: "busy", glyph: "▒" });
+  assert.deepEqual(activity.read(), { kind: "busy", glyph: "▒", label: "00:00" });
   activity.settle();
   assert.deepEqual(activity.read(), { kind: "idle", label: "0m", token: "muted" });
   paints.length = 0;
@@ -196,6 +216,42 @@ test("resuming replaces the idle clock and settling starts a fresh interval", (t
   activity.settle();
   t.mock.timers.tick(30_000);
   assert.deepEqual(paints, [{ kind: "idle", label: "1m", token: "muted" }]);
+});
+
+test("working timer spans phase changes and re-anchors on the next run", (t) => {
+  const { activity } = makeActivity(t);
+  activity.setPhase("thinking");
+  t.mock.timers.tick(65_000);
+  const first = activity.read();
+  assert.ok(first.kind === "busy");
+  assert.equal(first.label, "01:05");
+  // Phase transitions inside one run keep the original anchor.
+  activity.setPhase("exec");
+  t.mock.timers.tick(5_000);
+  const second = activity.read();
+  assert.ok(second.kind === "busy");
+  assert.equal(second.label, "01:10");
+  activity.settle();
+  // A new run starts its own working interval.
+  activity.setPhase("thinking");
+  const fresh = activity.read();
+  assert.ok(fresh.kind === "busy");
+  assert.equal(fresh.label, "00:00");
+});
+
+test("working timer requests a repaint when the second changes but the spinner glyph does not", (t) => {
+  const { activity, paints } = makeActivity(t);
+  activity.setPhase("exec");
+  t.mock.timers.tick(900);
+  activity.setPhase("thinking");
+  paints.length = 0;
+
+  // The first two thinking frames share a glyph; only the timer changes.
+  t.mock.timers.tick(100);
+  assert.equal(paints.length, 1);
+  const view = paints[0];
+  assert.ok(view.kind === "busy");
+  assert.equal(view.label, "00:01");
 });
 
 test("shutdown stops animation and idle checks, including repeated cleanup", (t) => {

@@ -1,4 +1,4 @@
-/** Activity indicator state, animation, idle duration, and cache-age coloring. */
+/** Activity indicator state, animation, working and idle durations, and cache-age coloring. */
 
 export type SpinnerPhase = "thinking" | "outputting" | "toolcall" | "exec";
 
@@ -30,6 +30,20 @@ export function formatIdleDuration(elapsedMs: number): string {
   if (elapsedMs >= dayMs) return `${(Math.floor(elapsedMs / dayMs * 10) / 10).toFixed(1)}d`;
   if (elapsedMs >= hourMs) return `${(Math.floor(elapsedMs / hourMs * 10) / 10).toFixed(1)}h`;
   return `${Math.floor(elapsedMs / 60_000)}m`;
+}
+
+/**
+ * Working duration as zero-padded `MM:SS`, floored to whole seconds.
+ * Minutes keep growing past an hour (`61:23`). Invalid input clamps to "00:00".
+ *
+ * @internal — exported for testing.
+ */
+export function formatWorkingDuration(elapsedMs: number): string {
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return "00:00";
+  const totalSeconds = Math.floor(elapsedMs / 1_000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 /**
@@ -91,7 +105,7 @@ export function lastActivityFromEntries(
 
 type ActivityView =
   | { kind: "hidden" }
-  | { kind: "busy"; glyph: string }
+  | { kind: "busy"; glyph: string; label: string }
   | { kind: "idle"; label: string; token: IdleTimerToken };
 
 /**
@@ -102,7 +116,8 @@ type ActivityView =
 export class ActivityIndicator {
   private phase: SpinnerPhase | null = null;
   private frameIndex = 0;
-  private idleSince: number | undefined;
+  /** Start of the current run or idle interval; preserved across busy phases. */
+  private stateSince: number | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
   private intervalMs: number | undefined;
   private paintedKey = "";
@@ -116,13 +131,14 @@ export class ActivityIndicator {
   ) {
     this.requestRender = requestRender;
     this.getTtl = getTtl;
-    this.idleSince = lastActivityAt;
+    this.stateSince = lastActivityAt;
     this.setIntervalMs(lastActivityAt == null ? undefined : 1_000);
   }
 
   /** Repeated phase events preserve both the frame and the animation clock. */
   setPhase(phase: SpinnerPhase): void {
     if (phase === this.phase) return;
+    if (this.phase === null) this.stateSince = Date.now();
     this.phase = phase;
     this.frameIndex = 0;
     this.setIntervalMs(100);
@@ -133,7 +149,7 @@ export class ActivityIndicator {
   settle(): void {
     if (this.phase === null) return;
     this.phase = null;
-    this.idleSince = Date.now();
+    this.stateSince = Date.now();
     this.setIntervalMs(1_000);
     this.requestRender();
   }
@@ -151,9 +167,16 @@ export class ActivityIndicator {
   }
 
   private view(): ActivityView {
-    if (this.phase) return { kind: "busy", glyph: SPINNERS[this.phase][this.frameIndex] };
-    if (this.idleSince == null) return { kind: "hidden" };
-    const elapsed = Date.now() - this.idleSince;
+    if (this.stateSince == null) return { kind: "hidden" };
+    const elapsed = Date.now() - this.stateSince;
+    if (this.phase) {
+      return {
+        kind: "busy",
+        glyph: SPINNERS[this.phase][this.frameIndex],
+        label: formatWorkingDuration(elapsed),
+      };
+    }
+
     return {
       kind: "idle",
       label: formatIdleDuration(elapsed),
@@ -162,7 +185,7 @@ export class ActivityIndicator {
   }
 
   private key(view: ActivityView): string {
-    if (view.kind === "busy") return view.glyph;
+    if (view.kind === "busy") return `${view.glyph}|${view.label}`;
     if (view.kind === "idle") return `${view.label}|${view.token}`;
     return "";
   }

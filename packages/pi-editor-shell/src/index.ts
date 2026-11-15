@@ -497,7 +497,7 @@ export default function (pi: ExtensionAPI) {
 
       const activityView = activity?.read();
       const activityText = activityView?.kind === "busy"
-        ? border(activityView.glyph)
+        ? `${border(activityView.glyph)}  ${theme.fg("muted", activityView.label)}`
         : activityView?.kind === "idle"
           ? theme.fg(activityView.token, `${icons.timer}${activityView.label}`)
           : "";

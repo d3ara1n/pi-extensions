@@ -160,7 +160,8 @@ When context matching fails, the error summarizes failed hunks across every file
 - inserted or missing blank lines between matching nonblank lines, with expected and actual line counts;
 - an exact match that lies outside the searched range (earlier in the file, or before an `*** End of File` anchor) — usually a chunk-ordering mistake;
 - whether the hunk's replacement text already occurs in the file, meaning the hunk was likely applied before;
-- a context line that is a prefix of a longer source line, which usually means it was copied from truncated tool output.
+- a context line that is a prefix of a longer source line, which usually means it was copied from truncated tool output;
+- when no candidate matches at all, exact occurrence counts for the whole pattern and each context line, with a stale-context note prompting a re-read when the pattern occurs zero times;
 
 Tabs, unusual spaces, zero-width characters, directional controls, and combining marks are rendered as visible Unicode escapes; ordinary spaces stay literal so that the surrounding text remains readable. These escapes are diagnostic notation; a patch must contain the literal source characters. Long line examples show an excerpt around the first difference. For example, a source with two inline spaces where the patch expects one reports:
 

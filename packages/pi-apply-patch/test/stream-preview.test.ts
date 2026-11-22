@@ -88,7 +88,7 @@ test("completed previews show the reordered update's actual diff and notice", ()
   const [block] = buildPreview(input, ROOT, emptyPreviewState(), fs);
   assert.equal(block.state, "ready");
   assert.equal(block.diff, generateDiffString(before, "ALPHA\nBETA\n").diff);
-  assert.match(renderPreviewBlock(block, plainTheme).join("\n"), /reordered hunks into file order/);
+  assert.match(block.warning ?? "", /reordered hunks into file order/);
 });
 
 test("streaming additions retain only completed sections and reuse their reads", () => {

@@ -2,6 +2,10 @@
 
 A collection of small extensions for [Pi Coding Agent](https://pi.dev).
 
+> [!NOTE]
+> **Looking for a standalone GUI agent harness?**
+> **[Asterism](https://asterism.dearain.dev)** ([GitHub](https://github.com/d3ara1n/asterism)) is the author's independent desktop agent harness with a full GUI — carrying forward the design philosophy and ideas behind these extensions as an object-centered workbench.
+
 ## Extensions
 
 | Package | Version | Description |

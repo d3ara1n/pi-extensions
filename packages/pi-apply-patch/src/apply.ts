@@ -56,6 +56,8 @@ export interface FileChange {
   readonly overwrites?: boolean;
   /** Source content changed between verification and write; matched against live text. */
   readonly rematched?: boolean;
+  /** Disjoint, uniquely matched hunks were applied in file order instead of input order. */
+  readonly reordered?: true;
 }
 export interface ApplyResult {
   readonly files: readonly FileChange[];
@@ -91,7 +93,7 @@ class UnmatchedUpdateError extends Error {
 export function formatSummary(
   files: readonly Pick<
     FileChange,
-    "kind" | "path" | "moveTo" | "hunks" | "overwrites" | "rematched"
+    "kind" | "path" | "moveTo" | "hunks" | "overwrites" | "rematched" | "reordered"
   >[],
   notices: readonly PatchNotice[] = files.flatMap(fileWarnings),
 ): string {
@@ -232,11 +234,21 @@ async function prepare(
   const before = content!;
   let after: string;
   let hunks: readonly HunkMatchInfo[] | undefined;
+  let reordered: true | undefined;
   if (previous && previous.change.before === before) {
     after = previous.change.after;
     hunks = previous.change.hunks;
+    reordered = previous.change.reordered;
   } else {
-    const plan = planUpdate(before, operation.chunks);
+    // A newly successful forward match could be ambiguous on the changed source.
+    if (previous?.change.reordered)
+      throw new Error(
+        `${operation.path}: source changed after hunk reordering; re-read the file before retrying`,
+      );
+    const plan = planUpdate(before, operation.chunks, {
+      allowReorder: !previous && operation.moveTo === undefined,
+    });
+    reordered = plan.reordered;
     if (plan.outcomes.some((outcome) => outcome.status === "unmatched"))
       throw new UnmatchedUpdateError(operation.path, plan.outcomes);
     after = applyReplacements(before, plan.replacements);
@@ -251,6 +263,7 @@ async function prepare(
       before,
       after,
       ...(hunks !== undefined && hunks.length ? { hunks } : {}),
+      ...(reordered ? { reordered } : {}),
       ...(destinationExists ? { overwrites: true } : {}),
     },
   };

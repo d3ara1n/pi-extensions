@@ -383,6 +383,76 @@ test("successful updates carry per-hunk match details", async () => {
   assert.equal(result.files[0].overwrites, undefined);
 });
 
+const reversedHunks = "@@\n-beta\n+BETA\n@@\n-alpha\n+ALPHA\n+extra";
+
+test("reorders unique disjoint hunks with the same result as a top-to-bottom patch", async () => {
+  const before = "\uFEFFalpha\r\nbeta\ntail\r\n";
+  const fs = new MemoryFileSystem({ a: before });
+  const ordered = new MemoryFileSystem({ a: before });
+  const result = await applyPatch(patch(`*** Update File: a\n${reversedHunks}`), fs.context());
+  const baseline = await applyPatch(
+    patch("*** Update File: a\n@@\n-alpha\n+ALPHA\n+extra\n@@\n-beta\n+BETA"),
+    ordered.context(),
+  );
+  assert.deepEqual(fs.snapshot(), { a: "\uFEFFALPHA\r\nextra\r\nBETA\ntail\r\n" });
+  assert.deepEqual(fs.snapshot(), ordered.snapshot());
+  assert.deepEqual(result.files[0].hunks, [
+    { hunk: 1, line: 2, strategy: "exact", occurrences: 1 },
+    { hunk: 2, line: 1, strategy: "exact", occurrences: 1 },
+  ]);
+  assert.deepEqual(baseline.notices, []);
+  assert.deepEqual(result.notices.map(({ kind, code, path }) => ({ kind, code, path })), [
+    { kind: "warning", code: "reordered-hunks", path: "a" },
+  ]);
+  assert.match(formatSummary(result.files, result.notices), /reordered hunks into file order/);
+});
+
+test("does not change the target of a hunk already placed by forward matching", async () => {
+  const fs = new MemoryFileSystem({ a: "top\nalpha\nbeta\n alpha\n" });
+  await assert.rejects(
+    applyPatch(patch(`*** Update File: a\n${reversedHunks}\n@@\n-top\n+TOP`), fs.context()),
+    /hunk 3: context lines not found/,
+  );
+  assert.equal(fs.writes.length, 0);
+});
+
+test("does not reorder moves or updates with locators, EOF markers, or append-only hunks", async (t) => {
+  for (const [name, body] of [
+    ["Move", `*** Move to: b\n${reversedHunks}`],
+    ["locator", reversedHunks.replace("@@\n-beta", "@@ middle\n-beta")],
+    ["EOF", reversedHunks.replace("+BETA\n", "+BETA\n*** End of File\n")],
+    ["append", `${reversedHunks}\n@@\n+tail`],
+  ]) {
+    await t.test(name, async () => {
+      const fs = new MemoryFileSystem({ a: "alpha\nmiddle\nbeta\n" });
+      await assert.rejects(
+        applyPatch(
+          patch(`*** Add File: other\n+untouched\n*** Update File: a\n${body}`),
+          fs.context(),
+        ),
+        /hunk 2: context lines not found/,
+      );
+      assert.equal(fs.writes.length, 0);
+    });
+  }
+});
+
+test("does not write a reordered update if its verified source changes", async () => {
+  const fs = new MemoryFileSystem({ a: "alpha\nbeta\n" });
+  const read = fs.readFile.bind(fs);
+  let reads = 0;
+  fs.readFile = async (path) => {
+    if (++reads === 2) fs.files.set(path, "alpha\nbeta\nalpha\n");
+    return read(path);
+  };
+  await assert.rejects(
+    applyPatch(patch(`*** Update File: a\n${reversedHunks}`), fs.context()),
+    /source changed after hunk reordering; re-read the file before retrying/,
+  );
+  assert.equal(fs.writes.length, 0);
+  assert.deepEqual(fs.snapshot(), { a: "alpha\nbeta\nalpha\n" });
+});
+
 test("overwrites are reported for adds and moves onto existing files", async () => {
   const fs = new MemoryFileSystem({ dup: "old\n", dest: "d\n", src: "s\n" });
   const result = await applyPatch(

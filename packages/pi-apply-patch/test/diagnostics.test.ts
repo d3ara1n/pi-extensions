@@ -105,7 +105,7 @@ test("reports every earlier exact match when an out-of-order hunk is ambiguous",
   assert.match(message, /ambiguous/);
 });
 
-test("reports a single earlier exact match with the hunk-order hint", async () => {
+test("keeps the hunk-order hint when an earlier exact match overlaps a matched hunk", async () => {
   const source = "line1\nline2\nline3\nline4\nline5\n";
   const patch = [
     "*** Begin Patch",
@@ -118,6 +118,7 @@ test("reports a single earlier exact match with the hunk-order hint", async () =
     " line2",
     "-line3",
     "+LINE3",
+    " line4",
     "*** End Patch",
   ].join("\n");
   const message = await rejectionFor(source, patch);

@@ -1,6 +1,6 @@
 // Adapted from openai/codex apply-patch at b04a2c2645. See NOTICE.
 import { countOccurrences, diagnoseContext } from "./diagnostics.ts";
-import { seekPass, seekSequence, strategyOf } from "./matcher.ts";
+import { seekPass, seekSequence, seekUniqueExact, strategyOf } from "./matcher.ts";
 import { splitSource } from "./source.ts";
 import type { Chunk, HunkFailure, HunkOutcome } from "./types.ts";
 
@@ -18,6 +18,8 @@ export interface UpdatePlan {
   readonly replacements: readonly Replacement[];
   /** Every chunk's match outcome; unmatched chunks do not stop later chunks from being searched. */
   readonly outcomes: readonly HunkOutcome[];
+  /** The forward matcher failed, but independent exact matches can be applied in file order. */
+  readonly reordered?: true;
 }
 
 /** Match logical lines while retaining a leading BOM for position-aware comparison. */
@@ -33,7 +35,11 @@ function sourceLines(original: string): string[] {
  * stopping at the first. The replacements of a fully matched plan are exactly
  * what {@link applyUpdate} applies.
  */
-export function planUpdate(original: string, chunks: readonly Chunk[]): UpdatePlan {
+export function planUpdate(
+  original: string,
+  chunks: readonly Chunk[],
+  { allowReorder = true } = {},
+): UpdatePlan {
   const lines = sourceLines(original);
   const replacements: Replacement[] = [];
   const outcomes: HunkOutcome[] = [];
@@ -105,7 +111,52 @@ export function planUpdate(original: string, chunks: readonly Chunk[]): UpdatePl
     cursor = index + pattern.length;
     searchBoundary = "hunk";
   }
+  if (allowReorder && chunks.length > 1 && outcomes.some((h) => h.status === "unmatched")) {
+    const reordered = planReorderedUpdate(lines, chunks, outcomes);
+    if (reordered) return reordered;
+  }
   return { replacements, outcomes };
+}
+
+function planReorderedUpdate(
+  lines: readonly string[],
+  chunks: readonly Chunk[],
+  forwardOutcomes: readonly HunkOutcome[],
+): UpdatePlan | undefined {
+  // Locators, EOF constraints and append-only hunks have their own ordering semantics.
+  if (chunks.some((c) => c.anchor !== undefined || c.endOfFile || !c.oldLines.length))
+    return undefined;
+
+  const replacements: Replacement[] = [];
+  const outcomes: HunkOutcome[] = [];
+  for (const [position, chunk] of chunks.entries()) {
+    const index = seekUniqueExact(lines, chunk.oldLines);
+    if (index === undefined) return undefined;
+    const forward = forwardOutcomes[position];
+    // Do not silently move a hunk that the forward matcher already placed.
+    if (forward.status === "matched" && (forward.strategy !== "exact" || forward.line !== index + 1))
+      return undefined;
+    replacements.push({
+      index,
+      count: chunk.oldLines.length,
+      lines: chunk.newLines,
+      sources: chunk.newLineSources,
+    });
+    outcomes.push({
+      hunk: position + 1,
+      status: "matched",
+      line: index + 1,
+      strategy: "exact",
+      occurrences: 1,
+    });
+  }
+  const inFileOrder = [...replacements].sort((a, b) => a.index - b.index);
+  // Include unchanged context in the overlap check, not just removed lines.
+  for (let i = 1; i < inFileOrder.length; i++) {
+    const prior = inFileOrder[i - 1];
+    if (prior.index + prior.count > inFileOrder[i].index) return undefined;
+  }
+  return { replacements, outcomes, reordered: true };
 }
 
 /** Preserve source context and line endings while applying explicit additions and removals. */

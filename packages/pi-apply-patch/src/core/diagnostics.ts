@@ -1,6 +1,6 @@
 import { comparisonPair, equalLine, normalize, PASSES, seekSequence } from "./matcher.ts";
 import { trim, trimEnd } from "./text.ts";
-import type { HunkCandidate, HunkFailure, HunkLineDifference } from "./types.ts";
+import type { ContextLineHit, HunkCandidate, HunkFailure, HunkLineDifference } from "./types.ts";
 
 /** Skip candidate and occurrence scans when they would exceed this many line comparisons. */
 const SCAN_BUDGET = 2_000_000;
@@ -195,6 +195,25 @@ export function findCandidates(
   return candidates;
 }
 
+/** Exact counts for a no-candidate pattern, plus per-line breakdown. */
+function staleBreakdown(lines: readonly string[], pattern: readonly string[]) {
+  const patternOccurrences = countOccurrences(lines, pattern, 0);
+  const contextLineHits: ContextLineHit[] = pattern.map((line, index) => {
+    const occurrences = countOccurrences(lines, [line], 0);
+    const firstAt = occurrences > 0 ? firstExactLine(lines, line) : undefined;
+    return firstAt === undefined ? { index, occurrences: 0 } : { index, occurrences, firstAt };
+  });
+  return { patternOccurrences, contextLineHits };
+}
+
+/** First 1-based line equal to `line` under the exact projection. */
+function firstExactLine(lines: readonly string[], line: string): number | undefined {
+  for (let index = 0; index < lines.length; index++) {
+    if (equalLine(lines[index], line, index, PASSES[0])) return index + 1;
+  }
+  return undefined;
+}
+
 /** Count all windows equal under one projection; 1 when the scan is over budget. */
 export function countOccurrences(
   lines: readonly string[],
@@ -254,13 +273,23 @@ export function diagnoseContext(
   const start = search.endOfFile
     ? Math.max(0, lines.length - search.pattern.length)
     : search.start;
+  const candidates = findCandidates(lines, search.pattern, start);
+  // No candidate at all: report how often the pattern and each context line exist verbatim, so
+  // the model can tell a stale patch (lines gone) from a reordered one (lines still present).
+  // Bounded by the same budget as the candidate scan; large files keep the old report.
+  const stale =
+    search.anchor === undefined && candidates.length === 0 && withinBudget(lines, search.pattern)
+      ? staleBreakdown(lines, search.pattern)
+      : undefined;
   return {
     anchor: search.anchor,
     pattern: search.pattern,
     searchFrom: start + 1,
     searchBoundary: search.endOfFile ? "eof" : search.searchBoundary,
     endOfFile: search.endOfFile,
-    candidates: findCandidates(lines, search.pattern, start),
+    candidates,
+    patternOccurrences: stale?.patternOccurrences,
+    contextLineHits: stale?.contextLineHits,
     alreadyAppliedAt:
       search.anchor === undefined
         ? findAlreadyApplied(lines, search.replacement, search.pattern, start, search.endOfFile)

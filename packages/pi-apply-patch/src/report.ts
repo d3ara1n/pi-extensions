@@ -63,6 +63,31 @@ function candidateLine(candidate: HunkCandidate, failure: HunkFailure): string {
   return `closest match at line ${candidate.line}: ${candidate.differing} of ${failure.pattern.length} context lines changed (${kind})`;
 }
 
+/** Cap the per-line occurrence breakdown so long patterns keep the report bounded. */
+const MAX_CONTEXT_HITS = 6;
+
+function staleLines(failure: HunkFailure): string[] {
+  const total = failure.patternOccurrences;
+  if (total === undefined || total !== 0) return [];
+  const hits = failure.contextLineHits ?? [];
+  const rows: string[] = [];
+  if (hits.length) {
+    const shown = hits.slice(0, MAX_CONTEXT_HITS).map(({ index, occurrences, firstAt }) => {
+      const line = index + 1;
+      if (occurrences === 0) return `context line ${line} not found anywhere`;
+      if (occurrences === 1) return `line ${line} occurs 1 time at line ${firstAt}`;
+      return `line ${line} occurs ${occurrences} times; first at line ${firstAt}`;
+    });
+    const omitted = hits.length - shown.length;
+    const tail = omitted > 0 ? `, … ${plural(omitted, "more context line")} omitted` : "";
+    rows.push(`pattern occurs 0 times in the file: ${shown.join(", ")}${tail}`);
+  } else {
+    rows.push("pattern occurs 0 times in the file");
+  }
+  rows.push("the patch context looks stale; re-read the file before patching");
+  return rows;
+}
+
 function hunkLines(hunk: number, failure: HunkFailure, text: DiagnosticText): string[] {
   const searched = failure.endOfFile
     ? "anchored to the end of the file"
@@ -80,6 +105,7 @@ function hunkLines(hunk: number, failure: HunkFailure, text: DiagnosticText): st
     if (candidate.omittedDifferences)
       rows.push(`  … ${candidate.omittedDifferences} more differing lines omitted`);
   }
+  if (failure.candidates.length === 0) rows.push(...staleLines(failure));
   if (failure.alreadyAppliedAt !== undefined)
     rows.push(
       `the replacement text already occurs at line ${failure.alreadyAppliedAt}; this hunk may already be applied`,

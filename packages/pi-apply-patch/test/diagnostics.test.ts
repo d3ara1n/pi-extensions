@@ -250,3 +250,32 @@ test("falls back to a focused window when the difference sits beyond the width c
   assert.match(message, /excerpt, columns 566-600/);
   assert.match(message, /which continues for 4 more code points/);
 });
+
+test("reports stale context with per-line occurrences when no candidate matches", async () => {
+  const source = `  "common.confirm": "Confirm",\n  "common.copied": "Copied",\n`;
+  const input = `*** Begin Patch\n*** Update File: a\n@@\n   "common.cancel": "Cancel",\n-  "common.confirm": "Confirm",\n*** End Patch`;
+  const message = await rejectionFor(source, input);
+  assert.match(message, /pattern occurs 0 times in the file/);
+  assert.match(message, /context line 1 not found anywhere/);
+  assert.match(message, /line 2 occurs 1 time at line 1/);
+  assert.match(message, /the patch context looks stale; re-read the file before patching/);
+});
+
+test("reports per-line hits when lines exist but not as a contiguous block", async () => {
+  const message = await rejection("alpha\nmiddle\nbeta\nother\ngamma\nend\nbeta\n", [
+    "alpha",
+    "beta",
+    "gamma",
+  ]);
+  assert.match(message, /pattern occurs 0 times in the file/);
+  assert.match(message, /line 1 occurs 1 time at line 1/);
+  assert.match(message, /line 2 occurs 2 times; first at line 3/);
+  assert.match(message, /line 3 occurs 1 time at line 5/);
+});
+
+test("no stale note when a candidate matches", async () => {
+  const message = await rejection("const  x = 1;\n", ["const x = 1;"]);
+  assert.match(message, /closest match at line 1/);
+  assert.doesNotMatch(message, /looks stale/);
+  assert.doesNotMatch(message, /pattern occurs/);
+});

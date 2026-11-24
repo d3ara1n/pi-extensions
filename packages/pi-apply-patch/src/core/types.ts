@@ -48,6 +48,16 @@ export interface HunkMatchInfo {
   readonly occurrences: number;
 }
 
+/** Row-level exact occurrence breakdown for one context line in a no-candidate failure. */
+export interface ContextLineHit {
+  /** Zero-based index into the failure pattern. */
+  readonly index: number;
+  /** Exact occurrences of this single line in the file. */
+  readonly occurrences: number;
+  /** First 1-based line where this line occurs, when it occurs. */
+  readonly firstAt?: number;
+}
+
 /** Why one update chunk did not match; used verbatim in tool error reports. */
 export interface HunkFailure {
   /** Anchor text whose seek failed, when the anchor itself is the failure. */
@@ -64,6 +74,10 @@ export interface HunkFailure {
   readonly candidates: readonly HunkCandidate[];
   /** 1-based line where the chunk's replacement text already occurs, when found. */
   readonly alreadyAppliedAt?: number;
+  /** Exact occurrences of the whole pattern in the file; set only when no candidate was found. */
+  readonly patternOccurrences?: number;
+  /** Per-line exact occurrences; set only when no candidate was found. */
+  readonly contextLineHits?: readonly ContextLineHit[];
 }
 
 /** The closest window to an unmatched context; diagnostics only, never applied. */

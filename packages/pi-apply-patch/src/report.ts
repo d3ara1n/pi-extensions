@@ -72,11 +72,12 @@ function staleLines(failure: HunkFailure): string[] {
   const hits = failure.contextLineHits ?? [];
   const rows: string[] = [];
   if (hits.length) {
-    const shown = hits.slice(0, MAX_CONTEXT_HITS).map((hit) =>
-      hit.occurrences === 0
-        ? `context line ${hit.index + 1} not found anywhere`
-        : `line ${hit.index + 1} occurs ${hit.occurrences} ${hit.occurrences === 1 ? "time" : "times"} at line ${hit.firstAt}`,
-    );
+    const shown = hits.slice(0, MAX_CONTEXT_HITS).map(({ index, occurrences, firstAt }) => {
+      const line = index + 1;
+      if (occurrences === 0) return `context line ${line} not found anywhere`;
+      if (occurrences === 1) return `line ${line} occurs 1 time at line ${firstAt}`;
+      return `line ${line} occurs ${occurrences} times; first at line ${firstAt}`;
+    });
     const omitted = hits.length - shown.length;
     const tail = omitted > 0 ? `, … ${plural(omitted, "more context line")} omitted` : "";
     rows.push(`pattern occurs 0 times in the file: ${shown.join(", ")}${tail}`);

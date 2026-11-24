@@ -82,7 +82,7 @@ export function makeApplyPatchTool(
       "Locators: bare '@@' searches for the hunk's context and removed lines. '@@ <existing line>' first locates that literal source line and searches AFTER it; do not repeat the locator line as the first context or removed line. To change that line itself, use bare '@@' with surrounding context, or locate an earlier line.",
       "Insertion: include unchanged context to insert at a specific location; a hunk containing only '+' lines appends to the end of the file, even with an '@@ <existing line>' locator. To match the file's final lines, put '*** End of File' after the hunk body.",
       "Move: put '*** Move to: destination' immediately after the Update header, before its hunks. A move still requires a nonempty hunk; for a rename without content changes, include an unchanged source line prefixed with a space. The destination is overwritten if it exists.",
-      "Recovery: keep patches focused. Verification checks the whole patch before writing; a verification failure changes no files. Use the reported hunks and candidate context to correct the patch instead of resending it unchanged. A pattern-occurs-zero-times note means the file has moved on since the context was written; re-read the file and rebuild the hunk from current content.",
+      "Recovery: keep patches focused. Verification checks the whole patch before writing; a verification failure changes no files. Use the reported hunks and candidate context to correct the patch instead of resending it unchanged.",
       [
         "Complete apply_patch example (the Update, Move, and Delete sources must already exist with the shown context):",
         "*** Begin Patch",

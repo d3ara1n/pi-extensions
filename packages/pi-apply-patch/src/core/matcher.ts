@@ -91,3 +91,23 @@ export function seekSequence(
   }
   return undefined;
 }
+
+/** Match the full nonempty pattern exactly once across the entire source. */
+export function seekUniqueExact(
+  lines: readonly string[],
+  pattern: readonly string[],
+): number | undefined {
+  if (!pattern.length) return undefined;
+  let match: number | undefined;
+  for (let index = 0; index <= lines.length - pattern.length; index++) {
+    if (
+      !pattern.every((line, offset) =>
+        equalLine(lines[index + offset], line, index + offset, PASSES[0]),
+      )
+    )
+      continue;
+    if (match !== undefined) return undefined;
+    match = index;
+  }
+  return match;
+}

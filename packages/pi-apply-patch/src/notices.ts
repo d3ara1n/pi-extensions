@@ -2,9 +2,14 @@ import type { FileChange } from "./apply.ts";
 import type { PatchNotice } from "./core/types.ts";
 export type { PatchNotice } from "./core/types.ts";
 
+/** @internal */
+export function reorderedHunksMessage(path: string): string {
+  return `${path}: reordered hunks into file order (each matched exactly once without overlap)`;
+}
+
 /** Collect execution facts without changing matching or write policy. @internal */
 export function fileWarnings(
-  file: Pick<FileChange, "path" | "moveTo" | "hunks" | "overwrites" | "rematched">,
+  file: Pick<FileChange, "path" | "moveTo" | "hunks" | "overwrites" | "rematched" | "reordered">,
 ): PatchNotice[] {
   const path = file.moveTo ?? file.path;
   const notices: PatchNotice[] = [];
@@ -17,6 +22,7 @@ export function fileWarnings(
       ...(hunk !== undefined ? { hunk } : {}),
       ...(line !== undefined ? { line } : {}),
     });
+  if (file.reordered) warn("reordered-hunks", reorderedHunksMessage(path));
   if (file.overwrites) warn("overwrite", `${path}: overwrote an existing file`);
   if (file.rematched)
     warn("rematched", `${path}: rematched against content that changed while queued`);

@@ -115,7 +115,10 @@ test("anchors advance past their context and subsequent chunks search forward", 
   assert.equal(update("fn a\nx\nfn b\nx\n", "@@ fn b\n-x\n+y"), "fn a\nx\nfn b\ny\n");
   assert.equal(update("x\nx\n", "@@\n-x\n+a\n@@\n-x\n+b"), "a\nb\n");
   assert.throws(() => update("fn a\nx\n", "@@ fn a\n-fn a\n+b"), /Failed to find expected lines/);
-  assert.throws(() => update("a\nb\n", "@@\n-b\n+B\n@@\n-a\n+A"), /Failed to find expected lines/);
+  assert.throws(
+    () => update("a\nmiddle\nb\n", "@@ middle\n-b\n+B\n@@\n-a\n+A"),
+    /Failed to find expected lines/,
+  );
   assert.throws(() => update("a\n", "@@ missing\n-a\n+b"), /Failed to find context 'missing'/);
 });
 

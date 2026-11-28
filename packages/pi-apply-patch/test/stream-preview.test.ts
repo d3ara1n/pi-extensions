@@ -81,6 +81,16 @@ test("completed previews preserve source context after normalized matching", () 
   assert.equal(block.diff, generateDiffString("  keep indent\nold\n", "  keep indent\nnew\n").diff);
 });
 
+test("completed previews show the reordered update's actual diff and notice", () => {
+  const before = "alpha\nbeta\n";
+  const { fs } = fixture({ a: before });
+  const input = patch("*** Update File: a", "@@", "-beta", "+BETA", "@@", "-alpha", "+ALPHA");
+  const [block] = buildPreview(input, ROOT, emptyPreviewState(), fs);
+  assert.equal(block.state, "ready");
+  assert.equal(block.diff, generateDiffString(before, "ALPHA\nBETA\n").diff);
+  assert.match(block.warning ?? "", /reordered hunks into file order/);
+});
+
 test("streaming additions retain only completed sections and reuse their reads", () => {
   const { fs, reads } = fixture({ "a.txt": "old\n" });
   const state = emptyPreviewState();

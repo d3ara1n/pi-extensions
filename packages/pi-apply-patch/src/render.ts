@@ -110,6 +110,7 @@ export function renderPreviewBlock(block: PreviewBlock, theme: Theme): string[] 
   const marker = { add: "A", update: "M", delete: "D" }[block.kind];
   const rows = [theme.fg("accent", `${marker} ${label}`)];
   if (block.state === "ready") {
+    if (block.warning) rows.push(theme.fg("warning", safe(block.warning)));
     if (block.diff) rows.push(renderDiff(safe(block.diff)));
     return rows;
   }

@@ -10,6 +10,7 @@ import { resolve } from "node:path";
 import { normalizePatchInput } from "./core/normalize.ts";
 import { parsePatch } from "./core/parser.ts";
 import { applyReplacements, planUpdate } from "./core/update.ts";
+import { reorderedHunksMessage } from "./notices.ts";
 import { resolvePatchPath, within } from "./workspace.ts";
 
 export interface PreviewBlock {
@@ -150,7 +151,9 @@ function completedBlock(
 
   const content = readPreviewFile(cwd, operation.path, fs, workspaceOnly);
   if (content === undefined) return { ...base, state: "noread" };
-  const plan = planUpdate(content, operation.chunks);
+  const plan = planUpdate(content, operation.chunks, {
+    allowReorder: operation.moveTo === undefined,
+  });
   const unmatched = plan.outcomes.filter((outcome) => outcome.status === "unmatched").length;
   if (unmatched > 0) {
     return {
@@ -163,6 +166,7 @@ function completedBlock(
     ...base,
     state: "ready",
     diff: toDiff(content, applyReplacements(content, plan.replacements)),
+    ...(plan.reordered ? { warning: reorderedHunksMessage(operation.path) } : {}),
   };
 }
 
